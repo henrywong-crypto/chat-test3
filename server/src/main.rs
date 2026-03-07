@@ -91,33 +91,60 @@ async fn relay_websocket_to_pty(
     mut pty_writer: WriteHalf<PtyMaster>,
     pty_raw_fd: RawFd,
 ) {
-    let mut initial_resize_done = false;
-    while let Some(Ok(msg)) = ws_receiver.next().await {
-        match msg {
-            Message::Binary(data) => {
-                if pty_writer.write_all(&data).await.is_err() {
-                    break;
-                }
-            }
-            Message::Text(text) => {
-                if let Ok(json) = serde_json::from_str::<serde_json::Value>(&text) {
-                    if json.get("type").and_then(|v| v.as_str()) == Some("resize") {
-                        let rows = json["rows"].as_u64().unwrap_or(24) as u16;
-                        let cols = json["cols"].as_u64().unwrap_or(80) as u16;
-                        let _ = resize_pty_fd(pty_raw_fd, rows, cols);
-                        if !initial_resize_done {
-                            initial_resize_done = true;
-                            // ttyS0 inside the VM has no terminal size (0x0) because
-                            // TIOCSWINSZ on the host PTY doesn't propagate into the guest.
-                            // Inject stty so TUI apps get correct dimensions from the start.
-                            let cmd = format!("stty cols {} rows {}\n", cols, rows);
-                            let _ = pty_writer.write_all(cmd.as_bytes()).await;
+    use std::time::Duration;
+    use tokio::time::Instant;
+
+    let mut last_rows: u16 = 24;
+    let mut last_cols: u16 = 80;
+    let mut stty_sent = false;
+    let mut retry_at: Option<Instant> = None;
+    const RETRY_DELAY: Duration = Duration::from_millis(400);
+
+    loop {
+        tokio::select! {
+            opt = ws_receiver.next() => {
+                let msg = match opt {
+                    Some(Ok(m)) => m,
+                    _ => break,
+                };
+                match msg {
+                    Message::Binary(data) => {
+                        if pty_writer.write_all(&data).await.is_err() {
+                            break;
                         }
                     }
+                    Message::Text(text) => {
+                        if let Ok(json) = serde_json::from_str::<serde_json::Value>(&text) {
+                            if json.get("type").and_then(|v| v.as_str()) == Some("resize") {
+                                let rows = json["rows"].as_u64().unwrap_or(24) as u16;
+                                let cols = json["cols"].as_u64().unwrap_or(80) as u16;
+                                last_rows = rows;
+                                last_cols = cols;
+                                let _ = resize_pty_fd(pty_raw_fd, rows, cols);
+                                // Guest serial (ttyS0) doesn't get TIOCSWINSZ from host; only
+                                // stty inside the guest sets winsize. So TUI apps (less, vim)
+                                // need stty to see full terminal size. Send once on first resize,
+                                // and again after a short delay in case the first size was wrong.
+                                if !stty_sent {
+                                    stty_sent = true;
+                                    let cmd = format!("stty cols {} rows {}\n", cols, rows);
+                                    let _ = pty_writer.write_all(cmd.as_bytes()).await;
+                                    retry_at = Some(Instant::now() + RETRY_DELAY);
+                                }
+                            }
+                        }
+                    }
+                    Message::Close(_) => break,
+                    _ => {}
                 }
             }
-            Message::Close(_) => break,
-            _ => {}
+            _ = tokio::time::sleep_until(
+                retry_at.as_ref().copied().unwrap_or(Instant::now() + Duration::from_secs(999999))
+            ), if retry_at.is_some() => {
+                retry_at = None;
+                let cmd = format!("stty cols {} rows {}\n", last_cols, last_rows);
+                let _ = pty_writer.write_all(cmd.as_bytes()).await;
+            }
         }
     }
 }
@@ -196,7 +223,13 @@ const FRONTEND_HTML: &str = r#"<!DOCTYPE html>
   <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/xterm@5/css/xterm.css" />
   <style>
     html, body { margin: 0; padding: 0; background: #000; height: 100%; overflow: hidden; }
-    #terminal { width: 100%; height: 100%; display: block; }
+    #terminal {
+      position: fixed;
+      top: 0; left: 0; right: 0; bottom: 0;
+      width: 100%; height: 100%;
+    }
+    #terminal .xterm { width: 100% !important; height: 100% !important; }
+    #terminal .xterm-viewport { overflow: hidden !important; }
   </style>
 </head>
 <body>
@@ -208,7 +241,12 @@ const FRONTEND_HTML: &str = r#"<!DOCTYPE html>
     const fitAddon = new FitAddon.FitAddon();
     term.loadAddon(fitAddon);
     term.open(document.getElementById('terminal'));
-    fitAddon.fit();
+    // Defer fit until container has layout dimensions (fixes very small initial size)
+    requestAnimationFrame(() => {
+      requestAnimationFrame(() => {
+        fitAddon.fit();
+      });
+    });
 
     function doFit() {
       requestAnimationFrame(() => { fitAddon.fit(); });
@@ -235,6 +273,22 @@ const FRONTEND_HTML: &str = r#"<!DOCTYPE html>
     window.addEventListener('resize', () => doFit());
     const resizeObs = new ResizeObserver(() => doFit());
     resizeObs.observe(document.getElementById('terminal'));
+
+    // Fullscreen: F11 toggles; must call fit() after change so terminal resizes (xterm#1053)
+    function toggleFullscreen() {
+      const el = document.getElementById('terminal');
+      const doc = document;
+      const req = el.requestFullscreen || el.webkitRequestFullscreen || el.mozRequestFullScreen || el.msRequestFullscreen;
+      const exit = doc.exitFullscreen || doc.webkitExitFullscreen || doc.mozCancelFullScreen || doc.msExitFullscreen;
+      const isFull = doc.fullscreenElement || doc.webkitFullscreenElement || doc.mozFullScreenElement || doc.msFullscreenElement;
+      if (isFull) exit.call(doc);
+      else req.call(el);
+    }
+    document.addEventListener('keydown', (e) => {
+      if (e.key === 'F11') { e.preventDefault(); toggleFullscreen(); }
+    });
+    document.addEventListener('fullscreenchange', () => doFit());
+    document.addEventListener('webkitfullscreenchange', () => doFit());
   </script>
 </body>
 </html>"#;
