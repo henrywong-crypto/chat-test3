@@ -1,5 +1,5 @@
 use std::io;
-use std::os::fd::{AsRawFd, OwnedFd};
+use std::os::fd::{AsRawFd, OwnedFd, RawFd};
 use std::pin::Pin;
 use std::task::{ready, Context, Poll};
 
@@ -33,6 +33,12 @@ pub struct PtyMaster {
     fd: AsyncFd<OwnedFd>,
 }
 
+impl AsRawFd for PtyMaster {
+    fn as_raw_fd(&self) -> RawFd {
+        self.fd.as_raw_fd()
+    }
+}
+
 pub struct PtySlave {
     fd: OwnedFd,
 }
@@ -51,18 +57,17 @@ pub fn open_pty() -> Result<PtyPair> {
     Ok(PtyPair { master, slave })
 }
 
-pub fn resize_pty(pty_master: &PtyMaster, terminal_size: &TerminalSize) -> Result<()> {
-    let winsize = libc::winsize {
-        ws_row: terminal_size.rows,
-        ws_col: terminal_size.cols,
-        ws_xpixel: 0,
-        ws_ypixel: 0,
-    };
-    let ret = unsafe { libc::ioctl(pty_master.fd.as_raw_fd(), libc::TIOCSWINSZ, &winsize) };
+pub fn resize_pty_fd(fd: RawFd, rows: u16, cols: u16) -> Result<()> {
+    let winsize = libc::winsize { ws_row: rows, ws_col: cols, ws_xpixel: 0, ws_ypixel: 0 };
+    let ret = unsafe { libc::ioctl(fd, libc::TIOCSWINSZ, &winsize) };
     if ret == -1 {
         return Err(Error::Io(io::Error::last_os_error()));
     }
     Ok(())
+}
+
+pub fn resize_pty(pty_master: &PtyMaster, terminal_size: &TerminalSize) -> Result<()> {
+    resize_pty_fd(pty_master.as_raw_fd(), terminal_size.rows, terminal_size.cols)
 }
 
 fn set_nonblocking_fd(fd: &OwnedFd) -> Result<()> {

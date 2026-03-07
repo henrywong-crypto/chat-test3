@@ -1,4 +1,5 @@
 use std::path::PathBuf;
+use std::os::fd::{AsRawFd, RawFd};
 
 use axum::extract::ws::{Message, WebSocket, WebSocketUpgrade};
 use axum::extract::State;
@@ -8,7 +9,7 @@ use axum::Router;
 use bytes::Bytes;
 use firecracker_manager::{build_mmds_with_iam, create_vm, setup_host_networking, system_time_to_iso8601, ImdsCredential, VmConfig};
 use futures::{SinkExt, StreamExt};
-use terminal_bridge::PtyMaster;
+use terminal_bridge::{resize_pty_fd, PtyMaster};
 use tokio::io::{split, AsyncReadExt, AsyncWriteExt, ReadHalf, WriteHalf};
 use tokio::net::TcpListener;
 
@@ -56,12 +57,14 @@ async fn run_vm_session(ws: WebSocket, state: AppState) {
     };
 
     let (pty_master, _guard) = vm.into_pty_master();
+    let pty_raw_fd = pty_master.as_raw_fd();
+    let _ = resize_pty_fd(pty_raw_fd, 24, 80);
     let (pty_reader, pty_writer) = split(pty_master);
     let (ws_sender, ws_receiver) = ws.split();
 
     tokio::select! {
         _ = relay_pty_to_websocket(pty_reader, ws_sender) => {}
-        _ = relay_websocket_to_pty(ws_receiver, pty_writer) => {}
+        _ = relay_websocket_to_pty(ws_receiver, pty_writer, pty_raw_fd) => {}
     }
 }
 
@@ -86,6 +89,7 @@ async fn relay_pty_to_websocket(
 async fn relay_websocket_to_pty(
     mut ws_receiver: futures::stream::SplitStream<WebSocket>,
     mut pty_writer: WriteHalf<PtyMaster>,
+    pty_raw_fd: RawFd,
 ) {
     while let Some(Ok(msg)) = ws_receiver.next().await {
         match msg {
@@ -95,8 +99,12 @@ async fn relay_websocket_to_pty(
                 }
             }
             Message::Text(text) => {
-                if pty_writer.write_all(text.as_bytes()).await.is_err() {
-                    break;
+                if let Ok(json) = serde_json::from_str::<serde_json::Value>(&text) {
+                    if json.get("type").and_then(|v| v.as_str()) == Some("resize") {
+                        let rows = json["rows"].as_u64().unwrap_or(24) as u16;
+                        let cols = json["cols"].as_u64().unwrap_or(80) as u16;
+                        let _ = resize_pty_fd(pty_raw_fd, rows, cols);
+                    }
                 }
             }
             Message::Close(_) => break,
@@ -120,7 +128,7 @@ fn build_vm_config(state: &AppState, iam_creds: Option<(String, ImdsCredential)>
         kernel_path: state.kernel_path.clone(),
         rootfs_path: state.rootfs_path.clone(),
         vcpu_count: 2,
-        mem_size_mib: 2048,
+        mem_size_mib: 4096,
         boot_args: "console=ttyS0 reboot=k panic=1".to_string(),
         mmds_metadata: Some(mmds_metadata),
         mmds_imds_compat,
@@ -196,8 +204,15 @@ const FRONTEND_HTML: &str = r#"<!DOCTYPE html>
     const ws = new WebSocket('ws://' + location.host + '/ws');
     ws.binaryType = 'arraybuffer';
 
+    term.onResize(({ rows, cols }) => {
+      if (ws.readyState === WebSocket.OPEN) {
+        ws.send(JSON.stringify({ type: 'resize', rows, cols }));
+      }
+    });
+
     ws.onopen = () => {
       term.onData(data => ws.send(new TextEncoder().encode(data)));
+      ws.send(JSON.stringify({ type: 'resize', rows: term.rows, cols: term.cols }));
     };
 
     ws.onmessage = event => term.write(new Uint8Array(event.data));
