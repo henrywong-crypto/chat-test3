@@ -6,7 +6,7 @@ use axum::response::{Html, Response};
 use axum::routing::get;
 use axum::Router;
 use bytes::Bytes;
-use firecracker_manager::{create_vm, VmConfig};
+use firecracker_manager::{create_vm, setup_host_networking, VmConfig};
 use futures::{SinkExt, StreamExt};
 use terminal_bridge::PtyMaster;
 use tokio::io::{split, AsyncReadExt, AsyncWriteExt, ReadHalf, WriteHalf};
@@ -21,6 +21,7 @@ struct AppState {
 
 #[tokio::main]
 async fn main() {
+    setup_host_networking().await;
     let state = load_app_state();
     let app = Router::new()
         .route("/", get(handle_index))
