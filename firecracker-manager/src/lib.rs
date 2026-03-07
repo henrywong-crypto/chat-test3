@@ -210,22 +210,16 @@ pub async fn setup_host_networking() {
     let _ = tokio::fs::write("/proc/sys/net/ipv4/ip_forward", "1").await;
     let _ = Command::new("iptables").args(["-P", "FORWARD", "ACCEPT"]).status().await;
     let Some(host_iface) = get_host_iface().await else { return };
-    let masq_exists = Command::new("iptables")
-        .args(["-t", "nat", "-C", "POSTROUTING", "-o", &host_iface, "-j", "MASQUERADE"])
+    // Best-effort delete to avoid duplicates on restart, then add (matches `|| true` in reference script)
+    let _ = Command::new("iptables")
+        .args(["-t", "nat", "-D", "POSTROUTING", "-o", &host_iface, "-j", "MASQUERADE"])
+        .stderr(Stdio::null())
         .status()
-        .await
-        .map(|s| s.success())
-        .unwrap_or(false);
-    if !masq_exists {
-        let _ = Command::new("iptables")
-            .args(["-t", "nat", "-D", "POSTROUTING", "-o", &host_iface, "-j", "MASQUERADE"])
-            .status()
-            .await;
-        let _ = Command::new("iptables")
-            .args(["-t", "nat", "-A", "POSTROUTING", "-o", &host_iface, "-j", "MASQUERADE"])
-            .status()
-            .await;
-    }
+        .await;
+    let _ = Command::new("iptables")
+        .args(["-t", "nat", "-A", "POSTROUTING", "-o", &host_iface, "-j", "MASQUERADE"])
+        .status()
+        .await;
 }
 
 fn dup_fd(fd: &OwnedFd) -> Result<OwnedFd> {
