@@ -180,29 +180,32 @@ fn cmd_setup_nat(iface: &str) -> i32 {
 fn raise_ambient_net_admin() -> std::io::Result<()> {
     #[cfg(target_os = "linux")]
     unsafe {
-        // The inheritable set is inherited from the parent (the unprivileged server),
-        // so it's empty even though our file caps include 'i'. We must promote
-        // CAP_NET_ADMIN into our own inheritable set first — the permitted set
-        // allows this — then raise to ambient so exec'd children inherit it.
-        let mut hdr = libc::__user_cap_header_struct {
-            version: 0x2008_0522, // _LINUX_CAPABILITY_VERSION_3
-            pid: 0,
-        };
-        let mut data = [libc::__user_cap_data_struct {
-            effective: 0,
-            permitted: 0,
-            inheritable: 0,
-        }; 2];
+        const CAP_NET_ADMIN: u32 = 12;
+        const CAP_V3: u32 = 0x2008_0522; // _LINUX_CAPABILITY_VERSION_3
+        const PR_CAP_AMBIENT: libc::c_int = 47;
+        const PR_CAP_AMBIENT_RAISE: libc::c_ulong = 2;
 
-        if libc::capget(&mut hdr, data.as_mut_ptr()) != 0 {
+        #[repr(C)]
+        struct CapHdr { version: u32, pid: i32 }
+        #[repr(C)]
+        #[derive(Clone, Copy, Default)]
+        struct CapData { effective: u32, permitted: u32, inheritable: u32 }
+
+        let mut hdr = CapHdr { version: CAP_V3, pid: 0 };
+        let mut data = [CapData::default(); 2];
+
+        // capget — read current sets
+        if libc::syscall(libc::SYS_capget, &mut hdr as *mut CapHdr, data.as_mut_ptr()) < 0 {
             return Err(std::io::Error::last_os_error());
         }
-        data[0].inheritable |= 1 << libc::CAP_NET_ADMIN;
-        if libc::capset(&mut hdr, data.as_ptr()) != 0 {
+        // Promote CAP_NET_ADMIN into inheritable (allowed since it's in permitted)
+        data[0].inheritable |= 1 << CAP_NET_ADMIN;
+        // capset — write back
+        if libc::syscall(libc::SYS_capset, &hdr as *const CapHdr, data.as_ptr()) < 0 {
             return Err(std::io::Error::last_os_error());
         }
-        let ret = libc::prctl(libc::PR_CAP_AMBIENT, libc::PR_CAP_AMBIENT_RAISE, libc::CAP_NET_ADMIN, 0, 0);
-        if ret != 0 {
+        // Raise to ambient so exec'd children inherit it
+        if libc::prctl(PR_CAP_AMBIENT, PR_CAP_AMBIENT_RAISE, CAP_NET_ADMIN as libc::c_ulong, 0, 0) < 0 {
             return Err(std::io::Error::last_os_error());
         }
     }
