@@ -114,9 +114,12 @@ pub fn build_mmds_with_iam(
     role_name: &str,
     credential: &ImdsCredential,
 ) -> serde_json::Value {
-    let cred_value = serde_json::to_value(credential).unwrap();
+    // Store credentials as a JSON string (leaf node), not a nested object.
+    // MMDS treats nested objects as directories and returns key listings instead
+    // of JSON, which breaks the AWS CLI and SDK credential parsers.
+    let cred_str = serde_json::to_string(credential).unwrap();
     let mut security_credentials = serde_json::Map::new();
-    security_credentials.insert(role_name.to_string(), cred_value);
+    security_credentials.insert(role_name.to_string(), serde_json::Value::String(cred_str));
     serde_json::json!({
         "latest": {
             "meta-data": {
@@ -132,9 +135,9 @@ pub fn build_mmds_with_iam(
 /// Build MMDS PATCH payload to refresh only the IAM credentials. Merge this
 /// with existing MMDS via `PATCH /mmds` so the rest of the metadata is unchanged.
 pub fn build_mmds_iam_refresh_patch(role_name: &str, credential: &ImdsCredential) -> serde_json::Value {
-    let cred_value = serde_json::to_value(credential).unwrap();
+    let cred_str = serde_json::to_string(credential).unwrap();
     let mut security_credentials = serde_json::Map::new();
-    security_credentials.insert(role_name.to_string(), cred_value);
+    security_credentials.insert(role_name.to_string(), serde_json::Value::String(cred_str));
     serde_json::json!({
         "latest": {
             "meta-data": {
