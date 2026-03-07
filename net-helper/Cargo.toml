@@ -8,4 +8,4 @@ name = "net-helper"
 path = "src/main.rs"
 
 [dependencies]
-# intentionally empty - stdlib only for minimal attack surface
+libc = "0.2"

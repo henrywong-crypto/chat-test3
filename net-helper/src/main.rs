@@ -179,26 +179,31 @@ fn cmd_setup_nat(iface: &str) -> i32 {
 
 fn raise_ambient_net_admin() -> std::io::Result<()> {
     #[cfg(target_os = "linux")]
-    {
-        // prctl(PR_CAP_AMBIENT=47, PR_CAP_AMBIENT_RAISE=2, CAP_NET_ADMIN=12, 0, 0)
-        // syscall number 157 on x86-64; syscall clobbers rcx and r11
-        let ret: i64;
-        unsafe {
-            std::arch::asm!(
-                "syscall",
-                inlateout("rax") 157i64 => ret,  // SYS_prctl
-                in("rdi") 47i64,                  // PR_CAP_AMBIENT
-                in("rsi") 2i64,                   // PR_CAP_AMBIENT_RAISE
-                in("rdx") 12i64,                  // CAP_NET_ADMIN
-                in("r10") 0i64,
-                in("r8")  0i64,
-                out("rcx") _,                     // clobbered by syscall instruction
-                out("r11") _,                     // clobbered by syscall instruction
-                options(nostack),
-            );
+    unsafe {
+        // The inheritable set is inherited from the parent (the unprivileged server),
+        // so it's empty even though our file caps include 'i'. We must promote
+        // CAP_NET_ADMIN into our own inheritable set first — the permitted set
+        // allows this — then raise to ambient so exec'd children inherit it.
+        let mut hdr = libc::__user_cap_header_struct {
+            version: 0x2008_0522, // _LINUX_CAPABILITY_VERSION_3
+            pid: 0,
+        };
+        let mut data = [libc::__user_cap_data_struct {
+            effective: 0,
+            permitted: 0,
+            inheritable: 0,
+        }; 2];
+
+        if libc::capget(&mut hdr, data.as_mut_ptr()) != 0 {
+            return Err(std::io::Error::last_os_error());
         }
-        if ret < 0 {
-            return Err(std::io::Error::from_raw_os_error((-ret) as i32));
+        data[0].inheritable |= 1 << libc::CAP_NET_ADMIN;
+        if libc::capset(&mut hdr, data.as_ptr()) != 0 {
+            return Err(std::io::Error::last_os_error());
+        }
+        let ret = libc::prctl(libc::PR_CAP_AMBIENT, libc::PR_CAP_AMBIENT_RAISE, libc::CAP_NET_ADMIN, 0, 0);
+        if ret != 0 {
+            return Err(std::io::Error::last_os_error());
         }
     }
     Ok(())
