@@ -1,11 +1,12 @@
 use std::io;
-use std::os::fd::{AsRawFd, OwnedFd, RawFd};
+use std::os::fd::{AsRawFd, BorrowedFd, OwnedFd, RawFd};
 use std::pin::Pin;
 use std::task::{ready, Context, Poll};
 
 use nix::fcntl::{fcntl, FcntlArg, OFlag};
 use nix::pty::openpty;
 use nix::sys::termios::{cfmakeraw, tcgetattr, tcsetattr, OutputFlags, SetArg};
+use rustix::termios::{tcsetwinsize, Winsize};
 use thiserror::Error;
 use tokio::io::unix::AsyncFd;
 use tokio::io::{AsyncRead, AsyncWrite, ReadBuf};
@@ -60,11 +61,9 @@ pub fn open_pty() -> Result<PtyPair> {
 }
 
 pub fn resize_pty_fd(fd: RawFd, rows: u16, cols: u16) -> Result<()> {
-    let winsize = libc::winsize { ws_row: rows, ws_col: cols, ws_xpixel: 0, ws_ypixel: 0 };
-    let ret = unsafe { libc::ioctl(fd, libc::TIOCSWINSZ, &winsize) };
-    if ret == -1 {
-        return Err(Error::Io(io::Error::last_os_error()));
-    }
+    let winsize = Winsize { ws_row: rows, ws_col: cols, ws_xpixel: 0, ws_ypixel: 0 };
+    let borrowed = unsafe { BorrowedFd::borrow_raw(fd) };
+    tcsetwinsize(borrowed, winsize).map_err(|e| Error::Io(io::Error::from(e)))?;
     Ok(())
 }
 

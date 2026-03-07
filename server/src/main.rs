@@ -96,7 +96,8 @@ async fn relay_websocket_to_pty(
 
     let mut last_rows: u16 = 24;
     let mut last_cols: u16 = 80;
-    let mut stty_sent = false;
+    // Retry queue: inject stty again after short delays on the initial connection
+    // in case the first injection arrives before the guest shell is ready.
     let mut retry_at: Option<Instant> = None;
     const RETRY_DELAY: Duration = Duration::from_millis(400);
 
@@ -121,14 +122,14 @@ async fn relay_websocket_to_pty(
                                 last_rows = rows;
                                 last_cols = cols;
                                 let _ = resize_pty_fd(pty_raw_fd, rows, cols);
-                                // Guest serial (ttyS0) doesn't get TIOCSWINSZ from host; only
-                                // stty inside the guest sets winsize. So TUI apps (less, vim)
-                                // need stty to see full terminal size. Send once on first resize,
-                                // and again after a short delay in case the first size was wrong.
-                                if !stty_sent {
-                                    stty_sent = true;
-                                    let cmd = format!("stty cols {} rows {}; export TERM=xterm-256color\n", cols, rows);
-                                    let _ = pty_writer.write_all(cmd.as_bytes()).await;
+                                // Guest serial (ttyS0) doesn't get TIOCSWINSZ from host; inject
+                                // stty on every resize so TUI apps always see the correct size.
+                                // Note: resizing while a TUI app is running will inject keystrokes.
+                                let cmd = format!("stty cols {} rows {}; export TERM=xterm-256color\n", cols, rows);
+                                let _ = pty_writer.write_all(cmd.as_bytes()).await;
+                                // Also schedule a retry in case this injection arrives before
+                                // the guest shell is ready (e.g. VM still booting).
+                                if retry_at.is_none() {
                                     retry_at = Some(Instant::now() + RETRY_DELAY);
                                 }
                             }

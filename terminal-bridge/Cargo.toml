@@ -6,5 +6,6 @@ edition = "2021"
 [dependencies]
 libc = "0.2"
 nix = { version = "0.29", features = ["fs", "term"] }
+rustix = { version = "0.38", features = ["termios"] }
 thiserror = "2"
 tokio = { version = "1", features = ["io-util"] }
