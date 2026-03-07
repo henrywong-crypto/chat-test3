@@ -5,7 +5,7 @@ use std::task::{ready, Context, Poll};
 
 use nix::fcntl::{fcntl, FcntlArg, OFlag};
 use nix::pty::openpty;
-use nix::sys::termios::{cfmakeraw, tcgetattr, tcsetattr, SetArg};
+use nix::sys::termios::{cfmakeraw, tcgetattr, tcsetattr, OutputFlags, SetArg};
 use thiserror::Error;
 use tokio::io::unix::AsyncFd;
 use tokio::io::{AsyncRead, AsyncWrite, ReadBuf};
@@ -75,6 +75,9 @@ pub fn resize_pty(pty_master: &PtyMaster, terminal_size: &TerminalSize) -> Resul
 fn set_raw_mode(fd: &OwnedFd) -> Result<()> {
     let mut termios = tcgetattr(fd)?;
     cfmakeraw(&mut termios);
+    // cfmakeraw disables ONLCR, but xterm.js needs \r\n to move to column 0.
+    // Re-enable it so \n from the VM becomes \r\n on the way to the browser.
+    termios.output_flags |= OutputFlags::ONLCR;
     tcsetattr(fd, SetArg::TCSANOW, &termios)?;
     Ok(())
 }
