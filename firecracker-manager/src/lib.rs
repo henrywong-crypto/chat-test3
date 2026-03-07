@@ -66,8 +66,9 @@ pub struct VmGuard {
 
 impl Drop for VmGuard {
     fn drop(&mut self) {
-        let _ = std::process::Command::new("ip")
-            .args(["link", "del", &self.tap_name])
+        let helper = net_helper_path();
+        let _ = std::process::Command::new(&helper)
+            .args(["tap-delete", &self.tap_name])
             .status();
     }
 }
@@ -179,19 +180,22 @@ fn vm_guest_mac(idx: u32) -> String {
 }
 
 async fn create_tap(tap_name: &str, tap_ip: &str) -> Result<()> {
-    let _ = Command::new("ip").args(["link", "del", tap_name]).status().await;
-    run_ip(&["tuntap", "add", "dev", tap_name, "mode", "tap"]).await?;
-    run_ip(&["addr", "add", tap_ip, "dev", tap_name]).await?;
-    run_ip(&["link", "set", "dev", tap_name, "up"]).await?;
+    let helper = net_helper_path();
+    let status = Command::new(&helper)
+        .args(["tap-create", tap_name, tap_ip])
+        .status()
+        .await?;
+    if !status.success() {
+        return Err(Error::NetworkSetup(format!(
+            "net-helper tap-create failed for {tap_name}: exit {}",
+            status.code().unwrap_or(-1)
+        )));
+    }
     Ok(())
 }
 
-async fn run_ip(args: &[&str]) -> Result<()> {
-    let status = Command::new("ip").args(args).status().await?;
-    if !status.success() {
-        return Err(Error::NetworkSetup(format!("ip {:?} failed", args)));
-    }
-    Ok(())
+fn net_helper_path() -> String {
+    std::env::var("NET_HELPER_PATH").unwrap_or_else(|_| "/usr/local/bin/net-helper".to_string())
 }
 
 async fn get_host_iface() -> Option<String> {
@@ -207,19 +211,19 @@ async fn get_host_iface() -> Option<String> {
 }
 
 pub async fn setup_host_networking() {
-    let _ = tokio::fs::write("/proc/sys/net/ipv4/ip_forward", "1").await;
-    let _ = Command::new("iptables").args(["-P", "FORWARD", "ACCEPT"]).status().await;
-    let Some(host_iface) = get_host_iface().await else { return };
-    // Best-effort delete to avoid duplicates on restart, then add (matches `|| true` in reference script)
-    let _ = Command::new("iptables")
-        .args(["-t", "nat", "-D", "POSTROUTING", "-o", &host_iface, "-j", "MASQUERADE"])
-        .stderr(Stdio::null())
-        .status()
-        .await;
-    let _ = Command::new("iptables")
-        .args(["-t", "nat", "-A", "POSTROUTING", "-o", &host_iface, "-j", "MASQUERADE"])
-        .status()
-        .await;
+    let Some(host_iface) = get_host_iface().await else {
+        eprintln!("warning: could not determine host interface, skipping NAT setup");
+        return;
+    };
+    let helper = net_helper_path();
+    match Command::new(&helper).args(["setup-nat", &host_iface]).status().await {
+        Ok(s) if s.success() => {}
+        Ok(s) => eprintln!(
+            "warning: net-helper setup-nat failed: exit {}",
+            s.code().unwrap_or(-1)
+        ),
+        Err(e) => eprintln!("warning: failed to run net-helper setup-nat: {e}"),
+    }
 }
 
 fn dup_fd(fd: &OwnedFd) -> Result<OwnedFd> {

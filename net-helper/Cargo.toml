@@ -1,0 +1,11 @@
+[package]
+name = "net-helper"
+version = "0.1.0"
+edition = "2021"
+
+[[bin]]
+name = "net-helper"
+path = "src/main.rs"
+
+[dependencies]
+# intentionally empty - stdlib only for minimal attack surface
