@@ -167,7 +167,7 @@ async fn wait_for_socket(socket_path: &Path) -> Result<()> {
 }
 
 fn vm_tap_name(idx: u32) -> String {
-    format!("vmtap{idx}")
+    format!("tap{idx}")
 }
 
 fn vm_tap_ip(idx: u32) -> String {

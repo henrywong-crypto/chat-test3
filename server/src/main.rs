@@ -112,7 +112,7 @@ fn build_vm_config(state: &AppState) -> VmConfig {
         rootfs_path: state.rootfs_path.clone(),
         vcpu_count: 2,
         mem_size_mib: 2048,
-        boot_args: "console=ttyS0 reboot=k panic=1 root=/dev/vda".to_string(),
+        boot_args: "console=ttyS0 reboot=k panic=1".to_string(),
     }
 }
 
