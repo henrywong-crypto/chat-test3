@@ -196,8 +196,8 @@ fn raise_ambient_net_admin() -> std::io::Result<()> {
                 options(nostack),
             );
         }
-        if ret == -1 {
-            return Err(std::io::Error::last_os_error());
+        if ret < 0 {
+            return Err(std::io::Error::from_raw_os_error((-ret) as i32));
         }
     }
     Ok(())
