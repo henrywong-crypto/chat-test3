@@ -127,7 +127,7 @@ async fn relay_websocket_to_pty(
                                 // and again after a short delay in case the first size was wrong.
                                 if !stty_sent {
                                     stty_sent = true;
-                                    let cmd = format!("stty cols {} rows {}\n", cols, rows);
+                                    let cmd = format!("stty cols {} rows {}; export TERM=xterm-256color\n", cols, rows);
                                     let _ = pty_writer.write_all(cmd.as_bytes()).await;
                                     retry_at = Some(Instant::now() + RETRY_DELAY);
                                 }
@@ -142,7 +142,7 @@ async fn relay_websocket_to_pty(
                 retry_at.as_ref().copied().unwrap_or(Instant::now() + Duration::from_secs(999999))
             ), if retry_at.is_some() => {
                 retry_at = None;
-                let cmd = format!("stty cols {} rows {}\n", last_cols, last_rows);
+                let cmd = format!("stty cols {} rows {}; export TERM=xterm-256color\n", last_cols, last_rows);
                 let _ = pty_writer.write_all(cmd.as_bytes()).await;
             }
         }
