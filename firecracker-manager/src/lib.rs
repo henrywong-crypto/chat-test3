@@ -1,3 +1,6 @@
+mod mmds_iam;
+pub use mmds_iam::{build_mmds_iam_refresh_patch, build_mmds_with_iam, imds_compat_mmds_config, system_time_to_iso8601, ImdsCredential};
+
 use std::io;
 use std::os::fd::{AsRawFd, FromRawFd, OwnedFd};
 use std::path::{Path, PathBuf};
@@ -6,8 +9,8 @@ use std::sync::atomic::{AtomicU32, Ordering};
 use std::time::Duration;
 
 use firecracker_client::{
-    set_boot_source, set_drive, set_machine_config, set_network_interface, start_instance,
-    BootSource, Drive, MachineConfig, NetworkInterface,
+    put_mmds, set_boot_source, set_drive, set_machine_config, set_mmds_config, set_network_interface,
+    start_instance, BootSource, Drive, MachineConfig, MmdsConfig, NetworkInterface,
 };
 use nix::sys::signal::{kill, Signal};
 use nix::unistd::{dup, Pid};
@@ -45,6 +48,12 @@ pub struct VmConfig {
     pub vcpu_count: u8,
     pub mem_size_mib: u32,
     pub boot_args: String,
+    /// MMDS payload (e.g. from [build_mmds_with_iam]). If [mmds_imds_compat] is true, use
+    /// [imds_compat_mmds_config] so the guest can use the AWS default credential chain.
+    pub mmds_metadata: Option<serde_json::Value>,
+    /// When true, MMDS is configured with imds_compat and V2 so EC2 IMDS–style credential
+    /// paths work (required when [mmds_metadata] contains IAM credentials for the SDK).
+    pub mmds_imds_compat: bool,
 }
 
 pub struct Vm {
@@ -154,6 +163,20 @@ async fn configure_vm(socket_path: &Path, vm_config: &VmConfig, tap_name: &str, 
         host_dev_name: tap_name.to_string(),
     })
     .await?;
+    if let Some(metadata) = &vm_config.mmds_metadata {
+        let mmds_config = if vm_config.mmds_imds_compat {
+            imds_compat_mmds_config(vec!["net1".to_string()])
+        } else {
+            MmdsConfig {
+                version: None,
+                network_interfaces: vec!["net1".to_string()],
+                ipv4_address: None,
+                imds_compat: None,
+            }
+        };
+        set_mmds_config(socket_path, &mmds_config).await?;
+        put_mmds(socket_path, metadata).await?;
+    }
     Ok(())
 }
 

@@ -78,13 +78,54 @@ pub async fn start_instance(socket_path: &Path) -> Result<()> {
     send_put(socket_path, "/actions", body).await
 }
 
+#[derive(Serialize)]
+pub struct MmdsConfig {
+    /// MMDS version. Use "V2" for IMDSv2-style token-based requests (recommended for AWS SDK).
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub version: Option<String>,
+    pub network_interfaces: Vec<String>,
+    /// IPv4 address for MMDS in the guest. Default 169.254.169.254 (same as EC2 IMDS).
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub ipv4_address: Option<String>,
+    /// When true, MMDS responds in EC2 IMDS format so AWS SDK default credential chain works.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub imds_compat: Option<bool>,
+}
+
+pub async fn set_mmds_config(socket_path: &Path, config: &MmdsConfig) -> Result<()> {
+    let body = serde_json::to_vec(config).unwrap();
+    send_put(socket_path, "/mmds/config", body).await
+}
+
+pub async fn put_mmds(socket_path: &Path, metadata: &serde_json::Value) -> Result<()> {
+    let body = serde_json::to_vec(metadata).unwrap();
+    send_put(socket_path, "/mmds", body).await
+}
+
+/// Partially update MMDS using JSON Merge Patch (RFC 7396). Use this to refresh
+/// credentials without replacing the entire metadata (e.g. only update
+/// `latest.aws` or `latest.iam`). Works while the VM is running.
+pub async fn patch_mmds(socket_path: &Path, patch: &serde_json::Value) -> Result<()> {
+    let body = serde_json::to_vec(patch).unwrap();
+    send_request(socket_path, Method::PATCH, "/mmds", body).await
+}
+
 async fn send_put(socket_path: &Path, uri: &str, body: Vec<u8>) -> Result<()> {
+    send_request(socket_path, Method::PUT, uri, body).await
+}
+
+async fn send_request(
+    socket_path: &Path,
+    method: Method,
+    uri: &str,
+    body: Vec<u8>,
+) -> Result<()> {
     let stream = UnixStream::connect(socket_path).await?;
     let (mut sender, conn) = http1::handshake(TokioIo::new(stream)).await?;
     tokio::spawn(conn);
 
     let request = Request::builder()
-        .method(Method::PUT)
+        .method(method)
         .uri(uri)
         .header("Host", "localhost")
         .header("Content-Type", "application/json")

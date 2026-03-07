@@ -6,7 +6,7 @@ use axum::response::{Html, Response};
 use axum::routing::get;
 use axum::Router;
 use bytes::Bytes;
-use firecracker_manager::{create_vm, setup_host_networking, VmConfig};
+use firecracker_manager::{build_mmds_with_iam, create_vm, setup_host_networking, system_time_to_iso8601, ImdsCredential, VmConfig};
 use futures::{SinkExt, StreamExt};
 use terminal_bridge::PtyMaster;
 use tokio::io::{split, AsyncReadExt, AsyncWriteExt, ReadHalf, WriteHalf};
@@ -45,7 +45,8 @@ async fn handle_attach_websocket(
 }
 
 async fn run_vm_session(ws: WebSocket, state: AppState) {
-    let vm_config = build_vm_config(&state);
+    let iam_creds = fetch_host_iam_credentials().await;
+    let vm_config = build_vm_config(&state, iam_creds);
     let vm = match create_vm(&vm_config).await {
         Ok(vm) => vm,
         Err(e) => {
@@ -104,16 +105,51 @@ async fn relay_websocket_to_pty(
     }
 }
 
-fn build_vm_config(state: &AppState) -> VmConfig {
+fn build_vm_config(state: &AppState, iam_creds: Option<(String, ImdsCredential)>) -> VmConfig {
+    let vm_id = uuid::Uuid::new_v4().to_string();
+    let (mmds_metadata, mmds_imds_compat) = match iam_creds {
+        Some((role_name, cred)) => (build_mmds_with_iam(&vm_id, &role_name, &cred), true),
+        None => (
+            serde_json::json!({ "latest": { "meta-data": { "instance-id": &vm_id } } }),
+            false,
+        ),
+    };
     VmConfig {
-        id: uuid::Uuid::new_v4().to_string(),
+        id: vm_id,
         socket_dir: state.socket_dir.clone(),
         kernel_path: state.kernel_path.clone(),
         rootfs_path: state.rootfs_path.clone(),
         vcpu_count: 2,
         mem_size_mib: 2048,
         boot_args: "console=ttyS0 reboot=k panic=1".to_string(),
+        mmds_metadata: Some(mmds_metadata),
+        mmds_imds_compat,
     }
+}
+
+async fn fetch_host_iam_credentials() -> Option<(String, ImdsCredential)> {
+    use aws_config::default_provider::credentials::DefaultCredentialsChain;
+    use aws_credential_types::provider::ProvideCredentials;
+
+    let provider = DefaultCredentialsChain::builder().build().await;
+    let creds = provider.provide_credentials().await
+        .map_err(|e| eprintln!("failed to fetch host credentials: {e}"))
+        .ok()?;
+    let role_name =
+        std::env::var("AWS_ROLE_NAME").unwrap_or_else(|_| "vm-role".to_string());
+    let expiration = creds
+        .expiry()
+        .map(system_time_to_iso8601)
+        .unwrap_or_else(|| "2099-01-01T00:00:00Z".to_string());
+    Some((
+        role_name,
+        ImdsCredential::new(
+            creds.access_key_id(),
+            creds.secret_access_key(),
+            creds.session_token().unwrap_or(""),
+            expiration,
+        ),
+    ))
 }
 
 fn load_app_state() -> AppState {

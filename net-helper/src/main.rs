@@ -173,6 +173,7 @@ fn cmd_setup_nat(iface: &str) -> i32 {
     // Best-effort delete to avoid duplicates on restart
     let _ = Command::new("iptables")
         .args(["-t", "nat", "-D", "POSTROUTING", "-o", iface, "-j", "MASQUERADE"])
+        .stderr(std::process::Stdio::null())
         .status();
     run_cmd("iptables", &["-t", "nat", "-A", "POSTROUTING", "-o", iface, "-j", "MASQUERADE"])
 }
