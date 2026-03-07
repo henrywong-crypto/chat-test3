@@ -223,7 +223,6 @@ const FRONTEND_HTML: &str = r#"<!DOCTYPE html>
   <title>vm terminal</title>
   <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/xterm@5/css/xterm.css" />
   <style>
-    * { box-sizing: border-box; }
     html, body { margin: 0; padding: 0; background: #000; width: 100%; height: 100%; overflow: hidden; }
     #terminal { width: 100%; height: 100%; }
   </style>
@@ -238,45 +237,42 @@ const FRONTEND_HTML: &str = r#"<!DOCTYPE html>
     const fitAddon = new FitAddon.FitAddon();
     term.loadAddon(fitAddon);
     term.open(container);
-    fitAddon.fit();
 
     const ws = new WebSocket('ws://' + location.host + '/ws');
     ws.binaryType = 'arraybuffer';
 
+    // Send current terminal dimensions to the server.
     function sendResize() {
       if (ws.readyState === WebSocket.OPEN) {
         ws.send(JSON.stringify({ type: 'resize', rows: term.rows, cols: term.cols }));
       }
     }
 
-    function doFit() {
-      fitAddon.fit();
-    }
-
-    // Whenever xterm changes its grid size, tell the server.
-    term.onResize(() => sendResize());
+    // Every time xterm's character grid changes, tell the server.
+    term.onResize(sendResize);
 
     ws.onopen = () => {
       term.onData(data => ws.send(new TextEncoder().encode(data)));
-      // Send current size immediately — onResize won't fire if fit() didn't change the grid.
+      // Explicitly send the current size in case onResize already fired
+      // before the socket was open (ResizeObserver initial callback).
       sendResize();
     };
 
     ws.onmessage = event => term.write(new Uint8Array(event.data));
     ws.onclose = () => term.write('\r\nconnection closed\r\n');
 
-    window.addEventListener('resize', doFit);
-    new ResizeObserver(doFit).observe(container);
+    // ResizeObserver is the single resize driver.
+    // It fires once immediately on observe (giving the initial size) and again
+    // whenever the container dimensions change (window resize, fullscreen, etc.).
+    new ResizeObserver(() => fitAddon.fit()).observe(container);
 
-    // F11 fullscreen toggle
+    // F11 fullscreen — fullscreenchange triggers ResizeObserver automatically.
     document.addEventListener('keydown', e => {
       if (e.key === 'F11') {
         e.preventDefault();
-        if (document.fullscreenElement) document.exitFullscreen();
-        else container.requestFullscreen();
+        document.fullscreenElement ? document.exitFullscreen() : container.requestFullscreen();
       }
     });
-    document.addEventListener('fullscreenchange', doFit);
   </script>
 </body>
 </html>"#;
