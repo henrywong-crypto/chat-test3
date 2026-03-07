@@ -91,6 +91,7 @@ async fn relay_websocket_to_pty(
     mut pty_writer: WriteHalf<PtyMaster>,
     pty_raw_fd: RawFd,
 ) {
+    let mut initial_resize_done = false;
     while let Some(Ok(msg)) = ws_receiver.next().await {
         match msg {
             Message::Binary(data) => {
@@ -104,6 +105,14 @@ async fn relay_websocket_to_pty(
                         let rows = json["rows"].as_u64().unwrap_or(24) as u16;
                         let cols = json["cols"].as_u64().unwrap_or(80) as u16;
                         let _ = resize_pty_fd(pty_raw_fd, rows, cols);
+                        if !initial_resize_done {
+                            initial_resize_done = true;
+                            // ttyS0 inside the VM has no terminal size (0x0) because
+                            // TIOCSWINSZ on the host PTY doesn't propagate into the guest.
+                            // Inject stty so TUI apps get correct dimensions from the start.
+                            let cmd = format!("stty cols {} rows {}\n", cols, rows);
+                            let _ = pty_writer.write_all(cmd.as_bytes()).await;
+                        }
                     }
                 }
             }
@@ -212,7 +221,7 @@ const FRONTEND_HTML: &str = r#"<!DOCTYPE html>
 
     ws.onopen = () => {
       term.onData(data => ws.send(new TextEncoder().encode(data)));
-      ws.send(JSON.stringify({ type: 'resize', rows: term.rows, cols: term.cols }));
+      fitAddon.fit();
     };
 
     ws.onmessage = event => term.write(new Uint8Array(event.data));
