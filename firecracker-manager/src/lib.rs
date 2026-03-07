@@ -1,0 +1,144 @@
+use std::io;
+use std::os::fd::{AsRawFd, FromRawFd, OwnedFd};
+use std::path::{Path, PathBuf};
+use std::process::Stdio;
+use std::time::Duration;
+
+use firecracker_client::{
+    set_boot_source, set_drive, set_machine_config, start_instance, BootSource, Drive,
+    MachineConfig,
+};
+use nix::sys::signal::{kill, Signal};
+use nix::unistd::{dup, Pid};
+use terminal_bridge::{open_pty, PtyMaster, PtySlave};
+use thiserror::Error;
+use tokio::process::{Child, Command};
+
+#[derive(Debug, Error)]
+pub enum Error {
+    #[error(transparent)]
+    Io(#[from] io::Error),
+    #[error(transparent)]
+    Nix(#[from] nix::Error),
+    #[error(transparent)]
+    Pty(#[from] terminal_bridge::Error),
+    #[error(transparent)]
+    Firecracker(#[from] firecracker_client::Error),
+    #[error("timed out waiting for firecracker socket")]
+    SocketTimeout,
+    #[error("process exited before pid was available")]
+    ProcessExited,
+}
+
+pub type Result<T> = std::result::Result<T, Error>;
+
+pub struct VmConfig {
+    pub id: String,
+    pub socket_dir: PathBuf,
+    pub kernel_path: PathBuf,
+    pub rootfs_path: PathBuf,
+    pub vcpu_count: u8,
+    pub mem_size_mib: u32,
+    pub boot_args: String,
+}
+
+pub struct Vm {
+    pub id: String,
+    pub socket_path: PathBuf,
+    pub pid: u32,
+    pub pty_master: PtyMaster,
+    child: Child,
+}
+
+pub struct VmGuard {
+    pub id: String,
+    pub socket_path: PathBuf,
+    pub pid: u32,
+    _child: Child,
+}
+
+impl Vm {
+    pub fn into_pty_master(self) -> (PtyMaster, VmGuard) {
+        let guard = VmGuard {
+            id: self.id,
+            socket_path: self.socket_path,
+            pid: self.pid,
+            _child: self.child,
+        };
+        (self.pty_master, guard)
+    }
+}
+
+pub async fn create_vm(vm_config: &VmConfig) -> Result<Vm> {
+    let pty_pair = open_pty()?;
+    let socket_path = build_socket_path(&vm_config.socket_dir, &vm_config.id);
+    let child = spawn_firecracker(&socket_path, pty_pair.slave)?;
+    let pid = child.id().ok_or(Error::ProcessExited)?;
+    wait_for_socket(&socket_path).await?;
+    configure_vm(&socket_path, vm_config).await?;
+    start_instance(&socket_path).await?;
+    Ok(Vm { id: vm_config.id.clone(), socket_path, pid, pty_master: pty_pair.master, child })
+}
+
+pub fn kill_vm(vm_pid: u32) -> Result<()> {
+    kill(Pid::from_raw(vm_pid as i32), Signal::SIGTERM)?;
+    Ok(())
+}
+
+pub fn check_vm_alive(vm_pid: u32) -> bool {
+    kill(Pid::from_raw(vm_pid as i32), None).is_ok()
+}
+
+fn build_socket_path(socket_dir: &Path, vm_id: &str) -> PathBuf {
+    socket_dir.join(format!("fc-{vm_id}.socket"))
+}
+
+fn spawn_firecracker(socket_path: &Path, slave: PtySlave) -> Result<Child> {
+    let slave_fd = slave.into_owned_fd();
+    let stdout_fd = dup_fd(&slave_fd)?;
+    let stderr_fd = dup_fd(&slave_fd)?;
+    let child = Command::new("firecracker")
+        .args(["--api-sock", &socket_path.to_string_lossy()])
+        .stdin(Stdio::from(slave_fd))
+        .stdout(Stdio::from(stdout_fd))
+        .stderr(Stdio::from(stderr_fd))
+        .kill_on_drop(true)
+        .spawn()?;
+    Ok(child)
+}
+
+async fn configure_vm(socket_path: &Path, vm_config: &VmConfig) -> Result<()> {
+    set_machine_config(socket_path, &MachineConfig {
+        vcpu_count: vm_config.vcpu_count,
+        mem_size_mib: vm_config.mem_size_mib,
+    })
+    .await?;
+    set_boot_source(socket_path, &BootSource {
+        kernel_image_path: vm_config.kernel_path.to_string_lossy().into_owned(),
+        boot_args: vm_config.boot_args.clone(),
+    })
+    .await?;
+    set_drive(socket_path, &Drive {
+        drive_id: "rootfs".to_string(),
+        path_on_host: vm_config.rootfs_path.to_string_lossy().into_owned(),
+        is_root_device: true,
+        is_read_only: false,
+    })
+    .await?;
+    Ok(())
+}
+
+async fn wait_for_socket(socket_path: &Path) -> Result<()> {
+    for _ in 0..50 {
+        if socket_path.exists() {
+            return Ok(());
+        }
+        tokio::time::sleep(Duration::from_millis(100)).await;
+    }
+    Err(Error::SocketTimeout)
+}
+
+fn dup_fd(fd: &OwnedFd) -> Result<OwnedFd> {
+    let raw_fd = dup(fd.as_raw_fd())?;
+    Ok(unsafe { OwnedFd::from_raw_fd(raw_fd) })
+}

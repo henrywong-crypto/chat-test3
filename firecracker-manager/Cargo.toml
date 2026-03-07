@@ -1,0 +1,11 @@
+[package]
+name = "firecracker-manager"
+version = "0.1.0"
+edition = "2021"
+
+[dependencies]
+firecracker-client = { path = "../firecracker-client" }
+terminal-bridge = { path = "../terminal-bridge" }
+nix = { version = "0.29", features = ["fs", "signal"] }
+thiserror = "2"
+tokio = { version = "1", features = ["process", "time"] }

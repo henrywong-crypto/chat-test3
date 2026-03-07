@@ -1,0 +1,17 @@
+[package]
+name = "server"
+version = "0.1.0"
+edition = "2021"
+
+[[bin]]
+name = "server"
+path = "src/main.rs"
+
+[dependencies]
+axum = { version = "0.8", features = ["ws"] }
+bytes = "1"
+firecracker-manager = { path = "../firecracker-manager" }
+futures = "0.3"
+terminal-bridge = { path = "../terminal-bridge" }
+tokio = { version = "1", features = ["full"] }
+uuid = { version = "1", features = ["v4"] }

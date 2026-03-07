@@ -1,0 +1,9 @@
+[workspace]
+members = [
+    "firecracker-client",
+    "firecracker-manager",
+    "terminal-bridge",
+    "store",
+    "server",
+]
+resolver = "2"
