@@ -264,6 +264,11 @@ const FRONTEND_HTML: &str = r#"<!DOCTYPE html>
 
     ws.onopen = () => {
       term.onData(data => ws.send(new TextEncoder().encode(data)));
+      // Always send current dimensions immediately on open — fitAddon.fit() may
+      // have already run (double-rAF above) so onResize won't fire again unless
+      // the size actually changes.  Send directly so the server always gets the
+      // correct initial size regardless of whether fitAddon detects a change.
+      ws.send(JSON.stringify({ type: 'resize', rows: term.rows, cols: term.cols }));
       doFit();
     };
 
