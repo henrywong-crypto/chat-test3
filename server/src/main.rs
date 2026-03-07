@@ -91,7 +91,6 @@ async fn relay_websocket_to_pty(
     mut pty_writer: WriteHalf<PtyMaster>,
     pty_raw_fd: RawFd,
 ) {
-    let mut initial_resize_done = false;
     while let Some(Ok(msg)) = ws_receiver.next().await {
         match msg {
             Message::Binary(data) => {
@@ -105,13 +104,6 @@ async fn relay_websocket_to_pty(
                         let rows = json["rows"].as_u64().unwrap_or(24) as u16;
                         let cols = json["cols"].as_u64().unwrap_or(80) as u16;
                         let _ = resize_pty_fd(pty_raw_fd, rows, cols);
-                        if !initial_resize_done {
-                            initial_resize_done = true;
-                            // ttyS0 inside the VM has no terminal size; inject stty so
-                            // bash readline knows the window dimensions before the user types.
-                            let cmd = format!("stty cols {} rows {}\n", cols, rows);
-                            let _ = pty_writer.write_all(cmd.as_bytes()).await;
-                        }
                     }
                 }
             }

@@ -75,9 +75,9 @@ pub fn resize_pty(pty_master: &PtyMaster, terminal_size: &TerminalSize) -> Resul
 fn set_raw_mode(fd: &OwnedFd) -> Result<()> {
     let mut termios = tcgetattr(fd)?;
     cfmakeraw(&mut termios);
-    // cfmakeraw disables ONLCR, but xterm.js needs \r\n to move to column 0.
-    // Re-enable it so \n from the VM becomes \r\n on the way to the browser.
-    termios.output_flags |= OutputFlags::ONLCR;
+    // cfmakeraw clears OPOST which disables all output processing, making ONLCR
+    // a no-op. Re-enable OPOST + ONLCR so \n from the VM becomes \r\n for xterm.js.
+    termios.output_flags |= OutputFlags::OPOST | OutputFlags::ONLCR;
     tcsetattr(fd, SetArg::TCSANOW, &termios)?;
     Ok(())
 }
