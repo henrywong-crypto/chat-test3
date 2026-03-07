@@ -109,9 +109,9 @@ fn build_vm_config(state: &AppState) -> VmConfig {
         socket_dir: state.socket_dir.clone(),
         kernel_path: state.kernel_path.clone(),
         rootfs_path: state.rootfs_path.clone(),
-        vcpu_count: 1,
-        mem_size_mib: 512,
-        boot_args: "console=ttyS0 reboot=k panic=1 pci=off root=/dev/vda".to_string(),
+        vcpu_count: 2,
+        mem_size_mib: 2048,
+        boot_args: "console=ttyS0 reboot=k panic=1 root=/dev/vda".to_string(),
     }
 }
 
@@ -119,11 +119,15 @@ fn load_app_state() -> AppState {
     AppState {
         kernel_path: PathBuf::from(
             std::env::var("KERNEL_PATH").unwrap_or_else(|_| "/var/lib/fc/vmlinux".to_string()),
-        ),
+        )
+        .canonicalize()
+        .expect("KERNEL_PATH does not exist"),
         rootfs_path: PathBuf::from(
             std::env::var("ROOTFS_PATH")
                 .unwrap_or_else(|_| "/var/lib/fc/rootfs.ext4".to_string()),
-        ),
+        )
+        .canonicalize()
+        .expect("ROOTFS_PATH does not exist"),
         socket_dir: PathBuf::from(
             std::env::var("SOCKET_DIR").unwrap_or_else(|_| "/tmp".to_string()),
         ),

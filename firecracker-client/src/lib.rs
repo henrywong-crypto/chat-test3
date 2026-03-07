@@ -1,6 +1,6 @@
 use std::path::Path;
 
-use http_body_util::Full;
+use http_body_util::{BodyExt, Full};
 use hyper::body::Bytes;
 use hyper::client::conn::http1;
 use hyper::http::Error as HttpError;
@@ -18,8 +18,8 @@ pub enum Error {
     Hyper(#[from] hyper::Error),
     #[error(transparent)]
     Http(#[from] HttpError),
-    #[error("firecracker api returned {0}")]
-    Api(StatusCode),
+    #[error("firecracker api returned {status}: {body}")]
+    Api { status: StatusCode, body: String },
 }
 
 pub type Result<T> = std::result::Result<T, Error>;
@@ -81,7 +81,10 @@ async fn send_put(socket_path: &Path, uri: &str, body: Vec<u8>) -> Result<()> {
     let response = sender.send_request(request).await?;
 
     if !response.status().is_success() {
-        return Err(Error::Api(response.status()));
+        let status = response.status();
+        let bytes = response.into_body().collect().await?.to_bytes();
+        let body = String::from_utf8_lossy(&bytes).into_owned();
+        return Err(Error::Api { status, body });
     }
 
     Ok(())
