@@ -165,7 +165,7 @@ fn build_vm_config(state: &AppState, iam_creds: Option<(String, ImdsCredential)>
         rootfs_path: state.rootfs_path.clone(),
         vcpu_count: 2,
         mem_size_mib: 4096,
-        boot_args: "console=ttyS0 reboot=k panic=1".to_string(),
+        boot_args: "console=ttyS0 reboot=k panic=1 quiet loglevel=3".to_string(),
         mmds_metadata: Some(mmds_metadata),
         mmds_imds_compat,
     }
