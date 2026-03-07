@@ -6,6 +6,15 @@ fn main() {
 }
 
 fn run(args: &[String]) -> i32 {
+    // Raise CAP_NET_ADMIN into the ambient set so child processes (ip, iptables)
+    // inherit it through exec without needing their own file capabilities.
+    // Requires net-helper to be deployed with cap_net_admin=eip (not just =ep).
+    if let Err(e) = raise_ambient_net_admin() {
+        eprintln!("failed to raise ambient cap_net_admin: {e}");
+        eprintln!("hint: deploy with 'sudo setcap cap_net_admin=eip /usr/local/bin/net-helper'");
+        return 2;
+    }
+
     match args.get(1).map(|s| s.as_str()) {
         Some("tap-create") => {
             if args.len() != 4 {
@@ -166,6 +175,32 @@ fn cmd_setup_nat(iface: &str) -> i32 {
         .args(["-t", "nat", "-D", "POSTROUTING", "-o", iface, "-j", "MASQUERADE"])
         .status();
     run_cmd("iptables", &["-t", "nat", "-A", "POSTROUTING", "-o", iface, "-j", "MASQUERADE"])
+}
+
+fn raise_ambient_net_admin() -> std::io::Result<()> {
+    #[cfg(target_os = "linux")]
+    {
+        // prctl(PR_CAP_AMBIENT=47, PR_CAP_AMBIENT_RAISE=2, CAP_NET_ADMIN=12, 0, 0)
+        // syscall number 157 on x86-64
+        let ret: i64;
+        unsafe {
+            std::arch::asm!(
+                "syscall",
+                in("rax") 157i64,  // SYS_prctl
+                in("rdi") 47i64,   // PR_CAP_AMBIENT
+                in("rsi") 2i64,    // PR_CAP_AMBIENT_RAISE
+                in("rdx") 12i64,   // CAP_NET_ADMIN
+                in("r10") 0i64,
+                in("r8")  0i64,
+                lateout("rax") ret,
+                options(nostack),
+            );
+        }
+        if ret == -1 {
+            return Err(std::io::Error::last_os_error());
+        }
+    }
+    Ok(())
 }
 
 #[cfg(test)]
