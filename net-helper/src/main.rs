@@ -181,18 +181,19 @@ fn raise_ambient_net_admin() -> std::io::Result<()> {
     #[cfg(target_os = "linux")]
     {
         // prctl(PR_CAP_AMBIENT=47, PR_CAP_AMBIENT_RAISE=2, CAP_NET_ADMIN=12, 0, 0)
-        // syscall number 157 on x86-64
+        // syscall number 157 on x86-64; syscall clobbers rcx and r11
         let ret: i64;
         unsafe {
             std::arch::asm!(
                 "syscall",
-                in("rax") 157i64,  // SYS_prctl
-                in("rdi") 47i64,   // PR_CAP_AMBIENT
-                in("rsi") 2i64,    // PR_CAP_AMBIENT_RAISE
-                in("rdx") 12i64,   // CAP_NET_ADMIN
+                inlateout("rax") 157i64 => ret,  // SYS_prctl
+                in("rdi") 47i64,                  // PR_CAP_AMBIENT
+                in("rsi") 2i64,                   // PR_CAP_AMBIENT_RAISE
+                in("rdx") 12i64,                  // CAP_NET_ADMIN
                 in("r10") 0i64,
                 in("r8")  0i64,
-                lateout("rax") ret,
+                out("rcx") _,                     // clobbered by syscall instruction
+                out("r11") _,                     // clobbered by syscall instruction
                 options(nostack),
             );
         }
