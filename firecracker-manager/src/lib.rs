@@ -129,7 +129,7 @@ fn spawn_firecracker(socket_path: &Path, slave: PtySlave) -> Result<Child> {
     let slave_fd = slave.into_owned_fd();
     let stdout_fd = dup_fd(&slave_fd)?;
     let child = Command::new("firecracker")
-        .args(["--api-sock", &socket_path.to_string_lossy()])
+        .args(["--api-sock", &socket_path.to_string_lossy(), "--log-path", "/dev/null"])
         .stdin(Stdio::from(slave_fd))
         .stdout(Stdio::from(stdout_fd))
         .stderr(Stdio::null())
