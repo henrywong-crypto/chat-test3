@@ -205,17 +205,14 @@ const FRONTEND_HTML: &str = r#"<!DOCTYPE html>
   <script src="https://cdn.jsdelivr.net/npm/xterm-addon-fit@0.8/lib/xterm-addon-fit.js"></script>
   <script>
     const term = new Terminal({ cursorBlink: true });
-    const fitAddon = new FitAddon();
+    const fitAddon = new FitAddon.FitAddon();
     term.loadAddon(fitAddon);
     term.open(document.getElementById('terminal'));
+    fitAddon.fit();
 
-    // Defer initial fit until after layout (avoids wrong cols/rows and display shift)
     function doFit() {
-      requestAnimationFrame(() => {
-        fitAddon.fit();
-      });
+      requestAnimationFrame(() => { fitAddon.fit(); });
     }
-    doFit();
 
     const ws = new WebSocket('ws://' + location.host + '/ws');
     ws.binaryType = 'arraybuffer';
