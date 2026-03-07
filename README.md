@@ -40,6 +40,7 @@ Open http://localhost:3000 — each page load boots a fresh VM and connects its 
 Run these inside the VM to enable outbound internet access:
 
 ```bash
+ip route add 169.254.169.254 dev eth0
 ip route add default via 172.16.0.1 dev eth0
 echo 'nameserver 1.1.1.1' > /etc/resolv.conf
 ```

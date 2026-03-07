@@ -195,8 +195,8 @@ const FRONTEND_HTML: &str = r#"<!DOCTYPE html>
   <title>vm terminal</title>
   <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/xterm@5/css/xterm.css" />
   <style>
-    html, body { margin: 0; padding: 0; background: #000; height: 100%; }
-    #terminal { height: 100%; }
+    html, body { margin: 0; padding: 0; background: #000; height: 100%; overflow: hidden; }
+    #terminal { width: 100%; height: 100%; display: block; }
   </style>
 </head>
 <body>
@@ -205,10 +205,17 @@ const FRONTEND_HTML: &str = r#"<!DOCTYPE html>
   <script src="https://cdn.jsdelivr.net/npm/xterm-addon-fit@0.8/lib/xterm-addon-fit.js"></script>
   <script>
     const term = new Terminal({ cursorBlink: true });
-    const fitAddon = new FitAddon.FitAddon();
+    const fitAddon = new FitAddon();
     term.loadAddon(fitAddon);
     term.open(document.getElementById('terminal'));
-    fitAddon.fit();
+
+    // Defer initial fit until after layout (avoids wrong cols/rows and display shift)
+    function doFit() {
+      requestAnimationFrame(() => {
+        fitAddon.fit();
+      });
+    }
+    doFit();
 
     const ws = new WebSocket('ws://' + location.host + '/ws');
     ws.binaryType = 'arraybuffer';
@@ -221,14 +228,16 @@ const FRONTEND_HTML: &str = r#"<!DOCTYPE html>
 
     ws.onopen = () => {
       term.onData(data => ws.send(new TextEncoder().encode(data)));
-      fitAddon.fit();
+      doFit();
     };
 
     ws.onmessage = event => term.write(new Uint8Array(event.data));
 
     ws.onclose = () => term.write('\r\nconnection closed\r\n');
 
-    window.addEventListener('resize', () => fitAddon.fit());
+    window.addEventListener('resize', () => doFit());
+    const resizeObs = new ResizeObserver(() => doFit());
+    resizeObs.observe(document.getElementById('terminal'));
   </script>
 </body>
 </html>"#;
