@@ -223,14 +223,9 @@ const FRONTEND_HTML: &str = r#"<!DOCTYPE html>
   <title>vm terminal</title>
   <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/xterm@5/css/xterm.css" />
   <style>
-    html, body { margin: 0; padding: 0; background: #000; height: 100%; overflow: hidden; }
-    #terminal {
-      position: fixed;
-      top: 0; left: 0; right: 0; bottom: 0;
-      width: 100%; height: 100%;
-    }
-    #terminal .xterm { width: 100% !important; height: 100% !important; }
-    #terminal .xterm-viewport { overflow: hidden !important; }
+    * { box-sizing: border-box; }
+    html, body { margin: 0; padding: 0; background: #000; width: 100%; height: 100%; overflow: hidden; }
+    #terminal { width: 100%; height: 100%; }
   </style>
 </head>
 <body>
@@ -238,63 +233,50 @@ const FRONTEND_HTML: &str = r#"<!DOCTYPE html>
   <script src="https://cdn.jsdelivr.net/npm/xterm@5/lib/xterm.js"></script>
   <script src="https://cdn.jsdelivr.net/npm/xterm-addon-fit@0.8/lib/xterm-addon-fit.js"></script>
   <script>
+    const container = document.getElementById('terminal');
     const term = new Terminal({ cursorBlink: true });
     const fitAddon = new FitAddon.FitAddon();
     term.loadAddon(fitAddon);
-    term.open(document.getElementById('terminal'));
-    // Defer fit until container has layout dimensions (fixes very small initial size)
-    requestAnimationFrame(() => {
-      requestAnimationFrame(() => {
-        fitAddon.fit();
-      });
-    });
-
-    function doFit() {
-      requestAnimationFrame(() => { fitAddon.fit(); });
-    }
+    term.open(container);
+    fitAddon.fit();
 
     const ws = new WebSocket('ws://' + location.host + '/ws');
     ws.binaryType = 'arraybuffer';
 
-    term.onResize(({ rows, cols }) => {
+    function sendResize() {
       if (ws.readyState === WebSocket.OPEN) {
-        ws.send(JSON.stringify({ type: 'resize', rows, cols }));
+        ws.send(JSON.stringify({ type: 'resize', rows: term.rows, cols: term.cols }));
       }
-    });
+    }
+
+    function doFit() {
+      fitAddon.fit();
+    }
+
+    // Whenever xterm changes its grid size, tell the server.
+    term.onResize(() => sendResize());
 
     ws.onopen = () => {
       term.onData(data => ws.send(new TextEncoder().encode(data)));
-      // Always send current dimensions immediately on open — fitAddon.fit() may
-      // have already run (double-rAF above) so onResize won't fire again unless
-      // the size actually changes.  Send directly so the server always gets the
-      // correct initial size regardless of whether fitAddon detects a change.
-      ws.send(JSON.stringify({ type: 'resize', rows: term.rows, cols: term.cols }));
-      doFit();
+      // Send current size immediately — onResize won't fire if fit() didn't change the grid.
+      sendResize();
     };
 
     ws.onmessage = event => term.write(new Uint8Array(event.data));
-
     ws.onclose = () => term.write('\r\nconnection closed\r\n');
 
-    window.addEventListener('resize', () => doFit());
-    const resizeObs = new ResizeObserver(() => doFit());
-    resizeObs.observe(document.getElementById('terminal'));
+    window.addEventListener('resize', doFit);
+    new ResizeObserver(doFit).observe(container);
 
-    // Fullscreen: F11 toggles; must call fit() after change so terminal resizes (xterm#1053)
-    function toggleFullscreen() {
-      const el = document.getElementById('terminal');
-      const doc = document;
-      const req = el.requestFullscreen || el.webkitRequestFullscreen || el.mozRequestFullScreen || el.msRequestFullscreen;
-      const exit = doc.exitFullscreen || doc.webkitExitFullscreen || doc.mozCancelFullScreen || doc.msExitFullscreen;
-      const isFull = doc.fullscreenElement || doc.webkitFullscreenElement || doc.mozFullScreenElement || doc.msFullscreenElement;
-      if (isFull) exit.call(doc);
-      else req.call(el);
-    }
-    document.addEventListener('keydown', (e) => {
-      if (e.key === 'F11') { e.preventDefault(); toggleFullscreen(); }
+    // F11 fullscreen toggle
+    document.addEventListener('keydown', e => {
+      if (e.key === 'F11') {
+        e.preventDefault();
+        if (document.fullscreenElement) document.exitFullscreen();
+        else container.requestFullscreen();
+      }
     });
-    document.addEventListener('fullscreenchange', () => doFit());
-    document.addEventListener('webkitfullscreenchange', () => doFit());
+    document.addEventListener('fullscreenchange', doFit);
   </script>
 </body>
 </html>"#;
