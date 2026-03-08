@@ -43,149 +43,63 @@ sudo setcap cap_net_admin=eip /usr/local/bin/net-helper
 
 ## Building the root filesystem
 
-### 1. Find the latest versions
-
-**Firecracker version** — check https://github.com/firecracker-microvm/firecracker/releases/latest and take the minor version, e.g. `v1.14.2` → `v1.14`.
-
-**Kernel and rootfs keys** — list available files for your chosen version and arch (`x86_64` or `aarch64`):
-
-```
-http://spec.ccfc.min.s3.amazonaws.com/?prefix=firecracker-ci/v1.14/x86_64/vmlinux-&list-type=2
-http://spec.ccfc.min.s3.amazonaws.com/?prefix=firecracker-ci/v1.14/x86_64/ubuntu-24.04&list-type=2
-```
-
-Pick the highest kernel version from the `<Key>` tags, e.g. `firecracker-ci/v1.14/x86_64/vmlinux-6.1.155`.
-
-### 2. Download kernel and rootfs
+Use the latest Firecracker minor version (e.g. `v1.14`) and pick the highest kernel version from the S3 listing at `http://spec.ccfc.min.s3.amazonaws.com/?prefix=firecracker-ci/v1.14/x86_64/vmlinux-&list-type=2`.
 
 ```bash
+# Download
 wget "https://s3.amazonaws.com/spec.ccfc.min/firecracker-ci/v1.14/x86_64/vmlinux-6.1.155"
 wget -O ubuntu-24.04.squashfs.upstream "https://s3.amazonaws.com/spec.ccfc.min/firecracker-ci/v1.14/x86_64/ubuntu-24.04.squashfs"
-```
 
-### 3. Build the ext4 rootfs
-
-```bash
-# Unpack
-sudo unsquashfs ubuntu-24.04.squashfs.upstream
-
-# Generate SSH keypair
-ssh-keygen -f id_rsa -N ""
-
-# Bake in the public key and DNS
-mkdir -p squashfs-root/root/.ssh
-cp id_rsa.pub squashfs-root/root/.ssh/authorized_keys
-echo "nameserver 8.8.8.8" > squashfs-root/etc/resolv.conf
-
-# Build ext4 image
+# Unpack and set ownership
+unsquashfs ubuntu-24.04.squashfs.upstream
 sudo chown -R root:root squashfs-root
-truncate -s 1G ubuntu-24.04.ext4
-sudo mkfs.ext4 -d squashfs-root -F ubuntu-24.04.ext4
+sudo chown -R 1000:1000 squashfs-root/home/ubuntu
 
-# Cleanup
-mv id_rsa ubuntu-24.04.id_rsa
-sudo rm -rf squashfs-root
-```
-
-#### Login as `ubuntu` instead of `root`
-
-Add the SSH key to the `ubuntu` user's home directory instead of (or in addition to) `root`:
-
-```bash
-sudo unsquashfs ubuntu-24.04.squashfs.upstream
-
+# SSH key
 ssh-keygen -f id_rsa -N ""
-
 mkdir -p squashfs-root/home/ubuntu/.ssh
 cp id_rsa.pub squashfs-root/home/ubuntu/.ssh/authorized_keys
-sudo chown -R 1000:1000 squashfs-root/home/ubuntu/.ssh
-chmod 700 squashfs-root/home/ubuntu/.ssh
-chmod 600 squashfs-root/home/ubuntu/.ssh/authorized_keys
-echo "nameserver 1.1.1.1" > squashfs-root/etc/resolv.conf
+sudo chmod 700 squashfs-root/home/ubuntu/.ssh
+sudo chmod 600 squashfs-root/home/ubuntu/.ssh/authorized_keys
+echo "nameserver 1.1.1.1" | sudo tee squashfs-root/etc/resolv.conf > /dev/null
 
-sudo chown -R root:root squashfs-root
-truncate -s 10G ubuntu-24.04.ext4
-sudo mkfs.ext4 -d squashfs-root -F ubuntu-24.04.ext4
-
-mv id_rsa ubuntu-24.04.id_rsa
-sudo rm -rf squashfs-root
-```
-
-Then set `SSH_USER=ubuntu` when running the server (see [Run](#run)).
-
-#### Install Claude Code into the rootfs
-
-To have Claude Code available in every VM terminal, install it into the squashfs tree before building the ext4 image. Do this after unpacking the squashfs but before running `mkfs.ext4`:
-
-```bash
-# Fix permissions required by apt inside the chroot
+# Install Node.js and Claude Code
 sudo chmod 1777 squashfs-root/tmp
 sudo mkdir -p squashfs-root/var/cache/apt/archives/partial
 sudo mkdir -p squashfs-root/var/log/apt
-
-# Mount kernel filesystems so apt and npm work inside the chroot
-sudo mount --bind /proc  squashfs-root/proc
-sudo mount --bind /sys   squashfs-root/sys
-sudo mount --bind /dev   squashfs-root/dev
-
-# Install Node.js and Claude Code
+sudo mount --bind /proc squashfs-root/proc
+sudo mount --bind /sys  squashfs-root/sys
+sudo mount --bind /dev  squashfs-root/dev
 sudo chroot squashfs-root bash -c "
   apt-get update -qq &&
   apt-get install -y -qq nodejs npm &&
   npm install -g @anthropic-ai/claude-code
 "
-
-# Unmount kernel filesystems
 sudo umount squashfs-root/dev
 sudo umount squashfs-root/sys
 sudo umount squashfs-root/proc
-```
 
-Then continue with `sudo chown -R root:root squashfs-root` and `mkfs.ext4` as normal.
+# Claude Code settings
+mkdir -p squashfs-root/home/ubuntu/.claude
+cat > squashfs-root/home/ubuntu/.claude/settings.json << 'EOF'
+{
+  "$schema": "https://json.schemastore.org/claude-code-settings.json",
+  "env": {
+    "ANTHROPIC_DEFAULT_HAIKU_MODEL": "us.anthropic.claude-haiku-4-5-20251001-v1:0",
+    "ANTHROPIC_DEFAULT_OPUS_MODEL": "us.anthropic.claude-opus-4-6-v1",
+    "ANTHROPIC_DEFAULT_SONNET_MODEL": "us.anthropic.claude-sonnet-4-6",
+    "CLAUDE_CODE_USE_BEDROCK": "1"
+  }
+}
+EOF
 
-If you already have a built rootfs and want to add Claude Code in-place:
+# Build ext4 image
+truncate -s 10G ubuntu-24.04.ext4
+sudo mkfs.ext4 -d squashfs-root -F ubuntu-24.04.ext4
+sudo rm -rf squashfs-root
+mv id_rsa ubuntu-24.04.id_rsa
 
-```bash
-sudo mkdir -p /mnt/rootfs
-sudo mount ubuntu-24.04.ext4 /mnt/rootfs
-
-sudo chmod 1777 /mnt/rootfs/tmp
-sudo mkdir -p /mnt/rootfs/var/cache/apt/archives/partial
-sudo mkdir -p /mnt/rootfs/var/log/apt
-sudo mount --bind /proc /mnt/rootfs/proc
-sudo mount --bind /sys  /mnt/rootfs/sys
-sudo mount --bind /dev  /mnt/rootfs/dev
-
-sudo chroot /mnt/rootfs bash -c "
-  apt-get update -qq &&
-  apt-get install -y -qq nodejs npm &&
-  npm install -g @anthropic-ai/claude-code
-"
-
-sudo umount /mnt/rootfs/dev
-sudo umount /mnt/rootfs/sys
-sudo umount /mnt/rootfs/proc
-sudo umount /mnt/rootfs
-```
-
-If you already have a built rootfs you don't want to rebuild, inject the key in-place:
-
-```bash
-sudo mkdir -p /mnt/rootfs
-sudo mount /var/lib/fc/ubuntu-24.04.ext4 /mnt/rootfs
-
-sudo mkdir -p /mnt/rootfs/home/ubuntu/.ssh
-sudo cp /var/lib/fc/ubuntu-24.04.id_rsa.pub /mnt/rootfs/home/ubuntu/.ssh/authorized_keys
-sudo chown -R 1000:1000 /mnt/rootfs/home/ubuntu/.ssh
-sudo chmod 700 /mnt/rootfs/home/ubuntu/.ssh
-sudo chmod 600 /mnt/rootfs/home/ubuntu/.ssh/authorized_keys
-
-sudo umount /mnt/rootfs
-```
-
-### 4. Install to /var/lib/fc
-
-```bash
+# Install to /var/lib/fc
 sudo mkdir -p /var/lib/fc
 sudo mv vmlinux-6.1.155 /var/lib/fc/vmlinux
 sudo mv ubuntu-24.04.ext4 /var/lib/fc/ubuntu-24.04.ext4
@@ -194,32 +108,26 @@ sudo mv ubuntu-24.04.id_rsa /var/lib/fc/ubuntu-24.04.id_rsa
 
 ## Run
 
-Create a `config.toml` in the working directory (all fields are optional — defaults are shown):
-
-```toml
-kernel_path  = "/var/lib/fc/vmlinux"
-rootfs_path  = "/var/lib/fc/ubuntu-24.04.ext4"
-ssh_key_path = "/var/lib/fc/ubuntu-24.04.id_rsa"
-ssh_user     = "ubuntu"   # default is "root"
-socket_dir   = "/tmp"
-port         = "3000"
-
-# AWS Cognito — required for the user login system
-cognito_client_id     = "your_client_id"
-cognito_client_secret = "your_client_secret"
-cognito_region        = "us-east-1"
-cognito_user_pool_id  = "us-east-1_xxxxxxxx"
-cognito_domain        = "your-domain.auth.us-east-1.amazoncognito.com"
-cognito_redirect_uri  = "http://localhost:3000/callback"
-```
-
-Then run:
+Configure via environment variables:
 
 ```bash
+KERNEL_PATH=~/vmlinux-6.1.155 \
+ROOTFS_PATH=~/ubuntu-24.04.ext4 \
+SSH_KEY_PATH=~/ubuntu-24.04.id_rsa \
+SSH_USER=ubuntu \
 ./target/release/server
 ```
 
-Environment variables (uppercased key names) override the config file.
+For Cognito login, also set:
+
+```bash
+COGNITO_CLIENT_ID=your_client_id \
+COGNITO_CLIENT_SECRET=your_client_secret \
+COGNITO_REGION=us-east-1 \
+COGNITO_USER_POOL_ID=us-east-1_xxxxxxxx \
+COGNITO_DOMAIN=your-domain.auth.us-east-1.amazoncognito.com \
+COGNITO_REDIRECT_URI=http://localhost:3000/callback \
+```
 
 ## User system
 
@@ -240,24 +148,22 @@ Open http://localhost:3000 — each page load boots a fresh VM and opens an SSH 
 
 ## Environment variables
 
-Config is loaded from `config.toml` first, then overridden by environment variables (uppercased key names).
-
-| Key / Env var | Default | Description |
+| Variable | Default | Description |
 |---|---|---|
-| `kernel_path` / `KERNEL_PATH` | `/var/lib/fc/vmlinux` | Firecracker kernel image |
-| `rootfs_path` / `ROOTFS_PATH` | `/var/lib/fc/rootfs.ext4` | Root filesystem image |
-| `ssh_key_path` / `SSH_KEY_PATH` | `/var/lib/fc/id_rsa` | SSH private key matching the public key baked into the rootfs |
-| `ssh_user` / `SSH_USER` | `root` | SSH login user inside the VM |
-| `socket_dir` / `SOCKET_DIR` | `/tmp` | Directory for Firecracker API sockets |
-| `port` / `PORT` | `3000` | HTTP listen port |
-| `net_helper_path` / `NET_HELPER_PATH` | `/usr/local/bin/net-helper` | Path to the net-helper binary |
-| `aws_role_name` / `AWS_ROLE_NAME` | `vm-role` | IAM role name forwarded to the VM via MMDS |
-| `cognito_client_id` / `COGNITO_CLIENT_ID` | — | Cognito app client ID |
-| `cognito_client_secret` / `COGNITO_CLIENT_SECRET` | — | Cognito app client secret |
-| `cognito_region` / `COGNITO_REGION` | — | AWS region of the user pool |
-| `cognito_user_pool_id` / `COGNITO_USER_POOL_ID` | — | Cognito user pool ID |
-| `cognito_domain` / `COGNITO_DOMAIN` | — | Cognito hosted UI domain |
-| `cognito_redirect_uri` / `COGNITO_REDIRECT_URI` | `http://localhost:3000/callback` | OAuth2 redirect URI |
+| `KERNEL_PATH` | `/var/lib/fc/vmlinux` | Firecracker kernel image |
+| `ROOTFS_PATH` | `/var/lib/fc/rootfs.ext4` | Root filesystem image |
+| `SSH_KEY_PATH` | `/var/lib/fc/id_rsa` | SSH private key matching the public key baked into the rootfs |
+| `SSH_USER` | `root` | SSH login user inside the VM |
+| `SOCKET_DIR` | `/tmp` | Directory for Firecracker API sockets |
+| `PORT` | `3000` | HTTP listen port |
+| `NET_HELPER_PATH` | `/usr/local/bin/net-helper` | Path to the net-helper binary |
+| `AWS_ROLE_NAME` | `vm-role` | IAM role name forwarded to the VM via MMDS |
+| `COGNITO_CLIENT_ID` | — | Cognito app client ID |
+| `COGNITO_CLIENT_SECRET` | — | Cognito app client secret |
+| `COGNITO_REGION` | — | AWS region of the user pool |
+| `COGNITO_USER_POOL_ID` | — | Cognito user pool ID |
+| `COGNITO_DOMAIN` | — | Cognito hosted UI domain |
+| `COGNITO_REDIRECT_URI` | `http://localhost:3000/callback` | OAuth2 redirect URI |
 
 ## Networking
 

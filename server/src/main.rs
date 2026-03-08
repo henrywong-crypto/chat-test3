@@ -1,15 +1,14 @@
 mod auth;
-mod frontend;
 mod handlers;
 mod ssh;
 mod state;
+mod templates;
 mod terminal;
-mod upload;
 mod vm;
 
 use anyhow::{Context, Result};
 use axum::{
-    routing::{delete, get, post},
+    routing::{get, post},
     Router,
 };
 use clap::Parser;
@@ -20,10 +19,9 @@ use tower_sessions::{Expiry, MemoryStore, SessionManagerLayer};
 
 use crate::{
     auth::{get_callback_handler, get_cognito_login_handler, get_demo_handler, get_login_handler, get_logout_handler},
-    handlers::{create_vm_handler, delete_vm_handler, get_index, list_vms},
+    handlers::{create_vm_handler, delete_vm_handler, get_redirect_to_vms, get_terminal_page, get_vms_page},
     state::{build_app_state, AppState, Args},
     terminal::handle_ws_upgrade,
-    upload::upload_file_handler,
 };
 
 #[tokio::main]
@@ -39,10 +37,10 @@ async fn main() -> Result<()> {
 fn build_router(app_state: AppState) -> Router {
     let session_layer = build_session_layer();
     Router::new()
-        .route("/", get(get_index))
-        .route("/vms", get(list_vms).post(create_vm_handler))
-        .route("/vms/{id}", delete(delete_vm_handler))
-        .route("/vms/{id}/upload", post(upload_file_handler))
+        .route("/", get(get_redirect_to_vms))
+        .route("/vms", get(get_vms_page).post(create_vm_handler))
+        .route("/vms/{id}/delete", post(delete_vm_handler))
+        .route("/terminal/{id}", get(get_terminal_page))
         .route("/ws/{id}", get(handle_ws_upgrade))
         .route("/login", get(get_login_handler))
         .route("/login/cognito", get(get_cognito_login_handler))

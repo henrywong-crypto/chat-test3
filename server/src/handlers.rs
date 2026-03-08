@@ -1,25 +1,27 @@
 use std::time::{SystemTime, UNIX_EPOCH};
+
 use anyhow::anyhow;
 use axum::{
     extract::{Path, State},
-    http::StatusCode,
-    response::{Html, IntoResponse},
-    Json,
+    response::{Html, IntoResponse, Redirect},
 };
 use firecracker_manager::create_vm;
 
 use crate::{
     auth::User,
-    frontend::FRONTEND_HTML,
     state::{AppError, AppState, VmEntry, VmInfo},
+    templates::{render_terminal_page, render_vms_page},
     vm::{build_vm_config, fetch_host_iam_credentials},
 };
 
-pub(crate) async fn get_index(_user: User) -> Html<&'static str> {
-    Html(FRONTEND_HTML)
+pub(crate) async fn get_redirect_to_vms(_user: User) -> Redirect {
+    Redirect::to("/vms")
 }
 
-pub(crate) async fn list_vms(_user: User, State(state): State<AppState>) -> Result<Json<Vec<VmInfo>>, AppError> {
+pub(crate) async fn get_vms_page(
+    _user: User,
+    State(state): State<AppState>,
+) -> Result<Html<String>, AppError> {
     let registry = state.vms.lock().map_err(|_| anyhow!("vm registry lock poisoned"))?;
     let mut vms: Vec<VmInfo> = registry
         .iter()
@@ -31,7 +33,7 @@ pub(crate) async fn list_vms(_user: User, State(state): State<AppState>) -> Resu
         })
         .collect();
     vms.sort_by_key(|v| v.created_at);
-    Ok(Json(vms))
+    Ok(Html(render_vms_page(&vms).into_string()))
 }
 
 pub(crate) async fn create_vm_handler(
@@ -45,18 +47,13 @@ pub(crate) async fn create_vm_handler(
         .duration_since(UNIX_EPOCH)
         .unwrap_or_default()
         .as_secs();
-    let info = VmInfo {
-        id: vm.id.clone(),
-        guest_ip: vm.guest_ip.clone(),
-        pid: vm.pid,
-        created_at,
-    };
+    let vm_id = vm.id.clone();
     state
         .vms
         .lock()
         .map_err(|_| anyhow!("vm registry lock poisoned"))?
         .insert(
-            vm.id.clone(),
+            vm_id.clone(),
             VmEntry {
                 guest_ip: vm.guest_ip.clone(),
                 pid: vm.pid,
@@ -64,23 +61,25 @@ pub(crate) async fn create_vm_handler(
                 _guard: vm.into_guard(),
             },
         );
-    Ok((StatusCode::CREATED, Json(info)))
+    Ok(Redirect::to(&format!("/terminal/{vm_id}")))
 }
 
 pub(crate) async fn delete_vm_handler(
     _user: User,
     Path(vm_id): Path<String>,
     State(state): State<AppState>,
-) -> Result<StatusCode, AppError> {
-    let removed = state
+) -> Result<impl IntoResponse, AppError> {
+    state
         .vms
         .lock()
         .map_err(|_| anyhow!("vm registry lock poisoned"))?
-        .remove(&vm_id)
-        .is_some();
-    if removed {
-        Ok(StatusCode::NO_CONTENT)
-    } else {
-        Ok(StatusCode::NOT_FOUND)
-    }
+        .remove(&vm_id);
+    Ok(Redirect::to("/vms"))
+}
+
+pub(crate) async fn get_terminal_page(
+    _user: User,
+    Path(vm_id): Path<String>,
+) -> Html<String> {
+    Html(render_terminal_page(&vm_id).into_string())
 }

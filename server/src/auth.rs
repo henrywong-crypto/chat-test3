@@ -7,8 +7,8 @@ use handlers::{callback, login, AppState as CognitoState, CallbackQuery};
 use tower_sessions::Session;
 
 use crate::{
-    frontend::LOGIN_HTML,
     state::AppState,
+    templates::render_login_page,
 };
 
 pub(crate) struct User {
@@ -40,8 +40,8 @@ fn build_cognito_state(state: &AppState) -> CognitoState {
     }
 }
 
-pub(crate) async fn get_login_handler() -> Html<&'static str> {
-    Html(LOGIN_HTML)
+pub(crate) async fn get_login_handler() -> Html<String> {
+    Html(render_login_page().into_string())
 }
 
 pub(crate) async fn get_cognito_login_handler(
@@ -59,7 +59,7 @@ pub(crate) async fn get_cognito_login_handler(
 
 pub(crate) async fn get_demo_handler(session: Session) -> impl IntoResponse {
     let _ = session.insert("email", "demo").await;
-    Redirect::to("/")
+    Redirect::to("/vms")
 }
 
 pub(crate) async fn get_callback_handler(
