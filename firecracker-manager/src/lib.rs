@@ -8,7 +8,7 @@ use std::sync::atomic::{AtomicU32, Ordering};
 use std::time::Duration;
 
 use firecracker_client::{
-    get_network_interfaces, put_mmds, set_boot_source, set_drive, set_machine_config,
+    put_mmds, set_boot_source, set_drive, set_machine_config,
     set_mmds_config, set_network_interface, start_instance, BootSource, Drive, MachineConfig,
     MmdsConfig, NetworkInterface,
 };
@@ -89,68 +89,6 @@ impl Vm {
             tap_name: self.tap_name,
         }
     }
-}
-
-/// Scan `socket_dir` for `fc-*.socket` files, query each via the Firecracker API,
-/// and return live VMs. Stale sockets (no response) are removed.
-pub async fn reconcile_vms(socket_dir: &Path) -> Vec<(String, VmGuard)> {
-    let mut recovered = Vec::new();
-    let entries = match std::fs::read_dir(socket_dir) {
-        Ok(e) => e,
-        Err(e) => {
-            eprintln!("reconcile: failed to read {:?}: {e}", socket_dir);
-            return recovered;
-        }
-    };
-    for entry in entries.flatten() {
-        let socket_path = entry.path();
-        let fname = match socket_path.file_name().and_then(|n| n.to_str()) {
-            Some(f) => f.to_string(),
-            None => continue,
-        };
-        if !fname.starts_with("fc-") || !fname.ends_with(".socket") {
-            continue;
-        }
-        let vm_id = fname
-            .trim_start_matches("fc-")
-            .trim_end_matches(".socket")
-            .to_string();
-
-        let ifaces = match get_network_interfaces(&socket_path).await {
-            Ok(i) => i,
-            Err(_) => {
-                eprintln!("reconcile: {fname} not responding, removing stale socket");
-                let _ = std::fs::remove_file(&socket_path);
-                continue;
-            }
-        };
-        let tap_name = match ifaces.into_iter().find(|i| i.iface_id == "net1") {
-            Some(i) => i.host_dev_name,
-            None => {
-                eprintln!("reconcile: no net1 interface for {vm_id}, skipping");
-                continue;
-            }
-        };
-        let net_idx: u32 = match tap_name.trim_start_matches("tap").parse() {
-            Ok(n) => n,
-            Err(_) => {
-                eprintln!("reconcile: cannot parse tap index from {tap_name}, skipping");
-                continue;
-            }
-        };
-        let guest_ip = vm_guest_ip(net_idx);
-        let pid = find_pid_for_socket(&socket_path).unwrap_or(0);
-        eprintln!("reconcile: recovered vm {vm_id} guest_ip={guest_ip}");
-
-        recovered.push((vm_id.clone(), VmGuard {
-            id: vm_id,
-            guest_ip,
-            socket_path,
-            pid,
-            tap_name,
-        }));
-    }
-    recovered
 }
 
 pub async fn create_vm(vm_config: &VmConfig) -> Result<Vm> {
@@ -242,24 +180,6 @@ async fn configure_vm(
         put_mmds(socket_path, metadata).await?;
     }
     Ok(())
-}
-
-fn find_pid_for_socket(socket_path: &Path) -> Option<u32> {
-    let socket_bytes = socket_path.to_string_lossy().into_owned().into_bytes();
-    for entry in std::fs::read_dir("/proc").ok()?.flatten() {
-        let pid: u32 = match entry.file_name().to_string_lossy().parse() {
-            Ok(p) => p,
-            Err(_) => continue,
-        };
-        let cmdline = match std::fs::read(format!("/proc/{pid}/cmdline")) {
-            Ok(c) => c,
-            Err(_) => continue,
-        };
-        if cmdline.windows(socket_bytes.len()).any(|w| w == socket_bytes) {
-            return Some(pid);
-        }
-    }
-    None
 }
 
 fn delete_tap(tap_name: &str) {

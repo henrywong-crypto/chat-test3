@@ -13,7 +13,7 @@ use axum::routing::get;
 use axum::{Json, Router};
 use bytes::Bytes;
 use firecracker_manager::{
-    build_mmds_with_iam, create_vm, reconcile_vms, setup_host_networking, system_time_to_iso8601,
+    build_mmds_with_iam, create_vm, setup_host_networking, system_time_to_iso8601,
     ImdsCredential, VmConfig, VmGuard,
 };
 use futures::{SinkExt, StreamExt};
@@ -74,28 +74,31 @@ async fn main() -> Result<()> {
     setup_host_networking().await;
     let state = load_app_state();
 
-    for (id, guard) in reconcile_vms(&state.socket_dir).await {
-        let created_at = SystemTime::now().duration_since(UNIX_EPOCH).unwrap_or_default().as_secs();
-        state.vms.lock().unwrap().insert(id, VmEntry {
-            guest_ip: guard.guest_ip.clone(),
-            created_at,
-            _guard: guard,
-        });
-    }
-
     let app = Router::new()
         .route("/", get(handle_index))
         .route("/vms", get(list_vms).post(create_vm_endpoint))
         .route("/vms/{id}", get(get_vm).delete(delete_vm_endpoint))
         .route("/ws/{id}", get(handle_websocket))
-        .with_state(state);
+        .with_state(state.clone());
 
     let port = std::env::var("PORT").unwrap_or_else(|_| "3000".to_string());
     let listener = TcpListener::bind(format!("0.0.0.0:{port}"))
         .await
         .with_context(|| format!("failed to bind to 0.0.0.0:{port}"))?;
     println!("listening on http://0.0.0.0:{port}");
-    axum::serve(listener, app).await.context("server error")?;
+
+    let vms = state.vms.clone();
+    axum::serve(listener, app)
+        .with_graceful_shutdown(async move {
+            tokio::signal::ctrl_c().await.ok();
+            println!("shutting down, deleting VMs...");
+            let entries: Vec<VmEntry> = vms.lock().unwrap().drain().map(|(_, v)| v).collect();
+            for entry in entries {
+                entry._guard.delete();
+            }
+        })
+        .await
+        .context("server error")?;
     Ok(())
 }
 
