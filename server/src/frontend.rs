@@ -8,25 +8,23 @@ pub(crate) const LOGIN_HTML: &str = r#"<!DOCTYPE html>
     body { margin: 0; background: #0d1117; color: #c9d1d9; font-family: ui-monospace, monospace;
            display: flex; align-items: center; justify-content: center; min-height: 100vh; }
     .card { background: #161b22; border: 1px solid #30363d; border-radius: 8px;
-            padding: 32px; width: 320px; }
-    h1 { margin: 0 0 24px; color: #58a6ff; font-size: 18px; }
-    label { display: block; font-size: 12px; color: #8b949e; margin-bottom: 4px; }
-    input[type=password] { width: 100%; background: #0d1117; color: #c9d1d9;
-                           border: 1px solid #30363d; border-radius: 4px;
-                           padding: 8px; font-family: inherit; font-size: 13px; margin-bottom: 16px; }
-    button { width: 100%; background: #238636; color: #c9d1d9; border: 1px solid #2ea043;
-             padding: 8px; border-radius: 6px; font-size: 13px; cursor: pointer; }
-    button:hover { background: #2ea043; }
+            padding: 32px; width: 320px; display: flex; flex-direction: column; gap: 12px; }
+    h1 { margin: 0 0 8px; color: #58a6ff; font-size: 18px; }
+    a { display: block; text-align: center; text-decoration: none; padding: 9px;
+        border-radius: 6px; font-size: 13px; cursor: pointer; }
+    .btn-primary { background: #238636; color: #c9d1d9; border: 1px solid #2ea043; }
+    .btn-primary:hover { background: #2ea043; }
+    .btn-secondary { background: #21262d; color: #c9d1d9; border: 1px solid #30363d; }
+    .btn-secondary:hover { background: #30363d; }
+    .divider { text-align: center; font-size: 11px; color: #8b949e; }
   </style>
 </head>
 <body>
   <div class="card">
     <h1>vm-terminal</h1>
-    <form method="POST" action="/login">
-      <label>Password</label>
-      <input type="password" name="password" autofocus />
-      <button type="submit">Login</button>
-    </form>
+    <a href="/login/cognito" class="btn-primary">Login with Cognito</a>
+    <div class="divider">or</div>
+    <a href="/demo" class="btn-secondary">Try Demo</a>
   </div>
 </body>
 </html>"#;

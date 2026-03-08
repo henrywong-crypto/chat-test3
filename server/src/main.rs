@@ -19,7 +19,7 @@ use tokio::net::TcpListener;
 use tower_sessions::{Expiry, MemoryStore, SessionManagerLayer};
 
 use crate::{
-    auth::{get_login_handler, get_logout_handler, post_login_handler},
+    auth::{get_callback_handler, get_cognito_login_handler, get_demo_handler, get_login_handler, get_logout_handler},
     handlers::{create_vm_handler, delete_vm_handler, get_index, list_vms},
     state::{build_app_state, AppState, Args},
     terminal::handle_ws_upgrade,
@@ -44,8 +44,11 @@ fn build_router(app_state: AppState) -> Router {
         .route("/vms/{id}", delete(delete_vm_handler))
         .route("/vms/{id}/upload", post(upload_file_handler))
         .route("/ws/{id}", get(handle_ws_upgrade))
-        .route("/login", get(get_login_handler).post(post_login_handler))
+        .route("/login", get(get_login_handler))
+        .route("/login/cognito", get(get_cognito_login_handler))
         .route("/logout", get(get_logout_handler))
+        .route("/demo", get(get_demo_handler))
+        .route("/callback", get(get_callback_handler))
         .with_state(app_state)
         .layer(session_layer)
 }

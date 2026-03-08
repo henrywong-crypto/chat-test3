@@ -17,6 +17,7 @@ bytes = "1.0.0"
 clap = { version = "4.0.0", features = ["derive", "env"] }
 firecracker-manager = { path = "../firecracker-manager" }
 futures = "0.3.0"
+handlers = { git = "https://github.com/llm-proxy-rs/cognito.git", version = "0.1.0" }
 russh = "0.46.0"
 russh-keys = "0.46.0"
 russh-sftp = "2.1.1"

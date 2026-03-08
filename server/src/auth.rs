@@ -1,9 +1,9 @@
 use axum::{
-    extract::{Form, FromRequestParts, State},
-    http::request::Parts,
+    extract::{FromRequestParts, Query, State},
+    http::{request::Parts, StatusCode},
     response::{Html, IntoResponse, Redirect, Response},
 };
-use serde::Deserialize;
+use handlers::{callback, login, AppState as CognitoState, CallbackQuery};
 use tower_sessions::Session;
 
 use crate::{
@@ -11,7 +11,9 @@ use crate::{
     state::AppState,
 };
 
-pub(crate) struct User;
+pub(crate) struct User {
+    pub(crate) email: String,
+}
 
 impl<S: Send + Sync> FromRequestParts<S> for User {
     type Rejection = Response;
@@ -19,33 +21,58 @@ impl<S: Send + Sync> FromRequestParts<S> for User {
     async fn from_request_parts(parts: &mut Parts, state: &S) -> Result<Self, Self::Rejection> {
         let session = Session::from_request_parts(parts, state)
             .await
-            .map_err(|e| e.into_response())?;
-        match session.get::<bool>("logged_in").await {
-            Ok(Some(true)) => Ok(User),
+            .map_err(|session_error| session_error.into_response())?;
+        match session.get::<String>("email").await {
+            Ok(Some(email)) => Ok(User { email }),
             _ => Err(Redirect::to("/login").into_response()),
         }
     }
 }
 
-#[derive(Deserialize)]
-pub(crate) struct LoginForm {
-    password: String,
+fn build_cognito_state(state: &AppState) -> CognitoState {
+    CognitoState {
+        client_id: state.cognito_client_id.clone(),
+        client_secret: state.cognito_client_secret.clone(),
+        domain: state.cognito_domain.clone(),
+        redirect_uri: state.cognito_redirect_uri.clone(),
+        region: state.cognito_region.clone(),
+        user_pool_id: state.cognito_user_pool_id.clone(),
+    }
 }
 
 pub(crate) async fn get_login_handler() -> Html<&'static str> {
     Html(LOGIN_HTML)
 }
 
-pub(crate) async fn post_login_handler(
+pub(crate) async fn get_cognito_login_handler(
     session: Session,
     State(state): State<AppState>,
-    Form(login_form): Form<LoginForm>,
 ) -> Response {
-    if login_form.password == state.demo_password {
-        let _ = session.insert("logged_in", true).await;
-        Redirect::to("/").into_response()
-    } else {
-        Redirect::to("/login").into_response()
+    let cognito_state = build_cognito_state(&state);
+    match login(session, State(cognito_state)).await {
+        Ok(response) => response,
+        Err(login_error) => {
+            (StatusCode::INTERNAL_SERVER_ERROR, login_error.to_string()).into_response()
+        }
+    }
+}
+
+pub(crate) async fn get_demo_handler(session: Session) -> impl IntoResponse {
+    let _ = session.insert("email", "demo").await;
+    Redirect::to("/")
+}
+
+pub(crate) async fn get_callback_handler(
+    query: Query<CallbackQuery>,
+    session: Session,
+    State(state): State<AppState>,
+) -> Response {
+    let cognito_state = build_cognito_state(&state);
+    match callback(query, session, State(cognito_state)).await {
+        Ok(response) => response,
+        Err(callback_error) => {
+            (StatusCode::INTERNAL_SERVER_ERROR, callback_error.to_string()).into_response()
+        }
     }
 }
 

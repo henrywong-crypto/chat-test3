@@ -26,8 +26,18 @@ pub(crate) struct Args {
     pub(crate) ssh_user: String,
     #[arg(long, env = "VM_HOST_KEY_PATH", default_value = "/var/lib/fc/vm_host_key.pub")]
     pub(crate) vm_host_key_path: PathBuf,
-    #[arg(long, env = "DEMO_PASSWORD", default_value = "demo")]
-    pub(crate) demo_password: String,
+    #[arg(long, env = "COGNITO_CLIENT_ID", default_value = "")]
+    pub(crate) cognito_client_id: String,
+    #[arg(long, env = "COGNITO_CLIENT_SECRET", default_value = "")]
+    pub(crate) cognito_client_secret: String,
+    #[arg(long, env = "COGNITO_DOMAIN", default_value = "")]
+    pub(crate) cognito_domain: String,
+    #[arg(long, env = "COGNITO_REDIRECT_URI", default_value = "http://localhost:3000/callback")]
+    pub(crate) cognito_redirect_uri: String,
+    #[arg(long, env = "COGNITO_REGION", default_value = "")]
+    pub(crate) cognito_region: String,
+    #[arg(long, env = "COGNITO_USER_POOL_ID", default_value = "")]
+    pub(crate) cognito_user_pool_id: String,
     #[arg(long, env = "UPLOAD_DIR", default_value = "/home/user/uploads")]
     pub(crate) upload_dir: String,
     #[arg(long, env = "PORT", default_value = "3000")]
@@ -42,7 +52,12 @@ pub(crate) struct AppState {
     pub(crate) ssh_key_path: PathBuf,
     pub(crate) ssh_user: String,
     pub(crate) vm_host_key_path: PathBuf,
-    pub(crate) demo_password: String,
+    pub(crate) cognito_client_id: String,
+    pub(crate) cognito_client_secret: String,
+    pub(crate) cognito_domain: String,
+    pub(crate) cognito_redirect_uri: String,
+    pub(crate) cognito_region: String,
+    pub(crate) cognito_user_pool_id: String,
     pub(crate) upload_dir: String,
     pub(crate) vms: VmRegistry,
 }
@@ -86,7 +101,12 @@ pub(crate) fn build_app_state(args: Args) -> Result<AppState> {
         ssh_key_path: args.ssh_key_path,
         ssh_user: args.ssh_user,
         vm_host_key_path: args.vm_host_key_path,
-        demo_password: args.demo_password,
+        cognito_client_id: args.cognito_client_id,
+        cognito_client_secret: args.cognito_client_secret,
+        cognito_domain: args.cognito_domain,
+        cognito_redirect_uri: args.cognito_redirect_uri,
+        cognito_region: args.cognito_region,
+        cognito_user_pool_id: args.cognito_user_pool_id,
         upload_dir: args.upload_dir,
         vms: Arc::new(Mutex::new(HashMap::new())),
     })
