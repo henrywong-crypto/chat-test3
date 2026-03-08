@@ -77,8 +77,8 @@ async fn main() {
     let app = Router::new()
         .route("/", get(handle_index))
         .route("/vms", get(list_vms).post(create_vm_endpoint))
-        .route("/vms/:id", delete(delete_vm_endpoint))
-        .route("/ws/:id", get(handle_websocket))
+        .route("/vms/{id}", delete(delete_vm_endpoint))
+        .route("/ws/{id}", get(handle_websocket))
         .with_state(state);
 
     let listener = TcpListener::bind("0.0.0.0:3000").await.unwrap();
