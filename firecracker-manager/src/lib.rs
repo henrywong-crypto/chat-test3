@@ -67,16 +67,16 @@ pub struct VmGuard {
 }
 
 impl VmGuard {
-    /// Kill the Firecracker process and remove the TAP interface.
-    /// Drop is a no-op so VMs survive server restarts.
     pub fn delete(self) {
-        let _ = kill(Pid::from_raw(self.pid as i32), Signal::SIGTERM);
-        delete_tap(&self.tap_name);
+        // drop runs the cleanup
     }
 }
 
 impl Drop for VmGuard {
-    fn drop(&mut self) {}
+    fn drop(&mut self) {
+        let _ = kill(Pid::from_raw(self.pid as i32), Signal::SIGTERM);
+        delete_tap(&self.tap_name);
+    }
 }
 
 impl Vm {
@@ -116,7 +116,7 @@ pub async fn create_vm(vm_config: &VmConfig) -> Result<Vm> {
 
 fn spawn_firecracker(socket_path: &Path) -> Result<Child> {
     Ok(Command::new("firecracker")
-        .args(["--api-sock", &socket_path.to_string_lossy(), "--log-path", "/dev/null"])
+        .args(["--api-sock", &socket_path.to_string_lossy()])
         .stdin(Stdio::null())
         .stdout(Stdio::null())
         .stderr(Stdio::null())
