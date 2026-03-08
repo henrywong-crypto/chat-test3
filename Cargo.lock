@@ -2592,6 +2592,7 @@ dependencies = [
  "futures",
  "russh",
  "russh-keys",
+ "serde",
  "serde_json",
  "tokio",
  "uuid",
