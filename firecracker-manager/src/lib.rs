@@ -67,13 +67,22 @@ pub struct VmGuard {
     tap_name: String,
 }
 
-impl Drop for VmGuard {
-    fn drop(&mut self) {
+impl VmGuard {
+    /// Kill this VM and remove its TAP interface. Call this on explicit deletion.
+    /// Drop is intentionally a no-op so VMs survive server restarts.
+    pub fn delete(self) {
         let _ = kill(Pid::from_raw(self.pid as i32), Signal::SIGTERM);
         let helper = net_helper_path();
         let _ = std::process::Command::new(&helper)
             .args(["tap-delete", &self.tap_name])
             .status();
+    }
+}
+
+impl Drop for VmGuard {
+    fn drop(&mut self) {
+        // Intentionally empty: VMs outlive the server process.
+        // Use VmGuard::delete() to explicitly kill a VM and clean up its TAP.
     }
 }
 

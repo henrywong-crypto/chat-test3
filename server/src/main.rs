@@ -162,10 +162,12 @@ async fn delete_vm_endpoint(
     Path(vm_id): Path<String>,
     State(state): State<AppState>,
 ) -> StatusCode {
-    if state.vms.lock().unwrap().remove(&vm_id).is_some() {
-        StatusCode::NO_CONTENT
-    } else {
-        StatusCode::NOT_FOUND
+    match state.vms.lock().unwrap().remove(&vm_id) {
+        Some(entry) => {
+            entry._guard.delete();
+            StatusCode::NO_CONTENT
+        }
+        None => StatusCode::NOT_FOUND,
     }
 }
 
