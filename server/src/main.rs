@@ -52,6 +52,7 @@ fn build_router(app_state: AppState) -> Router {
 
 fn build_session_layer() -> SessionManagerLayer<MemoryStore> {
     SessionManagerLayer::new(MemoryStore::default())
+        .with_secure(false)
         .with_expiry(Expiry::OnInactivity(Duration::seconds(86400)))
 }
 
