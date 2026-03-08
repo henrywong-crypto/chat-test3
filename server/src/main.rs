@@ -27,7 +27,15 @@ use tokio::net::TcpListener;
 struct VmEntry {
     guest_ip: String,
     created_at: u64,
+    rootfs_copy: PathBuf,
     _guard: VmGuard,
+}
+
+impl VmEntry {
+    fn cleanup(self) {
+        self._guard.delete();
+        let _ = std::fs::remove_file(&self.rootfs_copy);
+    }
 }
 
 #[derive(Serialize)]
@@ -95,7 +103,7 @@ async fn main() -> Result<()> {
             println!("shutting down, deleting VMs...");
             let entries: Vec<VmEntry> = vms.lock().unwrap().drain().map(|(_, v)| v).collect();
             for entry in entries {
-                entry._guard.delete();
+                entry.cleanup();
             }
         })
         .await
@@ -138,17 +146,26 @@ async fn get_vm(
     }
 }
 
-async fn create_vm_endpoint(
-    State(state): State<AppState>,
-) -> impl IntoResponse {
-    let iam_creds = fetch_host_iam_credentials().await;
+async fn create_vm_endpoint(State(state): State<AppState>) -> impl IntoResponse {
     let vm_id = uuid::Uuid::new_v4().to_string();
-    let vm_config = build_vm_config(&state, &vm_id, iam_creds);
+
+    // Copy the base rootfs so each VM gets its own private image
+    let rootfs_copy = match copy_rootfs(&state.rootfs_path, &vm_id).await {
+        Ok(p) => p,
+        Err(e) => {
+            eprintln!("failed to copy rootfs: {e}");
+            return StatusCode::INTERNAL_SERVER_ERROR.into_response();
+        }
+    };
+
+    let iam_creds = fetch_host_iam_credentials().await;
+    let vm_config = build_vm_config(&state, &vm_id, rootfs_copy.clone(), iam_creds);
 
     let vm = match create_vm(&vm_config).await {
         Ok(vm) => vm,
         Err(e) => {
             eprintln!("failed to create vm: {e}");
+            let _ = std::fs::remove_file(&rootfs_copy);
             return StatusCode::INTERNAL_SERVER_ERROR.into_response();
         }
     };
@@ -159,6 +176,7 @@ async fn create_vm_endpoint(
     state.vms.lock().unwrap().insert(vm.id.clone(), VmEntry {
         guest_ip: vm.guest_ip.clone(),
         created_at,
+        rootfs_copy,
         _guard: vm.into_guard(),
     });
 
@@ -171,7 +189,7 @@ async fn delete_vm_endpoint(
 ) -> StatusCode {
     match state.vms.lock().unwrap().remove(&vm_id) {
         Some(entry) => {
-            entry._guard.delete();
+            entry.cleanup();
             StatusCode::NO_CONTENT
         }
         None => StatusCode::NOT_FOUND,
@@ -277,6 +295,7 @@ async fn run_ssh_relay(
 fn build_vm_config(
     state: &AppState,
     vm_id: &str,
+    rootfs_path: PathBuf,
     iam_creds: Option<(String, ImdsCredential)>,
 ) -> VmConfig {
     let (mmds_metadata, mmds_imds_compat) = match iam_creds {
@@ -290,7 +309,7 @@ fn build_vm_config(
         id: vm_id.to_string(),
         socket_dir: state.socket_dir.clone(),
         kernel_path: state.kernel_path.clone(),
-        rootfs_path: state.rootfs_path.clone(),
+        rootfs_path,
         vcpu_count: 2,
         mem_size_mib: 4096,
         boot_args: "reboot=k panic=1 quiet loglevel=3 selinux=0".to_string(),
@@ -347,6 +366,19 @@ fn load_app_state() -> AppState {
         ssh_user: std::env::var("SSH_USER").unwrap_or_else(|_| "root".to_string()),
         vms: Arc::new(Mutex::new(HashMap::new())),
     }
+}
+
+// ── Rootfs copy ───────────────────────────────────────────────────────────────
+
+/// Copy the base rootfs image to a per-VM file alongside the original.
+/// e.g. /var/lib/fc/ubuntu-24.04.ext4 → /var/lib/fc/fc-<vm_id>.ext4
+async fn copy_rootfs(base: &std::path::Path, vm_id: &str) -> Result<PathBuf> {
+    let dir = base.parent().unwrap_or(std::path::Path::new("/tmp"));
+    let dest = dir.join(format!("fc-{vm_id}.ext4"));
+    tokio::fs::copy(base, &dest)
+        .await
+        .with_context(|| format!("copy {} -> {}", base.display(), dest.display()))?;
+    Ok(dest)
 }
 
 // ── File upload ───────────────────────────────────────────────────────────────
