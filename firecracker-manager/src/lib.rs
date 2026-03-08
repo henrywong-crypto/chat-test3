@@ -149,7 +149,10 @@ pub async fn reconcile_vms(socket_dir: &Path) -> Vec<RecoveredVm> {
     let mut recovered = Vec::new();
     let entries = match std::fs::read_dir(socket_dir) {
         Ok(e) => e,
-        Err(_) => return recovered,
+        Err(e) => {
+            eprintln!("reconcile: failed to read socket_dir {:?}: {e}", socket_dir);
+            return recovered;
+        }
     };
     for entry in entries.flatten() {
         let socket_path = entry.path();
@@ -165,24 +168,40 @@ pub async fn reconcile_vms(socket_dir: &Path) -> Vec<RecoveredVm> {
             .trim_end_matches(".socket")
             .to_string();
 
+        eprintln!("reconcile: found socket for vm {vm_id}");
+
         let pid = match find_pid_for_socket(&socket_path) {
             Some(p) => p,
-            None => continue,
+            None => {
+                eprintln!("reconcile: no process found for {fname}, skipping");
+                continue;
+            }
         };
+        eprintln!("reconcile: vm {vm_id} pid={pid}");
 
         let ifaces = match get_network_interfaces(&socket_path).await {
             Ok(i) => i,
-            Err(_) => continue,
+            Err(e) => {
+                eprintln!("reconcile: get_network_interfaces failed for vm {vm_id}: {e}");
+                continue;
+            }
         };
         let tap_name = match ifaces.into_iter().find(|i| i.iface_id == "net1") {
             Some(i) => i.host_dev_name,
-            None => continue,
+            None => {
+                eprintln!("reconcile: no net1 interface found for vm {vm_id}");
+                continue;
+            }
         };
         let net_idx: u32 = match tap_name.trim_start_matches("tap").parse() {
             Ok(n) => n,
-            Err(_) => continue,
+            Err(e) => {
+                eprintln!("reconcile: failed to parse tap index from {tap_name}: {e}");
+                continue;
+            }
         };
         let guest_ip = vm_guest_ip(net_idx);
+        eprintln!("reconcile: vm {vm_id} tap={tap_name} guest_ip={guest_ip}");
 
         let created_at = std::fs::metadata(&socket_path)
             .ok()
