@@ -37,7 +37,7 @@ async fn run_terminal_session(ws: WebSocket, state: AppState, vm_id: String) {
 
 async fn run_ssh_relay(guest_ip: &str, state: &AppState, ws: WebSocket) -> anyhow::Result<()> {
     let mut ssh_handle =
-        connect_ssh(guest_ip, &state.ssh_key_path, &state.ssh_user, &state.vm_host_key).await?;
+        connect_ssh(guest_ip, &state.ssh_key_path, &state.ssh_user, &state.vm_host_key_path).await?;
     let mut channel = open_terminal_channel(&mut ssh_handle).await?;
     let (mut ws_sender, mut ws_receiver) = ws.split();
     loop {

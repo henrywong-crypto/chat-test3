@@ -1,9 +1,6 @@
-use std::path::PathBuf;
-use anyhow::{Context, Result};
 use aws_config::default_provider::credentials::DefaultCredentialsChain;
 use aws_credential_types::provider::ProvideCredentials;
 use firecracker_manager::{build_mmds_with_iam, system_time_to_iso8601, ImdsCredential, VmConfig};
-use russh_keys::{key::PublicKey, load_public_key};
 use uuid::Uuid;
 
 use crate::state::AppState;
@@ -51,8 +48,4 @@ pub(crate) async fn fetch_host_iam_credentials() -> Option<(String, ImdsCredenti
             expiration,
         ),
     ))
-}
-
-pub(crate) fn load_vm_host_key(path: &PathBuf) -> Result<PublicKey> {
-    load_public_key(path).context("failed to load VM host key")
 }

@@ -22,7 +22,7 @@ pub(crate) async fn upload_file_handler(
     let (remote_path, data) = extract_upload_fields(&mut multipart).await?;
     let validated_path = validate_upload_path(&remote_path, &state.upload_dir)?;
     let mut ssh_handle =
-        connect_ssh(&guest_ip, &state.ssh_key_path, &state.ssh_user, &state.vm_host_key).await?;
+        connect_ssh(&guest_ip, &state.ssh_key_path, &state.ssh_user, &state.vm_host_key_path).await?;
     write_file_via_sftp(&mut ssh_handle, &validated_path, &data).await?;
     Ok(StatusCode::OK)
 }

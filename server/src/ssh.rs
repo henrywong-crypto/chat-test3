@@ -9,11 +9,11 @@ use russh::{
     Channel,
     client::{self, Handle},
 };
-use russh_keys::key::PublicKey;
+use russh_keys::{key::PublicKey, load_public_key, load_secret_key};
 use russh_sftp::client::SftpSession;
 
 pub(crate) struct SshClient {
-    pub(crate) vm_host_key: Arc<PublicKey>,
+    vm_host_key: PublicKey,
 }
 
 #[async_trait]
@@ -32,10 +32,11 @@ pub(crate) async fn connect_ssh(
     guest_ip: &str,
     ssh_key_path: &PathBuf,
     ssh_user: &str,
-    vm_host_key: &Arc<PublicKey>,
+    vm_host_key_path: &PathBuf,
 ) -> Result<Handle<SshClient>> {
+    let vm_host_key = load_public_key(vm_host_key_path).context("failed to load VM host key")?;
     let ssh_keypair = Arc::new(
-        russh_keys::load_secret_key(ssh_key_path, None).context("failed to load SSH key")?,
+        load_secret_key(ssh_key_path, None).context("failed to load SSH key")?,
     );
     let ssh_config = Arc::new(client::Config::default());
     let addr = format!("{guest_ip}:22");

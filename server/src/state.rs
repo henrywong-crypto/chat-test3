@@ -10,10 +10,7 @@ use axum::{
 };
 use clap::Parser;
 use firecracker_manager::VmGuard;
-use russh_keys::key::PublicKey;
 use serde::Serialize;
-
-use crate::vm::load_vm_host_key;
 
 #[derive(Parser)]
 pub(crate) struct Args {
@@ -42,7 +39,7 @@ pub(crate) struct AppState {
     pub(crate) socket_dir: PathBuf,
     pub(crate) ssh_key_path: PathBuf,
     pub(crate) ssh_user: String,
-    pub(crate) vm_host_key: Arc<PublicKey>,
+    pub(crate) vm_host_key_path: PathBuf,
     pub(crate) upload_dir: String,
     pub(crate) vms: VmRegistry,
 }
@@ -79,14 +76,13 @@ impl<E: Into<anyhow::Error>> From<E> for AppError {
 }
 
 pub(crate) fn build_app_state(args: Args) -> Result<AppState> {
-    let vm_host_key = load_vm_host_key(&args.vm_host_key_path)?;
     Ok(AppState {
         kernel_path: args.kernel_path,
         rootfs_path: args.rootfs_path,
         socket_dir: args.socket_dir,
         ssh_key_path: args.ssh_key_path,
         ssh_user: args.ssh_user,
-        vm_host_key: Arc::new(vm_host_key),
+        vm_host_key_path: args.vm_host_key_path,
         upload_dir: args.upload_dir,
         vms: Arc::new(Mutex::new(HashMap::new())),
     })
