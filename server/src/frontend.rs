@@ -1,3 +1,36 @@
+pub(crate) const LOGIN_HTML: &str = r#"<!DOCTYPE html>
+<html>
+<head>
+  <meta charset="utf-8" />
+  <title>vm-terminal — login</title>
+  <style>
+    *, *::before, *::after { box-sizing: border-box; }
+    body { margin: 0; background: #0d1117; color: #c9d1d9; font-family: ui-monospace, monospace;
+           display: flex; align-items: center; justify-content: center; min-height: 100vh; }
+    .card { background: #161b22; border: 1px solid #30363d; border-radius: 8px;
+            padding: 32px; width: 320px; }
+    h1 { margin: 0 0 24px; color: #58a6ff; font-size: 18px; }
+    label { display: block; font-size: 12px; color: #8b949e; margin-bottom: 4px; }
+    input[type=password] { width: 100%; background: #0d1117; color: #c9d1d9;
+                           border: 1px solid #30363d; border-radius: 4px;
+                           padding: 8px; font-family: inherit; font-size: 13px; margin-bottom: 16px; }
+    button { width: 100%; background: #238636; color: #c9d1d9; border: 1px solid #2ea043;
+             padding: 8px; border-radius: 6px; font-size: 13px; cursor: pointer; }
+    button:hover { background: #2ea043; }
+  </style>
+</head>
+<body>
+  <div class="card">
+    <h1>vm-terminal</h1>
+    <form method="POST" action="/login">
+      <label>Password</label>
+      <input type="password" name="password" autofocus />
+      <button type="submit">Login</button>
+    </form>
+  </div>
+</body>
+</html>"#;
+
 pub(crate) const FRONTEND_HTML: &str = r#"<!DOCTYPE html>
 <html>
 <head>

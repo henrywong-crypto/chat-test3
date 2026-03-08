@@ -13,7 +13,7 @@ use russh_keys::{key::PublicKey, load_public_key, load_secret_key};
 use russh_sftp::client::SftpSession;
 
 pub(crate) struct SshClient {
-    vm_host_key: PublicKey,
+    vm_host_key: Option<PublicKey>,
 }
 
 #[async_trait]
@@ -24,7 +24,10 @@ impl client::Handler for SshClient {
         &mut self,
         server_public_key: &PublicKey,
     ) -> Result<bool, Self::Error> {
-        Ok(server_public_key.fingerprint() == self.vm_host_key.fingerprint())
+        match &self.vm_host_key {
+            Some(key) => Ok(server_public_key.fingerprint() == key.fingerprint()),
+            None => Ok(true),
+        }
     }
 }
 
@@ -34,7 +37,7 @@ pub(crate) async fn connect_ssh(
     ssh_user: &str,
     vm_host_key_path: &PathBuf,
 ) -> Result<Handle<SshClient>> {
-    let vm_host_key = load_public_key(vm_host_key_path).context("failed to load VM host key")?;
+    let vm_host_key = load_public_key(vm_host_key_path).ok();
     let ssh_keypair = Arc::new(
         load_secret_key(ssh_key_path, None).context("failed to load SSH key")?,
     );

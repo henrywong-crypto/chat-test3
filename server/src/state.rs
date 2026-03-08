@@ -26,6 +26,8 @@ pub(crate) struct Args {
     pub(crate) ssh_user: String,
     #[arg(long, env = "VM_HOST_KEY_PATH", default_value = "/var/lib/fc/vm_host_key.pub")]
     pub(crate) vm_host_key_path: PathBuf,
+    #[arg(long, env = "DEMO_PASSWORD", default_value = "demo")]
+    pub(crate) demo_password: String,
     #[arg(long, env = "UPLOAD_DIR", default_value = "/home/user/uploads")]
     pub(crate) upload_dir: String,
     #[arg(long, env = "PORT", default_value = "3000")]
@@ -40,6 +42,7 @@ pub(crate) struct AppState {
     pub(crate) ssh_key_path: PathBuf,
     pub(crate) ssh_user: String,
     pub(crate) vm_host_key_path: PathBuf,
+    pub(crate) demo_password: String,
     pub(crate) upload_dir: String,
     pub(crate) vms: VmRegistry,
 }
@@ -83,6 +86,7 @@ pub(crate) fn build_app_state(args: Args) -> Result<AppState> {
         ssh_key_path: args.ssh_key_path,
         ssh_user: args.ssh_user,
         vm_host_key_path: args.vm_host_key_path,
+        demo_password: args.demo_password,
         upload_dir: args.upload_dir,
         vms: Arc::new(Mutex::new(HashMap::new())),
     })

@@ -8,11 +8,13 @@ use russh::client::Handle;
 use tokio::io::AsyncWriteExt;
 
 use crate::{
+    auth::User,
     ssh::{connect_ssh, open_sftp_session, SshClient},
     state::{AppError, AppState, find_vm_guest_ip},
 };
 
 pub(crate) async fn upload_file_handler(
+    _user: User,
     Path(vm_id): Path<String>,
     State(state): State<AppState>,
     mut multipart: Multipart,

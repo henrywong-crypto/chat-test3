@@ -9,16 +9,17 @@ use axum::{
 use firecracker_manager::create_vm;
 
 use crate::{
+    auth::User,
     frontend::FRONTEND_HTML,
     state::{AppError, AppState, VmEntry, VmInfo},
     vm::{build_vm_config, fetch_host_iam_credentials},
 };
 
-pub(crate) async fn get_index() -> Html<&'static str> {
+pub(crate) async fn get_index(_user: User) -> Html<&'static str> {
     Html(FRONTEND_HTML)
 }
 
-pub(crate) async fn list_vms(State(state): State<AppState>) -> Result<Json<Vec<VmInfo>>, AppError> {
+pub(crate) async fn list_vms(_user: User, State(state): State<AppState>) -> Result<Json<Vec<VmInfo>>, AppError> {
     let registry = state.vms.lock().map_err(|_| anyhow!("vm registry lock poisoned"))?;
     let mut vms: Vec<VmInfo> = registry
         .iter()
@@ -34,6 +35,7 @@ pub(crate) async fn list_vms(State(state): State<AppState>) -> Result<Json<Vec<V
 }
 
 pub(crate) async fn create_vm_handler(
+    _user: User,
     State(state): State<AppState>,
 ) -> Result<impl IntoResponse, AppError> {
     let iam_creds = fetch_host_iam_credentials().await;
@@ -66,6 +68,7 @@ pub(crate) async fn create_vm_handler(
 }
 
 pub(crate) async fn delete_vm_handler(
+    _user: User,
     Path(vm_id): Path<String>,
     State(state): State<AppState>,
 ) -> Result<StatusCode, AppError> {

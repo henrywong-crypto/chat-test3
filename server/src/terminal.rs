@@ -10,11 +10,13 @@ use futures::{SinkExt, StreamExt};
 use russh::ChannelMsg;
 
 use crate::{
+    auth::User,
     ssh::{connect_ssh, open_terminal_channel},
     state::{AppState, find_vm_guest_ip},
 };
 
 pub(crate) async fn handle_ws_upgrade(
+    _user: User,
     Path(vm_id): Path<String>,
     ws: WebSocketUpgrade,
     State(state): State<AppState>,
