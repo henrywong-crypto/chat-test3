@@ -13,8 +13,8 @@ use axum::routing::{delete, get};
 use axum::{Json, Router};
 use bytes::Bytes;
 use firecracker_manager::{
-    build_mmds_with_iam, create_vm, setup_host_networking, system_time_to_iso8601, ImdsCredential,
-    VmConfig, VmGuard,
+    build_mmds_with_iam, create_vm, reconcile_vms, setup_host_networking, system_time_to_iso8601,
+    ImdsCredential, VmConfig, VmGuard,
 };
 use futures::{SinkExt, StreamExt};
 use russh::client::{self, Handle};
@@ -75,6 +75,20 @@ impl client::Handler for SshClient {
 async fn main() -> anyhow::Result<()> {
     setup_host_networking().await;
     let state = load_app_state();
+
+    let recovered = reconcile_vms(&state.socket_dir).await;
+    if !recovered.is_empty() {
+        println!("reconciled {} existing VM(s)", recovered.len());
+        let mut registry = state.vms.lock().unwrap();
+        for vm in recovered {
+            registry.insert(vm.id.clone(), VmEntry {
+                guest_ip: vm.guest_ip,
+                pid: vm.pid,
+                created_at: vm.created_at,
+                _guard: vm.guard,
+            });
+        }
+    }
     let app = Router::new()
         .route("/", get(handle_index))
         .route("/vms", get(list_vms).post(create_vm_endpoint))

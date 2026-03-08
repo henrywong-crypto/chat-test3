@@ -5,11 +5,12 @@ use std::io;
 use std::path::{Path, PathBuf};
 use std::process::Stdio;
 use std::sync::atomic::{AtomicU32, Ordering};
-use std::time::Duration;
+use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
 use firecracker_client::{
-    put_mmds, set_boot_source, set_drive, set_machine_config, set_mmds_config, set_network_interface,
-    start_instance, BootSource, Drive, MachineConfig, MmdsConfig, NetworkInterface,
+    get_network_interfaces, put_mmds, set_boot_source, set_drive, set_machine_config,
+    set_mmds_config, set_network_interface, start_instance, BootSource, Drive, MachineConfig,
+    MmdsConfig, NetworkInterface,
 };
 use nix::sys::signal::{kill, Signal};
 use nix::unistd::Pid;
@@ -62,12 +63,16 @@ pub struct VmGuard {
     pub guest_ip: String,
     pub socket_path: PathBuf,
     pub pid: u32,
-    _child: Child,
+    _child: Option<Child>,
     tap_name: String,
 }
 
 impl Drop for VmGuard {
     fn drop(&mut self) {
+        // Recovered VMs have no child handle — kill by PID directly.
+        if self._child.is_none() {
+            let _ = kill(Pid::from_raw(self.pid as i32), Signal::SIGTERM);
+        }
         let helper = net_helper_path();
         let _ = std::process::Command::new(&helper)
             .args(["tap-delete", &self.tap_name])
@@ -82,7 +87,7 @@ impl Vm {
             guest_ip: self.guest_ip,
             socket_path: self.socket_path,
             pid: self.pid,
-            _child: self.child,
+            _child: Some(self.child),
             tap_name: self.tap_name,
         }
     }
@@ -120,6 +125,99 @@ pub fn kill_vm(vm_pid: u32) -> Result<()> {
 
 pub fn check_vm_alive(vm_pid: u32) -> bool {
     kill(Pid::from_raw(vm_pid as i32), None).is_ok()
+}
+
+pub struct RecoveredVm {
+    pub id: String,
+    pub guest_ip: String,
+    pub pid: u32,
+    pub created_at: u64,
+    pub guard: VmGuard,
+}
+
+/// Scan `socket_dir` for running Firecracker VMs and re-register them.
+/// For each `fc-{id}.socket` found, we locate the owning process via
+/// `/proc/*/cmdline`, then query the Firecracker API for the tap name to
+/// derive the guest IP.
+pub async fn reconcile_vms(socket_dir: &Path) -> Vec<RecoveredVm> {
+    let mut recovered = Vec::new();
+    let entries = match std::fs::read_dir(socket_dir) {
+        Ok(e) => e,
+        Err(_) => return recovered,
+    };
+    for entry in entries.flatten() {
+        let socket_path = entry.path();
+        let fname = match socket_path.file_name().and_then(|n| n.to_str()) {
+            Some(f) => f.to_string(),
+            None => continue,
+        };
+        if !fname.starts_with("fc-") || !fname.ends_with(".socket") {
+            continue;
+        }
+        let vm_id = fname
+            .trim_start_matches("fc-")
+            .trim_end_matches(".socket")
+            .to_string();
+
+        let pid = match find_pid_for_socket(&socket_path) {
+            Some(p) => p,
+            None => continue,
+        };
+
+        let ifaces = match get_network_interfaces(&socket_path).await {
+            Ok(i) => i,
+            Err(_) => continue,
+        };
+        let tap_name = match ifaces.into_iter().find(|i| i.iface_id == "net1") {
+            Some(i) => i.host_dev_name,
+            None => continue,
+        };
+        let net_idx: u32 = match tap_name.trim_start_matches("tap").parse() {
+            Ok(n) => n,
+            Err(_) => continue,
+        };
+        let guest_ip = vm_guest_ip(net_idx);
+
+        let created_at = std::fs::metadata(&socket_path)
+            .ok()
+            .and_then(|m| m.modified().ok())
+            .and_then(|t| t.duration_since(UNIX_EPOCH).ok())
+            .map(|d| d.as_secs())
+            .unwrap_or_else(|| {
+                SystemTime::now().duration_since(UNIX_EPOCH).unwrap_or_default().as_secs()
+            });
+
+        let guard = VmGuard {
+            id: vm_id.clone(),
+            guest_ip: guest_ip.clone(),
+            socket_path,
+            pid,
+            _child: None,
+            tap_name,
+        };
+        recovered.push(RecoveredVm { id: vm_id, guest_ip, pid, created_at, guard });
+    }
+    recovered
+}
+
+fn find_pid_for_socket(socket_path: &Path) -> Option<u32> {
+    let socket_bytes = socket_path.to_string_lossy().into_owned().into_bytes();
+    let proc_dir = std::fs::read_dir("/proc").ok()?;
+    for entry in proc_dir.flatten() {
+        let pid: u32 = match entry.file_name().to_string_lossy().parse() {
+            Ok(p) => p,
+            Err(_) => continue,
+        };
+        let cmdline_path = format!("/proc/{pid}/cmdline");
+        let cmdline = match std::fs::read(&cmdline_path) {
+            Ok(c) => c,
+            Err(_) => continue,
+        };
+        if cmdline.windows(socket_bytes.len()).any(|w| w == socket_bytes) {
+            return Some(pid);
+        }
+    }
+    None
 }
 
 fn build_socket_path(socket_dir: &Path, vm_id: &str) -> PathBuf {

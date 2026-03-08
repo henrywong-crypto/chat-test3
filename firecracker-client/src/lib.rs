@@ -6,7 +6,7 @@ use hyper::client::conn::http1;
 use hyper::http::Error as HttpError;
 use hyper::{Method, Request, StatusCode};
 use hyper_util::rt::TokioIo;
-use serde::Serialize;
+use serde::{Deserialize, Serialize};
 use thiserror::Error;
 use tokio::net::UnixStream;
 
@@ -67,6 +67,16 @@ pub async fn set_network_interface(socket_path: &Path, iface: &NetworkInterface)
     send_put(socket_path, &path, body).await
 }
 
+#[derive(Deserialize)]
+pub struct NetworkInterfaceInfo {
+    pub iface_id: String,
+    pub host_dev_name: String,
+}
+
+pub async fn get_network_interfaces(socket_path: &Path) -> Result<Vec<NetworkInterfaceInfo>> {
+    send_get(socket_path, "/network-interfaces").await
+}
+
 pub async fn set_drive(socket_path: &Path, drive: &Drive) -> Result<()> {
     let path = format!("/drives/{}", drive.drive_id);
     let body = serde_json::to_vec(drive).unwrap();
@@ -123,6 +133,33 @@ pub async fn patch_mmds(socket_path: &Path, patch: &serde_json::Value) -> Result
 
 async fn send_put(socket_path: &Path, uri: &str, body: Vec<u8>) -> Result<()> {
     send_request(socket_path, Method::PUT, uri, body).await
+}
+
+async fn send_get<T: serde::de::DeserializeOwned>(socket_path: &Path, uri: &str) -> Result<T> {
+    let stream = UnixStream::connect(socket_path).await?;
+    let (mut sender, conn) = http1::handshake(TokioIo::new(stream)).await?;
+    tokio::spawn(conn);
+
+    let request = Request::builder()
+        .method(Method::GET)
+        .uri(uri)
+        .header("Host", "localhost")
+        .header("Accept", "application/json")
+        .body(Full::new(Bytes::new()))?;
+
+    let response = sender.send_request(request).await?;
+
+    if !response.status().is_success() {
+        let status = response.status();
+        let bytes = response.into_body().collect().await?.to_bytes();
+        let body = String::from_utf8_lossy(&bytes).into_owned();
+        return Err(Error::Api { status, body });
+    }
+
+    let bytes = response.into_body().collect().await?.to_bytes();
+    serde_json::from_slice(&bytes).map_err(|e| {
+        Error::Api { status: StatusCode::OK, body: format!("failed to parse response: {e}") }
+    })
 }
 
 async fn send_request(
