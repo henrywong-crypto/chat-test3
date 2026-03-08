@@ -49,6 +49,7 @@ struct AppState {
     rootfs_path: PathBuf,
     socket_dir: PathBuf,
     ssh_key_path: PathBuf,
+    ssh_user: String,
     vms: VmRegistry,
 }
 
@@ -71,7 +72,7 @@ impl client::Handler for SshClient {
 // ── Entry point ───────────────────────────────────────────────────────────────
 
 #[tokio::main]
-async fn main() {
+async fn main() -> anyhow::Result<()> {
     setup_host_networking().await;
     let state = load_app_state();
     let app = Router::new()
@@ -81,9 +82,13 @@ async fn main() {
         .route("/ws/{id}", get(handle_websocket))
         .with_state(state);
 
-    let listener = TcpListener::bind("0.0.0.0:3000").await.unwrap();
-    println!("listening on http://0.0.0.0:3000");
-    axum::serve(listener, app).await.unwrap();
+    let port = std::env::var("PORT").unwrap_or_else(|_| "3000".to_string());
+    let listener = TcpListener::bind(format!("0.0.0.0:{port}"))
+        .await
+        .with_context(|| format!("failed to bind to 0.0.0.0:{port}"))?;
+    println!("listening on http://0.0.0.0:{port}");
+    axum::serve(listener, app).await.context("server error")?;
+    Ok(())
 }
 
 // ── REST handlers ─────────────────────────────────────────────────────────────
@@ -169,7 +174,7 @@ async fn run_terminal_session(ws: WebSocket, state: AppState, vm_id: String) {
         }
     };
 
-    if let Err(e) = run_ssh_relay(&guest_ip, &state.ssh_key_path, ws).await {
+    if let Err(e) = run_ssh_relay(&guest_ip, &state.ssh_key_path, &state.ssh_user, ws).await {
         eprintln!("SSH session error [{vm_id}]: {e}");
     }
 }
@@ -179,6 +184,7 @@ async fn run_terminal_session(ws: WebSocket, state: AppState, vm_id: String) {
 async fn run_ssh_relay(
     guest_ip: &str,
     key_path: &std::path::Path,
+    ssh_user: &str,
     ws: WebSocket,
 ) -> Result<()> {
     let keypair = Arc::new(
@@ -198,7 +204,7 @@ async fn run_ssh_relay(
         }
     };
 
-    let ok = handle.authenticate_publickey("ubuntu", keypair).await?;
+    let ok = handle.authenticate_publickey(ssh_user, keypair).await?;
     if !ok {
         bail!("SSH authentication rejected");
     }
@@ -314,6 +320,7 @@ fn load_app_state() -> AppState {
         ssh_key_path: PathBuf::from(
             std::env::var("SSH_KEY_PATH").unwrap_or_else(|_| "/var/lib/fc/id_rsa".to_string()),
         ),
+        ssh_user: std::env::var("SSH_USER").unwrap_or_else(|_| "root".to_string()),
         vms: Arc::new(Mutex::new(HashMap::new())),
     }
 }
