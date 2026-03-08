@@ -9,7 +9,7 @@ use axum::extract::ws::{Message, WebSocket, WebSocketUpgrade};
 use axum::extract::{Path, State};
 use axum::http::StatusCode;
 use axum::response::{Html, IntoResponse, Response};
-use axum::routing::get;
+use axum::routing::{get, post};
 use axum::{Json, Router};
 use bytes::Bytes;
 use firecracker_manager::{
@@ -78,6 +78,7 @@ async fn main() -> Result<()> {
         .route("/", get(handle_index))
         .route("/vms", get(list_vms).post(create_vm_endpoint))
         .route("/vms/{id}", get(get_vm).delete(delete_vm_endpoint))
+        .route("/vms/{id}/upload", post(upload_file_endpoint))
         .route("/ws/{id}", get(handle_websocket))
         .with_state(state.clone());
 
@@ -348,6 +349,95 @@ fn load_app_state() -> AppState {
     }
 }
 
+// ── File upload ───────────────────────────────────────────────────────────────
+
+async fn upload_file_endpoint(
+    Path(vm_id): Path<String>,
+    State(state): State<AppState>,
+    mut multipart: axum::extract::Multipart,
+) -> impl IntoResponse {
+    let (filename, data) = match multipart.next_field().await {
+        Ok(Some(field)) => {
+            let name = field
+                .file_name()
+                .map(sanitize_filename)
+                .unwrap_or_else(|| "upload".to_string());
+            match field.bytes().await {
+                Ok(b) => (name, b),
+                Err(_) => return StatusCode::BAD_REQUEST.into_response(),
+            }
+        }
+        _ => return StatusCode::BAD_REQUEST.into_response(),
+    };
+
+    let guest_ip = match state.vms.lock().unwrap().get(&vm_id) {
+        Some(e) => e.guest_ip.clone(),
+        None => return StatusCode::NOT_FOUND.into_response(),
+    };
+
+    match upload_via_ssh(&guest_ip, &state.ssh_key_path, &state.ssh_user, &filename, &data).await {
+        Ok(()) => StatusCode::NO_CONTENT.into_response(),
+        Err(e) => {
+            eprintln!("upload error [{vm_id}]: {e}");
+            StatusCode::INTERNAL_SERVER_ERROR.into_response()
+        }
+    }
+}
+
+fn sanitize_filename(name: &str) -> String {
+    let base = std::path::Path::new(name)
+        .file_name()
+        .and_then(|n| n.to_str())
+        .unwrap_or("upload");
+    let s: String = base
+        .chars()
+        .filter(|c| c.is_alphanumeric() || matches!(c, '.' | '-' | '_'))
+        .take(64)
+        .collect();
+    if s.is_empty() { "upload".to_string() } else { s }
+}
+
+async fn upload_via_ssh(
+    guest_ip: &str,
+    key_path: &std::path::Path,
+    ssh_user: &str,
+    filename: &str,
+    data: &bytes::Bytes,
+) -> Result<()> {
+    let keypair = Arc::new(
+        russh_keys::load_secret_key(key_path, None).context("failed to load SSH private key")?,
+    );
+    let config = Arc::new(client::Config::default());
+    let addr = format!("{guest_ip}:22");
+
+    let mut handle = client::connect(config, addr.as_str(), SshClient)
+        .await
+        .context("SSH connect failed")?;
+    handle
+        .authenticate_publickey(ssh_user, keypair)
+        .await
+        .context("SSH auth failed")?;
+
+    let mut channel = handle.channel_open_session().await?;
+    channel.exec(true, format!("cat > /tmp/{filename}")).await?;
+    channel.data(&data[..]).await?;
+    channel.eof().await?;
+
+    loop {
+        match channel.wait().await {
+            Some(ChannelMsg::ExitStatus { exit_status }) => {
+                if exit_status != 0 {
+                    bail!("remote cat exited with status {exit_status}");
+                }
+                break;
+            }
+            None => break,
+            _ => {}
+        }
+    }
+    Ok(())
+}
+
 const FRONTEND_HTML: &str = r#"<!DOCTYPE html>
 <html>
 <head>
@@ -393,13 +483,16 @@ const FRONTEND_HTML: &str = r#"<!DOCTYPE html>
   <div id="term-header">
     <button onclick="backToList()">&#8592; VMs</button>
     <span id="term-vm-id"></span>
+    <input type="file" id="upload-input" style="display:none" onchange="uploadFile(this)">
+    <button onclick="document.getElementById('upload-input').click()">Upload File</button>
+    <span id="upload-status" style="font-size:12px;color:#8b949e"></span>
   </div>
   <div id="term-container"></div>
 </div>
 <script src="https://cdn.jsdelivr.net/npm/xterm@5/lib/xterm.js"></script>
 <script src="https://cdn.jsdelivr.net/npm/xterm-addon-fit@0.8/lib/xterm-addon-fit.js"></script>
 <script>
-  let ws = null, term = null, fitAddon = null, refreshTimer = null;
+  let ws = null, term = null, fitAddon = null, refreshTimer = null, currentVmId = null;
 
   function ago(secs) {
     const d = Math.floor(Date.now() / 1000) - secs;
@@ -434,6 +527,7 @@ const FRONTEND_HTML: &str = r#"<!DOCTYPE html>
     document.getElementById('term-container').innerHTML = '';
     document.getElementById('terminal-view').style.display = 'none';
     document.getElementById('list-view').style.display = '';
+    currentVmId = null;
     startRefresh();
   }
 
@@ -443,6 +537,7 @@ const FRONTEND_HTML: &str = r#"<!DOCTYPE html>
     const tv = document.getElementById('terminal-view');
     tv.style.display = 'flex';
     document.getElementById('term-vm-id').textContent = vmId.slice(0,8) + '\u2026';
+    currentVmId = vmId;
 
     term = new Terminal({ cursorBlink: true });
     fitAddon = new FitAddon.FitAddon();
@@ -474,6 +569,23 @@ const FRONTEND_HTML: &str = r#"<!DOCTYPE html>
   }
 
   function connectVm(id) { openTerminal(id); }
+
+  async function uploadFile(input) {
+    const file = input.files[0];
+    if (!file || !currentVmId) return;
+    const status = document.getElementById('upload-status');
+    status.textContent = 'Uploading\u2026';
+    const form = new FormData();
+    form.append('file', file, file.name);
+    try {
+      const res = await fetch('/vms/' + currentVmId + '/upload', { method: 'POST', body: form });
+      status.textContent = res.ok ? 'Uploaded to /tmp/' + file.name : 'Upload failed';
+    } catch (e) {
+      status.textContent = 'Upload error';
+    }
+    input.value = '';
+    setTimeout(() => { status.textContent = ''; }, 3000);
+  }
 
   async function deleteVm(id) {
     await fetch('/vms/' + id, { method: 'DELETE' });

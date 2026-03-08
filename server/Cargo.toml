@@ -10,7 +10,7 @@ path = "src/main.rs"
 [dependencies]
 anyhow = "1"
 async-trait = "0.1"
-axum = { version = "0.8", features = ["ws"] }
+axum = { version = "0.8", features = ["ws", "multipart"] }
 aws-config = "1"
 aws-credential-types = "1"
 bytes = "1"
