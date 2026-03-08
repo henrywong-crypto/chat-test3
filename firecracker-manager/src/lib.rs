@@ -58,6 +58,7 @@ pub struct Vm {
     pub pid: u32,
     _child: Child,
     tap_name: String,
+    rootfs_copy: PathBuf,
 }
 
 pub struct VmGuard {
@@ -66,6 +67,7 @@ pub struct VmGuard {
     pub socket_path: PathBuf,
     pub pid: u32,
     tap_name: String,
+    rootfs_copy: PathBuf,
 }
 
 impl VmGuard {
@@ -78,6 +80,7 @@ impl Drop for VmGuard {
     fn drop(&mut self) {
         let _ = kill(Pid::from_raw(self.pid as i32), Signal::SIGTERM);
         delete_tap(&self.tap_name);
+        let _ = std::fs::remove_file(&self.rootfs_copy);
     }
 }
 
@@ -89,6 +92,7 @@ impl Vm {
             socket_path: self.socket_path,
             pid: self.pid,
             tap_name: self.tap_name,
+            rootfs_copy: self.rootfs_copy,
         }
     }
 }
@@ -100,6 +104,7 @@ pub async fn create_vm(vm_config: &VmConfig) -> Result<Vm> {
     let mac = vm_guest_mac(net_idx);
     let guest_ip = vm_guest_ip(net_idx);
     let socket_path = vm_config.socket_dir.join(format!("fc-{}.socket", vm_config.id));
+    let rootfs_copy = vm_config.socket_dir.join(format!("rootfs-{}.ext4", vm_config.id));
 
     let boot_args = format!(
         "{} ip={guest_ip}::172.16.{net_idx}.1:255.255.255.252::eth0:none",
@@ -107,14 +112,29 @@ pub async fn create_vm(vm_config: &VmConfig) -> Result<Vm> {
     );
 
     create_tap(&tap_name, &tap_ip).await?;
+    copy_rootfs(&vm_config.rootfs_path, &rootfs_copy).await?;
     let mut child = spawn_firecracker(&socket_path)?;
     let pid = child.id().ok_or(Error::ProcessExited)?;
     wait_for_socket(&socket_path).await?;
-    configure_vm(&socket_path, vm_config, &tap_name, &mac, &boot_args).await?;
+    configure_vm(&socket_path, &rootfs_copy, vm_config, &tap_name, &mac, &boot_args).await?;
     start_instance(&socket_path).await?;
     check_still_running(&mut child).await?;
 
-    Ok(Vm { id: vm_config.id.clone(), guest_ip, socket_path, pid, _child: child, tap_name })
+    Ok(Vm { id: vm_config.id.clone(), guest_ip, socket_path, pid, _child: child, tap_name, rootfs_copy })
+}
+
+async fn copy_rootfs(src: &Path, dst: &Path) -> Result<()> {
+    let status = Command::new("cp")
+        .args(["--sparse=always", &src.to_string_lossy(), &dst.to_string_lossy()])
+        .status()
+        .await?;
+    if !status.success() {
+        return Err(Error::NetworkSetup(format!(
+            "failed to copy rootfs from {} to {}",
+            src.display(), dst.display()
+        )));
+    }
+    Ok(())
 }
 
 fn spawn_firecracker(socket_path: &Path) -> Result<Child> {
@@ -149,6 +169,7 @@ async fn wait_for_socket(socket_path: &Path) -> Result<()> {
 
 async fn configure_vm(
     socket_path: &Path,
+    rootfs_copy: &Path,
     vm_config: &VmConfig,
     tap_name: &str,
     mac: &str,
@@ -166,7 +187,7 @@ async fn configure_vm(
     .await?;
     set_drive(socket_path, &Drive {
         drive_id: "rootfs".to_string(),
-        path_on_host: vm_config.rootfs_path.to_string_lossy().into_owned(),
+        path_on_host: rootfs_copy.to_string_lossy().into_owned(),
         is_root_device: true,
         is_read_only: false,
     })
