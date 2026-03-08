@@ -2,9 +2,7 @@
 members = [
     "firecracker-client",
     "firecracker-manager",
-    "terminal-bridge",
-    "store",
-    "server",
     "net-helper",
+    "server",
 ]
 resolver = "2"
