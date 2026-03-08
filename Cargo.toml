@@ -3,6 +3,7 @@ members = [
     "firecracker-client",
     "firecracker-manager",
     "net-helper",
+    "pty",
     "server",
 ]
 resolver = "2"
