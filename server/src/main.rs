@@ -15,7 +15,7 @@ use clap::Parser;
 use firecracker_manager::setup_host_networking;
 use time::Duration;
 use tokio::net::TcpListener;
-use tower_sessions::{Expiry, MemoryStore, SessionManagerLayer};
+use tower_sessions::{cookie::SameSite, Expiry, MemoryStore, SessionManagerLayer};
 
 use crate::{
     auth::{get_callback_handler, get_cognito_login_handler, get_demo_handler, get_login_handler, get_logout_handler},
@@ -54,6 +54,7 @@ fn build_router(app_state: AppState) -> Router {
 fn build_session_layer() -> SessionManagerLayer<MemoryStore> {
     SessionManagerLayer::new(MemoryStore::default())
         .with_secure(false)
+        .with_same_site(SameSite::Lax)
         .with_expiry(Expiry::OnInactivity(Duration::seconds(86400)))
 }
 
