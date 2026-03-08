@@ -94,6 +94,7 @@ Open http://localhost:3000 — each page load boots a fresh VM and opens an SSH 
 | `KERNEL_PATH` | `/var/lib/fc/vmlinux` | Firecracker kernel image |
 | `ROOTFS_PATH` | `/var/lib/fc/rootfs.ext4` | Root filesystem image |
 | `SSH_KEY_PATH` | `/var/lib/fc/id_rsa` | SSH private key matching the public key baked into the rootfs |
+| `SSH_USER` | `root` | SSH login user inside the VM |
 | `SOCKET_DIR` | `/tmp` | Directory for Firecracker API sockets |
 | `NET_HELPER_PATH` | `/usr/local/bin/net-helper` | Path to the net-helper binary |
 | `AWS_ROLE_NAME` | `vm-role` | IAM role name forwarded to the VM via MMDS |
