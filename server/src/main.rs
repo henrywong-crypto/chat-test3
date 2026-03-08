@@ -19,7 +19,7 @@ use firecracker_manager::{
 use futures::{SinkExt, StreamExt};
 use russh::client::{self, Handle};
 use russh::ChannelMsg;
-use serde::{Deserialize, Serialize};
+use serde::Serialize;
 use tokio::net::TcpListener;
 
 // ── VM registry ───────────────────────────────────────────────────────────────
@@ -37,11 +37,6 @@ struct VmInfo {
     created_at: u64,
 }
 
-#[derive(Deserialize)]
-struct CreateVmRequest {
-    socket_path: String,
-}
-
 type VmRegistry = Arc<Mutex<HashMap<String, VmEntry>>>;
 
 // ── App state ─────────────────────────────────────────────────────────────────
@@ -50,6 +45,7 @@ type VmRegistry = Arc<Mutex<HashMap<String, VmEntry>>>;
 struct AppState {
     kernel_path: PathBuf,
     rootfs_path: PathBuf,
+    socket_dir: PathBuf,
     ssh_key_path: PathBuf,
     ssh_user: String,
     vms: VmRegistry,
@@ -78,10 +74,7 @@ async fn main() -> Result<()> {
     setup_host_networking().await;
     let state = load_app_state();
 
-    let socket_dir = PathBuf::from(
-        std::env::var("SOCKET_DIR").unwrap_or_else(|_| "/tmp".to_string()),
-    );
-    for (id, guard) in reconcile_vms(&socket_dir).await {
+    for (id, guard) in reconcile_vms(&state.socket_dir).await {
         let created_at = SystemTime::now().duration_since(UNIX_EPOCH).unwrap_or_default().as_secs();
         state.vms.lock().unwrap().insert(id, VmEntry {
             guest_ip: guard.guest_ip.clone(),
@@ -143,11 +136,10 @@ async fn get_vm(
 
 async fn create_vm_endpoint(
     State(state): State<AppState>,
-    Json(req): Json<CreateVmRequest>,
 ) -> impl IntoResponse {
     let iam_creds = fetch_host_iam_credentials().await;
     let vm_id = uuid::Uuid::new_v4().to_string();
-    let vm_config = build_vm_config(&state, &vm_id, PathBuf::from(req.socket_path), iam_creds);
+    let vm_config = build_vm_config(&state, &vm_id, iam_creds);
 
     let vm = match create_vm(&vm_config).await {
         Ok(vm) => vm,
@@ -281,7 +273,6 @@ async fn run_ssh_relay(
 fn build_vm_config(
     state: &AppState,
     vm_id: &str,
-    socket_path: PathBuf,
     iam_creds: Option<(String, ImdsCredential)>,
 ) -> VmConfig {
     let (mmds_metadata, mmds_imds_compat) = match iam_creds {
@@ -293,7 +284,7 @@ fn build_vm_config(
     };
     VmConfig {
         id: vm_id.to_string(),
-        socket_path,
+        socket_dir: state.socket_dir.clone(),
         kernel_path: state.kernel_path.clone(),
         rootfs_path: state.rootfs_path.clone(),
         vcpu_count: 2,
@@ -343,6 +334,9 @@ fn load_app_state() -> AppState {
         )
         .canonicalize()
         .expect("ROOTFS_PATH does not exist"),
+        socket_dir: PathBuf::from(
+            std::env::var("SOCKET_DIR").unwrap_or_else(|_| "/tmp".to_string()),
+        ),
         ssh_key_path: PathBuf::from(
             std::env::var("SSH_KEY_PATH").unwrap_or_else(|_| "/var/lib/fc/id_rsa".to_string()),
         ),
@@ -466,13 +460,10 @@ const FRONTEND_HTML: &str = r#"<!DOCTYPE html>
   }
 
   async function newVm() {
-    const socketPath = prompt('Firecracker socket path:');
-    if (!socketPath) return;
     const btn = document.getElementById('new-btn');
     btn.disabled = true; btn.textContent = 'Starting\u2026';
     try {
-      const res = await fetch('/vms', { method: 'POST', headers: {'Content-Type':'application/json'},
-        body: JSON.stringify({ socket_path: socketPath }) });
+      const res = await fetch('/vms', { method: 'POST' });
       if (!res.ok) { alert('Failed to create VM'); return; }
       const vm = await res.json();
       openTerminal(vm.id);

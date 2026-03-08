@@ -3,22 +3,32 @@ pub use mmds_iam::{build_mmds_iam_refresh_patch, build_mmds_with_iam, imds_compa
 
 use std::io;
 use std::path::{Path, PathBuf};
+use std::process::Stdio;
 use std::sync::atomic::{AtomicU32, Ordering};
+use std::time::Duration;
 
 use firecracker_client::{
     get_network_interfaces, put_mmds, set_boot_source, set_drive, set_machine_config,
     set_mmds_config, set_network_interface, start_instance, BootSource, Drive, MachineConfig,
     MmdsConfig, NetworkInterface,
 };
+use nix::sys::signal::{kill, Signal};
+use nix::unistd::Pid;
 use thiserror::Error;
-use tokio::process::Command;
+use tokio::process::{Child, Command};
 
 #[derive(Debug, Error)]
 pub enum Error {
     #[error(transparent)]
     Io(#[from] io::Error),
     #[error(transparent)]
+    Nix(#[from] nix::Error),
+    #[error(transparent)]
     Firecracker(#[from] firecracker_client::Error),
+    #[error("timed out waiting for firecracker socket")]
+    SocketTimeout,
+    #[error("process exited before pid was available")]
+    ProcessExited,
     #[error("network setup failed: {0}")]
     NetworkSetup(String),
 }
@@ -29,7 +39,7 @@ static VM_NET_COUNTER: AtomicU32 = AtomicU32::new(0);
 
 pub struct VmConfig {
     pub id: String,
-    pub socket_path: PathBuf,
+    pub socket_dir: PathBuf,
     pub kernel_path: PathBuf,
     pub rootfs_path: PathBuf,
     pub vcpu_count: u8,
@@ -43,6 +53,8 @@ pub struct Vm {
     pub id: String,
     pub guest_ip: String,
     pub socket_path: PathBuf,
+    pub pid: u32,
+    _child: Child,
     tap_name: String,
 }
 
@@ -50,13 +62,15 @@ pub struct VmGuard {
     pub id: String,
     pub guest_ip: String,
     pub socket_path: PathBuf,
+    pub pid: u32,
     tap_name: String,
 }
 
 impl VmGuard {
-    /// Remove this VM's TAP interface. Call on explicit deletion.
-    /// Drop is a no-op so the TAP survives server restarts.
+    /// Kill the Firecracker process and remove the TAP interface.
+    /// Drop is a no-op so VMs survive server restarts.
     pub fn delete(self) {
+        let _ = kill(Pid::from_raw(self.pid as i32), Signal::SIGTERM);
         delete_tap(&self.tap_name);
     }
 }
@@ -71,6 +85,7 @@ impl Vm {
             id: self.id,
             guest_ip: self.guest_ip,
             socket_path: self.socket_path,
+            pid: self.pid,
             tap_name: self.tap_name,
         }
     }
@@ -124,12 +139,14 @@ pub async fn reconcile_vms(socket_dir: &Path) -> Vec<(String, VmGuard)> {
             }
         };
         let guest_ip = vm_guest_ip(net_idx);
+        let pid = find_pid_for_socket(&socket_path).unwrap_or(0);
         eprintln!("reconcile: recovered vm {vm_id} guest_ip={guest_ip}");
 
         recovered.push((vm_id.clone(), VmGuard {
             id: vm_id,
             guest_ip,
             socket_path,
+            pid,
             tap_name,
         }));
     }
@@ -142,6 +159,7 @@ pub async fn create_vm(vm_config: &VmConfig) -> Result<Vm> {
     let tap_ip = vm_tap_ip(net_idx);
     let mac = vm_guest_mac(net_idx);
     let guest_ip = vm_guest_ip(net_idx);
+    let socket_path = vm_config.socket_dir.join(format!("fc-{}.socket", vm_config.id));
 
     let boot_args = format!(
         "{} ip={guest_ip}::172.16.{net_idx}.1:255.255.255.252::eth0:none",
@@ -149,12 +167,35 @@ pub async fn create_vm(vm_config: &VmConfig) -> Result<Vm> {
     );
 
     create_tap(&tap_name, &tap_ip).await?;
-    configure_vm(&vm_config.socket_path, vm_config, &tap_name, &mac, &boot_args).await?;
-    start_instance(&vm_config.socket_path).await?;
+    let child = spawn_firecracker(&socket_path)?;
+    let pid = child.id().ok_or(Error::ProcessExited)?;
+    wait_for_socket(&socket_path).await?;
+    configure_vm(&socket_path, vm_config, &tap_name, &mac, &boot_args).await?;
+    start_instance(&socket_path).await?;
 
-    Ok(Vm { id: vm_config.id.clone(), guest_ip, socket_path: vm_config.socket_path.clone(), tap_name })
+    Ok(Vm { id: vm_config.id.clone(), guest_ip, socket_path, pid, _child: child, tap_name })
 }
 
+fn spawn_firecracker(socket_path: &Path) -> Result<Child> {
+    Ok(Command::new("firecracker")
+        .args(["--api-sock", &socket_path.to_string_lossy(), "--log-path", "/dev/null"])
+        .stdin(Stdio::null())
+        .stdout(Stdio::null())
+        .stderr(Stdio::null())
+        .kill_on_drop(false)
+        .process_group(0)
+        .spawn()?)
+}
+
+async fn wait_for_socket(socket_path: &Path) -> Result<()> {
+    for _ in 0..50 {
+        if socket_path.exists() {
+            return Ok(());
+        }
+        tokio::time::sleep(Duration::from_millis(100)).await;
+    }
+    Err(Error::SocketTimeout)
+}
 
 async fn configure_vm(
     socket_path: &Path,
@@ -203,16 +244,32 @@ async fn configure_vm(
     Ok(())
 }
 
+fn find_pid_for_socket(socket_path: &Path) -> Option<u32> {
+    let socket_bytes = socket_path.to_string_lossy().into_owned().into_bytes();
+    for entry in std::fs::read_dir("/proc").ok()?.flatten() {
+        let pid: u32 = match entry.file_name().to_string_lossy().parse() {
+            Ok(p) => p,
+            Err(_) => continue,
+        };
+        let cmdline = match std::fs::read(format!("/proc/{pid}/cmdline")) {
+            Ok(c) => c,
+            Err(_) => continue,
+        };
+        if cmdline.windows(socket_bytes.len()).any(|w| w == socket_bytes) {
+            return Some(pid);
+        }
+    }
+    None
+}
+
 fn delete_tap(tap_name: &str) {
-    let helper = net_helper_path();
-    let _ = std::process::Command::new(&helper)
+    let _ = std::process::Command::new(net_helper_path())
         .args(["tap-delete", tap_name])
         .status();
 }
 
 async fn create_tap(tap_name: &str, tap_ip: &str) -> Result<()> {
-    let helper = net_helper_path();
-    let status = Command::new(&helper)
+    let status = Command::new(net_helper_path())
         .args(["tap-create", tap_name, tap_ip])
         .status()
         .await?;
@@ -251,8 +308,7 @@ pub async fn setup_host_networking() {
         eprintln!("warning: could not determine host interface, skipping NAT setup");
         return;
     };
-    let helper = net_helper_path();
-    match Command::new(&helper).args(["setup-nat", &host_iface]).status().await {
+    match Command::new(net_helper_path()).args(["setup-nat", &host_iface]).status().await {
         Ok(s) if s.success() => {}
         Ok(s) => eprintln!("warning: net-helper setup-nat failed: exit {}", s.code().unwrap_or(-1)),
         Err(e) => eprintln!("warning: failed to run net-helper setup-nat: {e}"),
