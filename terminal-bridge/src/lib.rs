@@ -5,7 +5,6 @@ use std::task::{ready, Context, Poll};
 
 use nix::fcntl::{fcntl, FcntlArg, OFlag};
 use nix::pty::openpty;
-use nix::sys::termios::{cfmakeraw, tcgetattr, tcsetattr, OutputFlags, SetArg};
 use rustix::termios::{tcsetwinsize, Winsize};
 use thiserror::Error;
 use tokio::io::unix::AsyncFd;
@@ -53,7 +52,6 @@ impl PtySlave {
 
 pub fn open_pty() -> Result<PtyPair> {
     let pty = openpty(None, None)?;
-    // set_raw_mode(&pty.master)?;
     set_nonblocking_fd(&pty.master)?;
     let master = PtyMaster { fd: AsyncFd::new(pty.master)? };
     let slave = PtySlave { fd: pty.slave };
@@ -69,16 +67,6 @@ pub fn resize_pty_fd(fd: RawFd, rows: u16, cols: u16) -> Result<()> {
 
 pub fn resize_pty(pty_master: &PtyMaster, terminal_size: &TerminalSize) -> Result<()> {
     resize_pty_fd(pty_master.as_raw_fd(), terminal_size.rows, terminal_size.cols)
-}
-
-fn set_raw_mode(fd: &OwnedFd) -> Result<()> {
-    let mut termios = tcgetattr(fd)?;
-    cfmakeraw(&mut termios);
-    // cfmakeraw clears OPOST which disables all output processing, making ONLCR
-    // a no-op. Re-enable OPOST + ONLCR so \n from the VM becomes \r\n for xterm.js.
-    termios.output_flags |= OutputFlags::OPOST | OutputFlags::ONLCR;
-    tcsetattr(fd, SetArg::TCSANOW, &termios)?;
-    Ok(())
 }
 
 fn set_nonblocking_fd(fd: &OwnedFd) -> Result<()> {
