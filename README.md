@@ -101,10 +101,10 @@ cp id_rsa.pub squashfs-root/home/ubuntu/.ssh/authorized_keys
 sudo chown -R 1000:1000 squashfs-root/home/ubuntu/.ssh
 chmod 700 squashfs-root/home/ubuntu/.ssh
 chmod 600 squashfs-root/home/ubuntu/.ssh/authorized_keys
-echo "nameserver 8.8.8.8" > squashfs-root/etc/resolv.conf
+echo "nameserver 1.1.1.1" > squashfs-root/etc/resolv.conf
 
 sudo chown -R root:root squashfs-root
-truncate -s 1G ubuntu-24.04.ext4
+truncate -s 10G ubuntu-24.04.ext4
 sudo mkfs.ext4 -d squashfs-root -F ubuntu-24.04.ext4
 
 mv id_rsa ubuntu-24.04.id_rsa
@@ -112,6 +112,61 @@ sudo rm -rf squashfs-root
 ```
 
 Then set `SSH_USER=ubuntu` when running the server (see [Run](#run)).
+
+#### Install Claude Code into the rootfs
+
+To have Claude Code available in every VM terminal, install it into the squashfs tree before building the ext4 image. Do this after unpacking the squashfs but before running `mkfs.ext4`:
+
+```bash
+# Fix permissions required by apt inside the chroot
+sudo chmod 1777 squashfs-root/tmp
+sudo mkdir -p squashfs-root/var/cache/apt/archives/partial
+sudo mkdir -p squashfs-root/var/log/apt
+
+# Mount kernel filesystems so apt and npm work inside the chroot
+sudo mount --bind /proc  squashfs-root/proc
+sudo mount --bind /sys   squashfs-root/sys
+sudo mount --bind /dev   squashfs-root/dev
+
+# Install Node.js and Claude Code
+sudo chroot squashfs-root bash -c "
+  apt-get update -qq &&
+  apt-get install -y -qq nodejs npm &&
+  npm install -g @anthropic-ai/claude-code
+"
+
+# Unmount kernel filesystems
+sudo umount squashfs-root/dev
+sudo umount squashfs-root/sys
+sudo umount squashfs-root/proc
+```
+
+Then continue with `sudo chown -R root:root squashfs-root` and `mkfs.ext4` as normal.
+
+If you already have a built rootfs and want to add Claude Code in-place:
+
+```bash
+sudo mkdir -p /mnt/rootfs
+sudo mount ubuntu-24.04.ext4 /mnt/rootfs
+
+sudo chmod 1777 /mnt/rootfs/tmp
+sudo mkdir -p /mnt/rootfs/var/cache/apt/archives/partial
+sudo mkdir -p /mnt/rootfs/var/log/apt
+sudo mount --bind /proc /mnt/rootfs/proc
+sudo mount --bind /sys  /mnt/rootfs/sys
+sudo mount --bind /dev  /mnt/rootfs/dev
+
+sudo chroot /mnt/rootfs bash -c "
+  apt-get update -qq &&
+  apt-get install -y -qq nodejs npm &&
+  npm install -g @anthropic-ai/claude-code
+"
+
+sudo umount /mnt/rootfs/dev
+sudo umount /mnt/rootfs/sys
+sudo umount /mnt/rootfs/proc
+sudo umount /mnt/rootfs
+```
 
 If you already have a built rootfs you don't want to rebuild, inject the key in-place:
 
