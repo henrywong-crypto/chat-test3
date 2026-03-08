@@ -256,6 +256,7 @@ fn spawn_firecracker(socket_path: &Path) -> Result<Child> {
         .stdout(Stdio::null())
         .stderr(Stdio::null())
         .kill_on_drop(false)
+        .process_group(0)
         .spawn()?;
     Ok(child)
 }
