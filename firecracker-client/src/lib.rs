@@ -79,6 +79,17 @@ pub async fn start_instance(socket_path: &Path) -> Result<()> {
 }
 
 #[derive(Serialize)]
+pub struct Vsock {
+    pub guest_cid: u32,
+    pub uds_path: String,
+}
+
+pub async fn set_vsock(socket_path: &Path, vsock: &Vsock) -> Result<()> {
+    let body = serde_json::to_vec(vsock).unwrap();
+    send_put(socket_path, "/vsock", body).await
+}
+
+#[derive(Serialize)]
 pub struct MmdsConfig {
     /// MMDS version. Use "V2" for IMDSv2-style token-based requests (recommended for AWS SDK).
     #[serde(skip_serializing_if = "Option::is_none")]

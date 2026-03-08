@@ -1,16 +1,22 @@
-use std::path::PathBuf;
-use std::os::fd::{AsRawFd, RawFd};
+use std::path::{Path, PathBuf};
+use std::sync::Arc;
+use std::time::Duration;
 
+use anyhow::{bail, Context, Result};
+use async_trait::async_trait;
 use axum::extract::ws::{Message, WebSocket, WebSocketUpgrade};
 use axum::extract::State;
 use axum::response::{Html, Response};
 use axum::routing::get;
 use axum::Router;
 use bytes::Bytes;
-use firecracker_manager::{build_mmds_with_iam, create_vm, setup_host_networking, system_time_to_iso8601, ImdsCredential, VmConfig};
+use firecracker_manager::{
+    build_mmds_with_iam, create_vm, setup_host_networking, system_time_to_iso8601, ImdsCredential,
+    VmConfig,
+};
 use futures::{SinkExt, StreamExt};
-use terminal_bridge::{resize_pty_fd, PtyMaster};
-use tokio::io::{split, AsyncReadExt, AsyncWriteExt, ReadHalf, WriteHalf};
+use russh::client::{self, Handle};
+use russh::ChannelMsg;
 use tokio::net::TcpListener;
 
 #[derive(Clone)]
@@ -18,6 +24,22 @@ struct AppState {
     kernel_path: PathBuf,
     rootfs_path: PathBuf,
     socket_dir: PathBuf,
+    ssh_key_path: PathBuf,
+}
+
+struct SshClient;
+
+#[async_trait]
+impl client::Handler for SshClient {
+    type Error = russh::Error;
+
+    async fn check_server_key(
+        &mut self,
+        _server_public_key: &russh_keys::key::PublicKey,
+    ) -> Result<bool, Self::Error> {
+        // Ephemeral VMs: accept any host key.
+        Ok(true)
+    }
 }
 
 #[tokio::main]
@@ -56,98 +78,78 @@ async fn run_vm_session(ws: WebSocket, state: AppState) {
         }
     };
 
-    let (pty_master, _guard) = vm.into_pty_master();
-    let pty_raw_fd = pty_master.as_raw_fd();
-    let _ = resize_pty_fd(pty_raw_fd, 24, 80);
-    let (pty_reader, pty_writer) = split(pty_master);
-    let (ws_sender, ws_receiver) = ws.split();
+    let guest_ip = vm.guest_ip.clone();
+    let _guard = vm.into_guard();
 
-    tokio::select! {
-        _ = relay_pty_to_websocket(pty_reader, ws_sender) => {}
-        _ = relay_websocket_to_pty(ws_receiver, pty_writer, pty_raw_fd) => {}
+    if let Err(e) = run_ssh_relay(&guest_ip, &state.ssh_key_path, ws).await {
+        eprintln!("SSH session error: {e}");
     }
 }
 
-async fn relay_pty_to_websocket(
-    mut pty_reader: ReadHalf<PtyMaster>,
-    mut ws_sender: futures::stream::SplitSink<WebSocket, Message>,
-) {
-    let mut buf = vec![0u8; 4096];
-    loop {
-        match pty_reader.read(&mut buf).await {
-            Ok(0) | Err(_) => break,
-            Ok(n) => {
-                let msg = Message::Binary(Bytes::copy_from_slice(&buf[..n]));
-                if ws_sender.send(msg).await.is_err() {
-                    break;
-                }
+async fn run_ssh_relay(guest_ip: &str, key_path: &Path, ws: WebSocket) -> Result<()> {
+    let key = Arc::new(
+        russh_keys::load_secret_key(key_path, None).context("failed to load SSH private key")?,
+    );
+    let config = Arc::new(client::Config::default());
+    let addr = format!("{guest_ip}:22");
+    let deadline = tokio::time::Instant::now() + Duration::from_secs(60);
+
+    // Retry until sshd is up (VM still booting).
+    let mut handle: Handle<SshClient> = loop {
+        match client::connect(config.clone(), addr.as_str(), SshClient).await {
+            Ok(h) => break h,
+            Err(_) if tokio::time::Instant::now() < deadline => {
+                tokio::time::sleep(Duration::from_millis(500)).await;
             }
+            Err(e) => bail!("SSH connect timed out: {e}"),
         }
+    };
+
+    let ok = handle.authenticate_publickey("root", key).await?;
+    if !ok {
+        bail!("SSH authentication rejected");
     }
-}
 
-async fn relay_websocket_to_pty(
-    mut ws_receiver: futures::stream::SplitStream<WebSocket>,
-    mut pty_writer: WriteHalf<PtyMaster>,
-    pty_raw_fd: RawFd,
-) {
-    use std::time::Duration;
-    use tokio::time::Instant;
+    let mut channel = handle.channel_open_session().await?;
+    channel.request_pty(false, "xterm-256color", 80, 24, 0, 0, &[]).await?;
+    channel.request_shell(false).await?;
 
-    let mut last_rows: u16 = 24;
-    let mut last_cols: u16 = 80;
-    // Retry queue: inject stty again after short delays on the initial connection
-    // in case the first injection arrives before the guest shell is ready.
-    let mut retry_at: Option<Instant> = None;
-    const RETRY_DELAY: Duration = Duration::from_millis(400);
-
+    let (mut ws_sender, mut ws_receiver) = ws.split();
     loop {
         tokio::select! {
-            opt = ws_receiver.next() => {
-                let msg = match opt {
-                    Some(Ok(m)) => m,
-                    _ => break,
-                };
+            msg = channel.wait() => {
                 match msg {
-                    Message::Binary(data) => {
-                        if pty_writer.write_all(&data).await.is_err() {
+                    Some(ChannelMsg::Data { ref data }) => {
+                        if ws_sender.send(Message::Binary(Bytes::copy_from_slice(data))).await.is_err() {
                             break;
                         }
                     }
-                    Message::Text(text) => {
-                        if let Ok(json) = serde_json::from_str::<serde_json::Value>(&text) {
-                            if json.get("type").and_then(|v| v.as_str()) == Some("resize") {
-                                let rows = json["rows"].as_u64().unwrap_or(24) as u16;
-                                let cols = json["cols"].as_u64().unwrap_or(80) as u16;
-                                last_rows = rows;
-                                last_cols = cols;
-                                let _ = resize_pty_fd(pty_raw_fd, rows, cols);
-                                // Guest serial (ttyS0) doesn't get TIOCSWINSZ from host; inject
-                                // stty on every resize so TUI apps always see the correct size.
-                                // Note: resizing while a TUI app is running will inject keystrokes.
-                                let cmd = format!("stty cols {} rows {}; export TERM=xterm-256color\n", cols, rows);
-                                let _ = pty_writer.write_all(cmd.as_bytes()).await;
-                                // Also schedule a retry in case this injection arrives before
-                                // the guest shell is ready (e.g. VM still booting).
-                                if retry_at.is_none() {
-                                    retry_at = Some(Instant::now() + RETRY_DELAY);
-                                }
-                            }
-                        }
-                    }
-                    Message::Close(_) => break,
+                    Some(ChannelMsg::ExitStatus { .. }) | None => break,
                     _ => {}
                 }
             }
-            _ = tokio::time::sleep_until(
-                retry_at.as_ref().copied().unwrap_or(Instant::now() + Duration::from_secs(999999))
-            ), if retry_at.is_some() => {
-                retry_at = None;
-                let cmd = format!("stty cols {} rows {}; export TERM=xterm-256color\n", last_cols, last_rows);
-                let _ = pty_writer.write_all(cmd.as_bytes()).await;
+            ws_msg = ws_receiver.next() => {
+                match ws_msg {
+                    Some(Ok(Message::Binary(data))) => {
+                        if channel.data(&data[..]).await.is_err() {
+                            break;
+                        }
+                    }
+                    Some(Ok(Message::Text(text))) => {
+                        if let Ok(json) = serde_json::from_str::<serde_json::Value>(&text) {
+                            if json["type"] == "resize" {
+                                let cols = json["cols"].as_u64().unwrap_or(80) as u32;
+                                let rows = json["rows"].as_u64().unwrap_or(24) as u32;
+                                let _ = channel.window_change(cols, rows, 0, 0).await;
+                            }
+                        }
+                    }
+                    _ => break,
+                }
             }
         }
     }
+    Ok(())
 }
 
 fn build_vm_config(state: &AppState, iam_creds: Option<(String, ImdsCredential)>) -> VmConfig {
@@ -166,7 +168,7 @@ fn build_vm_config(state: &AppState, iam_creds: Option<(String, ImdsCredential)>
         rootfs_path: state.rootfs_path.clone(),
         vcpu_count: 2,
         mem_size_mib: 4096,
-        boot_args: "console=ttyS0 reboot=k panic=1 quiet loglevel=3 selinux=0".to_string(),
+        boot_args: "reboot=k panic=1 quiet loglevel=3 selinux=0".to_string(),
         mmds_metadata: Some(mmds_metadata),
         mmds_imds_compat,
     }
@@ -177,11 +179,12 @@ async fn fetch_host_iam_credentials() -> Option<(String, ImdsCredential)> {
     use aws_credential_types::provider::ProvideCredentials;
 
     let provider = DefaultCredentialsChain::builder().build().await;
-    let creds = provider.provide_credentials().await
+    let creds = provider
+        .provide_credentials()
+        .await
         .map_err(|e| eprintln!("failed to fetch host credentials: {e}"))
         .ok()?;
-    let role_name =
-        std::env::var("AWS_ROLE_NAME").unwrap_or_else(|_| "vm-role".to_string());
+    let role_name = std::env::var("AWS_ROLE_NAME").unwrap_or_else(|_| "vm-role".to_string());
     let expiration = creds
         .expiry()
         .map(system_time_to_iso8601)
@@ -213,6 +216,10 @@ fn load_app_state() -> AppState {
         socket_dir: PathBuf::from(
             std::env::var("SOCKET_DIR").unwrap_or_else(|_| "/tmp".to_string()),
         ),
+        ssh_key_path: PathBuf::from(
+            std::env::var("SSH_KEY_PATH")
+                .unwrap_or_else(|_| "/var/lib/fc/id_rsa".to_string()),
+        ),
     }
 }
 
@@ -241,32 +248,24 @@ const FRONTEND_HTML: &str = r#"<!DOCTYPE html>
     const ws = new WebSocket('ws://' + location.host + '/ws');
     ws.binaryType = 'arraybuffer';
 
-    // Send current terminal dimensions to the server.
     function sendResize() {
       if (ws.readyState === WebSocket.OPEN) {
         ws.send(JSON.stringify({ type: 'resize', rows: term.rows, cols: term.cols }));
       }
     }
 
-    // Every time xterm's character grid changes, tell the server.
     term.onResize(sendResize);
 
     ws.onopen = () => {
       term.onData(data => ws.send(new TextEncoder().encode(data)));
-      // Explicitly send the current size in case onResize already fired
-      // before the socket was open (ResizeObserver initial callback).
       sendResize();
     };
 
     ws.onmessage = event => term.write(new Uint8Array(event.data));
     ws.onclose = () => term.write('\r\nconnection closed\r\n');
 
-    // ResizeObserver is the single resize driver.
-    // It fires once immediately on observe (giving the initial size) and again
-    // whenever the container dimensions change (window resize, fullscreen, etc.).
     new ResizeObserver(() => fitAddon.fit()).observe(container);
 
-    // F11 fullscreen — fullscreenchange triggers ResizeObserver automatically.
     document.addEventListener('keydown', e => {
       if (e.key === 'F11') {
         e.preventDefault();
