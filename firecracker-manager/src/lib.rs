@@ -69,10 +69,7 @@ pub struct VmGuard {
 
 impl Drop for VmGuard {
     fn drop(&mut self) {
-        // Recovered VMs have no child handle — kill by PID directly.
-        if self._child.is_none() {
-            let _ = kill(Pid::from_raw(self.pid as i32), Signal::SIGTERM);
-        }
+        let _ = kill(Pid::from_raw(self.pid as i32), Signal::SIGTERM);
         let helper = net_helper_path();
         let _ = std::process::Command::new(&helper)
             .args(["tap-delete", &self.tap_name])
@@ -230,7 +227,7 @@ fn spawn_firecracker(socket_path: &Path) -> Result<Child> {
         .stdin(Stdio::null())
         .stdout(Stdio::null())
         .stderr(Stdio::null())
-        .kill_on_drop(true)
+        .kill_on_drop(false)
         .spawn()?;
     Ok(child)
 }
