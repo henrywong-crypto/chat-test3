@@ -29,6 +29,8 @@ pub enum Error {
     SocketTimeout,
     #[error("process exited before pid was available")]
     ProcessExited,
+    #[error("firecracker exited immediately after start: {0}")]
+    FirecrackerExited(String),
     #[error("network setup failed: {0}")]
     NetworkSetup(String),
 }
@@ -105,11 +107,12 @@ pub async fn create_vm(vm_config: &VmConfig) -> Result<Vm> {
     );
 
     create_tap(&tap_name, &tap_ip).await?;
-    let child = spawn_firecracker(&socket_path)?;
+    let mut child = spawn_firecracker(&socket_path)?;
     let pid = child.id().ok_or(Error::ProcessExited)?;
     wait_for_socket(&socket_path).await?;
     configure_vm(&socket_path, vm_config, &tap_name, &mac, &boot_args).await?;
     start_instance(&socket_path).await?;
+    check_still_running(&mut child).await?;
 
     Ok(Vm { id: vm_config.id.clone(), guest_ip, socket_path, pid, _child: child, tap_name })
 }
@@ -119,10 +122,19 @@ fn spawn_firecracker(socket_path: &Path) -> Result<Child> {
         .args(["--api-sock", &socket_path.to_string_lossy()])
         .stdin(Stdio::null())
         .stdout(Stdio::null())
-        .stderr(Stdio::null())
+        .stderr(Stdio::inherit())
         .kill_on_drop(false)
         .process_group(0)
         .spawn()?)
+}
+
+async fn check_still_running(child: &mut Child) -> Result<()> {
+    tokio::time::sleep(Duration::from_millis(500)).await;
+    match child.try_wait() {
+        Ok(Some(status)) => Err(Error::FirecrackerExited(status.to_string())),
+        Ok(None) => Ok(()),
+        Err(e) => Err(Error::Io(e)),
+    }
 }
 
 async fn wait_for_socket(socket_path: &Path) -> Result<()> {
