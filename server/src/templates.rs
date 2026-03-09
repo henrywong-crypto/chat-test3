@@ -166,6 +166,7 @@ fn render_terminal_topbar(short_id: &str, csrf_token: &str, has_user_rootfs: boo
                 }
                 button id="upload-toggle" class="btn" onclick="toggleUpload()" { "↑ Upload" }
                 button id="download-toggle" class="btn" onclick="toggleDownload()" { "↓ Download" }
+                a href="/logout" class="btn btn-ghost" { "Logout" }
             }
         }
     }
