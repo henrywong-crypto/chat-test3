@@ -40,7 +40,9 @@ pub(crate) async fn create_vm_handler(
     _user: User,
     State(state): State<AppState>,
 ) -> Result<impl IntoResponse, AppError> {
+    eprintln!("[handler] create_vm_handler: fetching IAM creds");
     let iam_creds = fetch_host_iam_credentials().await;
+    eprintln!("[handler] create_vm_handler: IAM creds done, creating VM");
     let vm_config = build_vm_config(&state, iam_creds);
     let vm = create_vm(&vm_config).await?;
     let created_at = SystemTime::now()
@@ -61,6 +63,7 @@ pub(crate) async fn create_vm_handler(
                 _guard: vm.into_guard(),
             },
         );
+    eprintln!("[handler] create_vm_handler: redirecting to /terminal/{vm_id}");
     Ok(Redirect::to(&format!("/terminal/{vm_id}")))
 }
 
@@ -81,5 +84,6 @@ pub(crate) async fn get_terminal_page(
     _user: User,
     Path(vm_id): Path<String>,
 ) -> Html<String> {
+    eprintln!("[handler] get_terminal_page: vm_id={vm_id}");
     Html(render_terminal_page(&vm_id).into_string())
 }
