@@ -6,7 +6,7 @@ use firecracker_client::{
     NetworkInterface,
 };
 pub use mmds_iam::{
-    build_mmds_with_iam, imds_compat_mmds_config, system_time_to_iso8601, ImdsCredential,
+    build_mmds_with_iam, imds_compat_mmds_config, ImdsCredential,
 };
 use nix::{
     sys::signal::{kill, Signal},
@@ -58,7 +58,6 @@ pub struct VmGuard {
 
 impl VmGuard {
     pub fn delete(self) {
-        // drop runs the cleanup
     }
 
     pub async fn save_rootfs_to(&self, dest: &Path) -> Result<()> {
@@ -149,8 +148,6 @@ fn build_vm_boot_args(base_boot_args: &str, guest_ip: &str, net_idx: u32) -> Str
     format!("{base_boot_args} ip={guest_ip}::172.16.{net_idx}.1:255.255.255.252::eth0:none")
 }
 
-/// Kill and clean up any VMs left over from a previous server run.
-/// Call this once on startup before accepting requests.
 pub fn cleanup_stale_vms(socket_dir: &Path) {
     let Ok(entries) = std::fs::read_dir(socket_dir) else {
         return;

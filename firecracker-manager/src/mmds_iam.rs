@@ -1,15 +1,7 @@
-//! Helpers for passing IAM role credentials to Firecracker guests via MMDS in
-//! EC2 IMDS-compatible format so the AWS SDK (e.g. Rust default credential chain) works.
-//!
-//! See [docs/mmds-iam-role.md](../../docs/mmds-iam-role.md) for the full design.
-
 use anyhow::Result;
-use chrono::{DateTime, Utc};
+use chrono::Utc;
 use serde::Serialize;
-use std::time::SystemTime;
 
-/// EC2 IMDS credential response shape. The guest (e.g. AWS SDK) expects this
-/// exact structure at `latest/meta-data/iam/security-credentials/<role-name>`.
 #[derive(Debug, Clone, Serialize)]
 #[serde(rename_all = "PascalCase")]
 pub struct ImdsCredential {
@@ -24,7 +16,6 @@ pub struct ImdsCredential {
 }
 
 impl ImdsCredential {
-    /// Build from temporary credential fields (e.g. from STS AssumeRole / GetSessionToken).
     pub fn new(
         access_key_id: impl Into<String>,
         secret_access_key: impl Into<String>,
@@ -47,21 +38,14 @@ fn format_iso8601_now() -> String {
     Utc::now().format("%Y-%m-%dT%H:%M:%SZ").to_string()
 }
 
-pub fn system_time_to_iso8601(t: SystemTime) -> String {
-    let dt: DateTime<Utc> = t.into();
-    dt.format("%Y-%m-%dT%H:%M:%SZ").to_string()
-}
-
-/// Build full MMDS JSON for initial `PUT /mmds`: instance-id + IAM credentials
-/// in EC2 IMDS shape. Use with `imds_compat: true` and `version: "V2"` in MmdsConfig.
 pub fn build_mmds_with_iam(
     instance_id: &str,
     role_name: &str,
     credential: &ImdsCredential,
 ) -> Result<serde_json::Value> {
-    // Store credentials as a JSON string (leaf node), not a nested object.
-    // MMDS treats nested objects as directories and returns key listings instead
-    // of JSON, which breaks the AWS CLI and SDK credential parsers.
+    // Credentials are stored as a JSON string (leaf node) rather than a nested object.
+    // MMDS treats nested objects as directories and returns key listings instead of JSON,
+    // which breaks the AWS SDK credential parser.
     let cred_str = serde_json::to_string(credential)?;
     let mut security_credentials = serde_json::Map::new();
     security_credentials.insert(role_name.to_string(), serde_json::Value::String(cred_str));
@@ -77,8 +61,6 @@ pub fn build_mmds_with_iam(
     }))
 }
 
-/// MmdsConfig tuned for EC2 IMDS compatibility so the AWS SDK default credential
-/// chain in the guest works without env vars.
 pub fn imds_compat_mmds_config(
     network_interface_ids: Vec<String>,
 ) -> firecracker_client::MmdsConfig {

@@ -1,12 +1,21 @@
 use anyhow::Result;
 use aws_config::default_provider::credentials::DefaultCredentialsChain;
 use aws_credential_types::{provider::ProvideCredentials, Credentials};
-use firecracker_manager::{build_mmds_with_iam, system_time_to_iso8601, ImdsCredential, VmConfig};
-use std::path::{Path, PathBuf};
+use chrono::{DateTime, Utc};
+use firecracker_manager::{build_mmds_with_iam, ImdsCredential, VmConfig};
+use std::{
+    path::{Path, PathBuf},
+    time::SystemTime,
+};
 use tracing::{error, info, warn};
 use uuid::Uuid;
 
 use crate::state::{AppConfig, AppState, VmEntry};
+
+fn system_time_to_iso8601(t: SystemTime) -> String {
+    let dt: DateTime<Utc> = t.into();
+    dt.format("%Y-%m-%dT%H:%M:%SZ").to_string()
+}
 
 pub(crate) fn build_vm_config(
     state: &AppConfig,

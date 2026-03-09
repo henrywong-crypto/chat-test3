@@ -9,8 +9,9 @@ use axum::http::StatusCode;
 use axum::response::{Html, IntoResponse};
 use axum::routing::get;
 use axum::{Json, Router};
+use chrono::{DateTime, Utc};
 use firecracker_manager::{
-    build_mmds_with_iam, create_vm, reconcile_vms, setup_host_networking, system_time_to_iso8601,
+    build_mmds_with_iam, create_vm, reconcile_vms, setup_host_networking,
     ImdsCredential, VmConfig, VmGuard,
 };
 use serde::{Deserialize, Serialize};
@@ -175,6 +176,11 @@ fn build_vm_config(
         mmds_metadata: Some(mmds_metadata),
         mmds_imds_compat,
     }
+}
+
+fn system_time_to_iso8601(t: SystemTime) -> String {
+    let dt: DateTime<Utc> = t.into();
+    dt.format("%Y-%m-%dT%H:%M:%SZ").to_string()
 }
 
 async fn fetch_host_iam_credentials() -> Option<(String, ImdsCredential)> {

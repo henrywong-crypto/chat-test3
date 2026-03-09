@@ -6,14 +6,11 @@ use crate::http::send_put;
 
 #[derive(Serialize)]
 pub struct MmdsConfig {
-    /// MMDS version. Use "V2" for IMDSv2-style token-based requests (recommended for AWS SDK).
     #[serde(skip_serializing_if = "Option::is_none")]
     pub version: Option<String>,
     pub network_interfaces: Vec<String>,
-    /// IPv4 address for MMDS in the guest. Default 169.254.169.254 (same as EC2 IMDS).
     #[serde(skip_serializing_if = "Option::is_none")]
     pub ipv4_address: Option<String>,
-    /// When true, MMDS responds in EC2 IMDS format so AWS SDK default credential chain works.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub imds_compat: Option<bool>,
 }
