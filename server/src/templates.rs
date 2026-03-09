@@ -29,7 +29,7 @@ pub(crate) fn render_login_page() -> Markup {
     }
 }
 
-pub(crate) fn render_vms_page(vms: &[VmInfo]) -> Markup {
+pub(crate) fn render_vms_page(vms: &[VmInfo], csrf_token: &str) -> Markup {
     html! {
         (DOCTYPE)
         html lang="en" data-theme="dark" {
@@ -45,17 +45,18 @@ pub(crate) fn render_vms_page(vms: &[VmInfo]) -> Markup {
                     div class="flex justify-between items-center mb-6" {
                         h1 class="text-xl font-bold text-primary" { "vm-terminal" }
                         form method="post" action="/vms" {
+                            input type="hidden" name="csrf_token" value=(csrf_token);
                             button type="submit" class="btn btn-primary btn-sm" { "+ New VM" }
                         }
                     }
-                    (render_vm_table(vms))
+                    (render_vm_table(vms, csrf_token))
                 }
             }
         }
     }
 }
 
-fn render_vm_table(vms: &[VmInfo]) -> Markup {
+fn render_vm_table(vms: &[VmInfo], csrf_token: &str) -> Markup {
     if vms.is_empty() {
         return html! {
             p class="text-base-content/50 text-center py-8" { "No running VMs." }
@@ -75,7 +76,7 @@ fn render_vm_table(vms: &[VmInfo]) -> Markup {
                 }
                 tbody {
                     @for vm in vms {
-                        (render_vm_row(vm))
+                        (render_vm_row(vm, csrf_token))
                     }
                 }
             }
@@ -83,7 +84,7 @@ fn render_vm_table(vms: &[VmInfo]) -> Markup {
     }
 }
 
-fn render_vm_row(vm: &VmInfo) -> Markup {
+fn render_vm_row(vm: &VmInfo, csrf_token: &str) -> Markup {
     let short_id = format!("{}…", vm.id.get(..8).unwrap_or(&vm.id));
     let started = format_time_ago(vm.created_at);
     html! {
@@ -95,6 +96,7 @@ fn render_vm_row(vm: &VmInfo) -> Markup {
             td class="flex gap-2" {
                 a href={ "/terminal/" (vm.id) } class="btn btn-sm" { "Connect" }
                 form method="post" action={ "/vms/" (vm.id) "/delete" } {
+                    input type="hidden" name="csrf_token" value=(csrf_token);
                     button type="submit" class="btn btn-error btn-sm" { "Delete" }
                 }
             }

@@ -8,6 +8,10 @@ mod vm;
 
 use anyhow::{Context, Result};
 use axum::{
+    extract::Request,
+    http::HeaderValue,
+    middleware::{self, Next},
+    response::Response,
     routing::{get, post},
     Router,
 };
@@ -16,6 +20,7 @@ use firecracker_manager::{cleanup_stale_vms, setup_host_networking};
 use time::Duration;
 use tokio::net::TcpListener;
 use tower_sessions::{cookie::SameSite, Expiry, MemoryStore, SessionManagerLayer};
+use tracing::info;
 
 use crate::{
     auth::{get_callback_handler, get_cognito_login_handler, get_demo_handler, get_login_handler, get_logout_handler},
@@ -26,6 +31,7 @@ use crate::{
 
 #[tokio::main]
 async fn main() -> Result<()> {
+    tracing_subscriber::fmt::init();
     let args = Args::parse();
     let port = args.port;
     cleanup_stale_vms(&args.socket_dir);
@@ -50,19 +56,40 @@ fn build_router(app_state: AppState) -> Router {
         .route("/callback", get(get_callback_handler))
         .with_state(app_state)
         .layer(session_layer)
+        .layer(middleware::from_fn(add_security_headers))
 }
 
 fn build_session_layer() -> SessionManagerLayer<MemoryStore> {
     SessionManagerLayer::new(MemoryStore::default())
-        .with_secure(false)
+        .with_secure(true)
         .with_same_site(SameSite::Lax)
         .with_expiry(Expiry::OnInactivity(Duration::seconds(86400)))
+}
+
+async fn add_security_headers(request: Request, next: Next) -> Response {
+    let mut response = next.run(request).await;
+    let headers = response.headers_mut();
+    headers.insert("x-frame-options", HeaderValue::from_static("DENY"));
+    headers.insert("x-content-type-options", HeaderValue::from_static("nosniff"));
+    headers.insert("referrer-policy", HeaderValue::from_static("strict-origin-when-cross-origin"));
+    headers.insert(
+        "content-security-policy",
+        HeaderValue::from_static(
+            "default-src 'self'; \
+             script-src 'self' 'unsafe-inline' https://cdn.jsdelivr.net https://cdn.tailwindcss.com; \
+             style-src 'self' 'unsafe-inline' https://cdn.jsdelivr.net; \
+             connect-src 'self'; \
+             img-src 'self' data:; \
+             font-src 'self' data:"
+        ),
+    );
+    response
 }
 
 async fn serve_router(router: Router, port: u16) -> Result<()> {
     let tcp_listener = TcpListener::bind(format!("0.0.0.0:{port}"))
         .await
         .with_context(|| format!("failed to bind to port {port}"))?;
-    println!("listening on http://0.0.0.0:{port}");
+    info!("listening on http://0.0.0.0:{port}");
     axum::serve(tcp_listener, router).await.context("server error")
 }

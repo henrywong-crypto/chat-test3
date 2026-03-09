@@ -4,37 +4,40 @@ use axum::{
         ws::{Message, WebSocket, WebSocketUpgrade},
         Path, State,
     },
-    response::Response,
+    http::StatusCode,
+    response::{IntoResponse, Response},
 };
 use futures::{SinkExt, StreamExt};
 use russh::ChannelMsg;
+use tracing::error;
+use uuid::Uuid;
 
 use crate::{
     auth::User,
     ssh::{connect_ssh, open_terminal_channel},
-    state::{AppState, find_vm_guest_ip},
+    state::{AppState, find_vm_guest_ip_for_user},
 };
 
 pub(crate) async fn handle_ws_upgrade(
-    _user: User,
+    user: User,
     Path(vm_id): Path<String>,
     ws: WebSocketUpgrade,
     State(state): State<AppState>,
 ) -> Response {
-    ws.on_upgrade(|socket| run_terminal_session(socket, state, vm_id))
+    if Uuid::parse_str(&vm_id).is_err() {
+        return (StatusCode::NOT_FOUND, "Not found").into_response();
+    }
+    let email = user.email;
+    ws.on_upgrade(move |socket| run_terminal_session(socket, state, vm_id, email))
 }
 
-async fn run_terminal_session(ws: WebSocket, state: AppState, vm_id: String) {
-    let guest_ip = match find_vm_guest_ip(&state.vms, &vm_id) {
+async fn run_terminal_session(ws: WebSocket, state: AppState, vm_id: String, email: String) {
+    let guest_ip = match find_vm_guest_ip_for_user(&state.vms, &vm_id, &email) {
         Some(ip) => ip,
-        None => {
-            eprintln!("[terminal] VM {vm_id} not found in registry");
-            return;
-        }
+        None => return,
     };
-    eprintln!("[terminal] starting session for vm={vm_id} ip={guest_ip}");
     if let Err(e) = run_ssh_relay(&guest_ip, &state, ws).await {
-        eprintln!("[terminal] session error vm={vm_id}: {e}");
+        error!("terminal session error: {e}");
     }
 }
 

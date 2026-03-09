@@ -11,6 +11,7 @@ use axum::{
 use clap::Parser;
 use firecracker_manager::VmGuard;
 use serde::Serialize;
+use tracing::error;
 
 #[derive(Parser)]
 pub(crate) struct Args {
@@ -68,6 +69,7 @@ pub(crate) struct VmEntry {
     pub(crate) guest_ip: String,
     pub(crate) pid: u32,
     pub(crate) created_at: u64,
+    pub(crate) email: String,
     pub(crate) _guard: VmGuard,
 }
 
@@ -83,7 +85,8 @@ pub(crate) struct AppError(pub(crate) anyhow::Error);
 
 impl IntoResponse for AppError {
     fn into_response(self) -> Response {
-        (StatusCode::INTERNAL_SERVER_ERROR, self.0.to_string()).into_response()
+        error!("internal error: {}", self.0);
+        (StatusCode::INTERNAL_SERVER_ERROR, "An internal error occurred").into_response()
     }
 }
 
@@ -112,6 +115,8 @@ pub(crate) fn build_app_state(args: Args) -> Result<AppState> {
     })
 }
 
-pub(crate) fn find_vm_guest_ip(vms: &VmRegistry, vm_id: &str) -> Option<String> {
-    vms.lock().ok()?.get(vm_id).map(|vm_entry| vm_entry.guest_ip.clone())
+pub(crate) fn find_vm_guest_ip_for_user(vms: &VmRegistry, vm_id: &str, email: &str) -> Option<String> {
+    let registry = vms.lock().ok()?;
+    let entry = registry.get(vm_id)?;
+    (entry.email == email).then(|| entry.guest_ip.clone())
 }

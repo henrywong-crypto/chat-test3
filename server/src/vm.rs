@@ -1,6 +1,7 @@
 use aws_config::default_provider::credentials::DefaultCredentialsChain;
 use aws_credential_types::provider::ProvideCredentials;
 use firecracker_manager::{build_mmds_with_iam, system_time_to_iso8601, ImdsCredential, VmConfig};
+use tracing::warn;
 use uuid::Uuid;
 
 use crate::state::AppState;
@@ -32,7 +33,7 @@ pub(crate) async fn fetch_host_iam_credentials() -> Option<(String, ImdsCredenti
     let creds = provider
         .provide_credentials()
         .await
-        .map_err(|e| eprintln!("failed to fetch host credentials: {e}"))
+        .map_err(|e| warn!("failed to fetch host credentials: {e}"))
         .ok()?;
     let role_name = std::env::var("AWS_ROLE_NAME").unwrap_or_else(|_| "vm-role".to_string());
     let expiration = creds
