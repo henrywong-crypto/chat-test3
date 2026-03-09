@@ -118,7 +118,7 @@ pub(crate) async fn create_vm_handler(
     if user_vm_count >= state.max_vms_per_user {
         return Ok((
             StatusCode::FORBIDDEN,
-            format!("VM limit reached (max {})", state.max_vms_per_user),
+            format!("Session limit reached (max {})", state.max_vms_per_user),
         )
             .into_response());
     }

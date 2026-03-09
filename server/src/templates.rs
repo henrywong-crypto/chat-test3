@@ -63,7 +63,7 @@ pub(crate) fn render_login_page() -> Markup {
             head {
                 meta charset="utf-8";
                 meta name="viewport" content="width=device-width, initial-scale=1";
-                title { "vm-terminal" }
+                title { "WebCode" }
                 style { (PreEscaped(base_styles())) (PreEscaped("
                     body { display: flex; align-items: center; justify-content: center; min-height: 100vh; }
                     .login-card {
@@ -78,7 +78,7 @@ pub(crate) fn render_login_page() -> Markup {
             }
             body {
                 div class="login-card" {
-                    h1 { "vm-terminal" }
+                    h1 { "WebCode" }
                     a href="/login/cognito" class="btn btn-primary" { "Sign in with Cognito" }
                     div class="divider" { "or" }
                     a href="/demo" class="btn" { "Try Demo" }
@@ -95,7 +95,7 @@ pub(crate) fn render_vms_page(vms: &[VmInfo], csrf_token: &str, has_user_rootfs:
             head {
                 meta charset="utf-8";
                 meta name="viewport" content="width=device-width, initial-scale=1";
-                title { "vm-terminal" }
+                title { "WebCode" }
                 style { (PreEscaped(base_styles())) (PreEscaped("
                     .topbar {
                         display: flex; align-items: center; justify-content: space-between;
@@ -123,10 +123,10 @@ pub(crate) fn render_vms_page(vms: &[VmInfo], csrf_token: &str, has_user_rootfs:
             }
             body {
                 div class="topbar" {
-                    span class="topbar-title" { "vm-terminal" }
+                    span class="topbar-title" { "WebCode" }
                     form method="post" action="/vms" {
                         input type="hidden" name="csrf_token" value=(csrf_token);
-                        button type="submit" class="btn btn-primary" { "+ New VM" }
+                        button type="submit" class="btn btn-primary" { "+ New Session" }
                     }
                 }
                 div class="content" {
@@ -142,11 +142,11 @@ fn render_vm_section(vms: &[VmInfo], csrf_token: &str) -> Markup {
     html! {
         div class="section" {
             div class="section-header" {
-                span { "Virtual machines" }
+                span { "Sessions" }
                 span { (vms.len()) " running" }
             }
             @if vms.is_empty() {
-                div class="empty" { "No running VMs. Create one to get started." }
+                div class="empty" { "No running sessions. Create one to get started." }
             } @else {
                 table {
                     thead {
@@ -199,14 +199,14 @@ fn render_disk_section(csrf_token: &str, has_user_rootfs: bool) -> Markup {
                 span class="disk-label" { "Status:" }
                 @if has_user_rootfs {
                     span class="badge badge-green" { "saved" }
-                    span style="color:var(--text-muted)" { "Your disk will be restored on the next VM." }
+                    span style="color:var(--text-muted)" { "Your disk will be restored on the next session." }
                     form method="post" action="/rootfs/delete" style="margin-left:auto" {
                         input type="hidden" name="csrf_token" value=(csrf_token);
                         button type="submit" class="btn btn-danger" { "Delete saved disk" }
                     }
                 } @else {
                     span class="badge badge-gray" { "none" }
-                    span style="color:var(--text-muted)" { "Base image will be used on next VM." }
+                    span style="color:var(--text-muted)" { "Base image will be used on next session." }
                 }
             }
         }
@@ -223,7 +223,7 @@ pub(crate) fn render_terminal_page(vm_id: &str, csrf_token: &str, upload_dir: &s
         html lang="en" {
             head {
                 meta charset="utf-8";
-                title { "vm-terminal — " (short_id) }
+                title { "WebCode — " (short_id) }
                 link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/xterm@5/css/xterm.css";
                 style { (PreEscaped(base_styles())) (PreEscaped("
                     body { display: flex; flex-direction: column; height: 100vh; overflow: hidden; }
@@ -273,7 +273,7 @@ fn render_terminal_topbar(short_id: &str) -> Markup {
     html! {
         div id="topbar" {
             div id="topbar-left" {
-                a href="/vms" class="btn btn-ghost" style="padding:4px 8px" { "← VMs" }
+                a href="/vms" class="btn btn-ghost" style="padding:4px 8px" { "← Sessions" }
                 span id="vm-id" { (short_id) }
             }
             div id="topbar-right" {

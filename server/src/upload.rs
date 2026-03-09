@@ -31,7 +31,7 @@ pub(crate) async fn upload_file_handler(
         return Ok((StatusCode::FORBIDDEN, "Forbidden").into_response());
     }
     let guest_ip = find_vm_guest_ip_for_user(&state.vms, &vm_id, &user.email)
-        .ok_or_else(|| anyhow!("VM {vm_id} not found"))?;
+        .ok_or_else(|| anyhow!("Session {vm_id} not found"))?;
     let validated_path = validate_upload_path(&remote_path, &state.upload_dir)?;
     let mut ssh_handle = connect_ssh(
         &guest_ip,

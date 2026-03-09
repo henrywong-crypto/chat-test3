@@ -54,7 +54,7 @@ async fn main() -> Result<()> {
     );
     let recovered = reconcile_vms(&socket_dir).await;
     if !recovered.is_empty() {
-        println!("reconciled {} existing VM(s)", recovered.len());
+        println!("reconciled {} existing session(s)", recovered.len());
         let mut registry = state.vms.lock().unwrap();
         for (id, guard) in recovered {
             let created_at = SystemTime::now()
@@ -226,7 +226,7 @@ const FRONTEND_HTML: &str = r#"<!DOCTYPE html>
 <html>
 <head>
   <meta charset="utf-8" />
-  <title>vm-terminal</title>
+  <title>WebCode</title>
   <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/xterm@5/css/xterm.css" />
   <style>
     *, *::before, *::after { box-sizing: border-box; }
@@ -258,14 +258,14 @@ const FRONTEND_HTML: &str = r#"<!DOCTYPE html>
 <body>
 <div id="list-view">
   <div class="list-header">
-    <h1>vm-terminal</h1>
-    <button id="new-btn" class="btn-primary" onclick="newVm()">+ New VM</button>
+    <h1>WebCode</h1>
+    <button id="new-btn" class="btn-primary" onclick="newVm()">+ New Session</button>
   </div>
   <div id="vm-table-wrap"></div>
 </div>
 <div id="terminal-view">
   <div id="term-header">
-    <button onclick="backToList()">&#8592; VMs</button>
+    <button onclick="backToList()">&#8592; Sessions</button>
     <span id="term-vm-id"></span>
   </div>
   <div id="term-container"></div>
@@ -287,7 +287,7 @@ const FRONTEND_HTML: &str = r#"<!DOCTYPE html>
   async function loadVms() {
     const vms = await fetch('/vms').then(r => r.json());
     const wrap = document.getElementById('vm-table-wrap');
-    if (!vms.length) { wrap.innerHTML = '<p class="empty">No running VMs.</p>'; return; }
+    if (!vms.length) { wrap.innerHTML = '<p class="empty">No running sessions.</p>'; return; }
     wrap.innerHTML = `<table><thead><tr><th>ID</th><th>IP</th><th>Started</th><th></th></tr></thead><tbody>
       ${vms.map(v => `<tr>
         <td title="${v.id}">${v.id.slice(0,8)}&hellip;</td>
@@ -345,10 +345,10 @@ const FRONTEND_HTML: &str = r#"<!DOCTYPE html>
     try {
       const res = await fetch('/vms', { method: 'POST', headers: {'Content-Type':'application/json'},
         body: JSON.stringify({ socket_path: socketPath }) });
-      if (!res.ok) { alert('Failed to create VM'); return; }
+      if (!res.ok) { alert('Failed to create session'); return; }
       const vm = await res.json();
       openTerminal(vm.id);
-    } finally { btn.disabled = false; btn.textContent = '+ New VM'; }
+    } finally { btn.disabled = false; btn.textContent = '+ New Session'; }
   }
 
   function connectVm(id) { openTerminal(id); }
