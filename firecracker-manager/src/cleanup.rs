@@ -23,8 +23,7 @@ fn delete_stale_socket_dir_files(socket_dir: &Path) {
         let Some(name) = path.file_name().and_then(|n| n.to_str()) else {
             continue;
         };
-        if (name.starts_with("fc-") && name.ends_with(".socket"))
-            || (name.starts_with("rootfs-") && name.ends_with(".ext4"))
+        if name.starts_with("fc-") && name.ends_with(".socket")
         {
             let _ = std::fs::remove_file(&path);
         }
