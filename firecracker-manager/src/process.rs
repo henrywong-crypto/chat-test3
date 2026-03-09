@@ -1,4 +1,4 @@
-use anyhow::{bail, Context, Result};
+use anyhow::{Context, Result};
 use std::{
     io::ErrorKind,
     path::{Path, PathBuf},
@@ -65,13 +65,16 @@ pub(crate) async fn copy_rootfs(src: &Path, dst: &Path) -> Result<()> {
 }
 
 pub(crate) async fn wait_for_socket(socket_path: &Path) -> Result<()> {
-    for _ in 0..50 {
-        if socket_path.exists() {
-            return Ok(());
+    tokio::time::timeout(Duration::from_secs(5), async {
+        loop {
+            if socket_path.exists() {
+                return;
+            }
+            tokio::time::sleep(Duration::from_millis(100)).await;
         }
-        tokio::time::sleep(Duration::from_millis(100)).await;
-    }
-    bail!("timed out waiting for firecracker socket")
+    })
+    .await
+    .context("timed out waiting for firecracker socket")
 }
 
 pub(crate) async fn check_still_running(child: &mut Child) -> Result<()> {
