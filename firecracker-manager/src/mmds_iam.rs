@@ -61,11 +61,11 @@ pub fn build_mmds_with_iam(
     }))
 }
 
-pub fn imds_compat_mmds_config(
+pub(crate) fn imds_compat_mmds_config(
     network_interface_ids: Vec<String>,
 ) -> firecracker_client::MmdsConfig {
     firecracker_client::MmdsConfig {
-        version: Some("V1".to_string()),
+        version: Some("V2".to_string()),
         network_interfaces: network_interface_ids,
         ipv4_address: None,
         imds_compat: Some(true),

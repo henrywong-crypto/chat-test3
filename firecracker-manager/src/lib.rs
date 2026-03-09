@@ -5,9 +5,7 @@ use firecracker_client::{
     set_network_interface, start_instance, BootSource, Drive, MachineConfig, MmdsConfig,
     NetworkInterface,
 };
-pub use mmds_iam::{
-    build_mmds_with_iam, imds_compat_mmds_config, ImdsCredential,
-};
+pub use mmds_iam::{build_mmds_with_iam, ImdsCredential};
 use nix::{
     sys::signal::{kill, Signal},
     unistd::Pid,
