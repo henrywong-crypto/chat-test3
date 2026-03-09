@@ -6,8 +6,7 @@ use firecracker_client::{
     NetworkInterface,
 };
 pub use mmds_iam::{
-    build_mmds_iam_refresh_patch, build_mmds_with_iam, imds_compat_mmds_config,
-    system_time_to_iso8601, ImdsCredential,
+    build_mmds_with_iam, imds_compat_mmds_config, system_time_to_iso8601, ImdsCredential,
 };
 use nix::{
     sys::signal::{kill, Signal},

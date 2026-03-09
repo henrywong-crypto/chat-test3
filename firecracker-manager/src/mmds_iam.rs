@@ -77,26 +77,6 @@ pub fn build_mmds_with_iam(
     }))
 }
 
-/// Build MMDS PATCH payload to refresh only the IAM credentials. Merge this
-/// with existing MMDS via `PATCH /mmds` so the rest of the metadata is unchanged.
-pub fn build_mmds_iam_refresh_patch(
-    role_name: &str,
-    credential: &ImdsCredential,
-) -> Result<serde_json::Value> {
-    let cred_str = serde_json::to_string(credential)?;
-    let mut security_credentials = serde_json::Map::new();
-    security_credentials.insert(role_name.to_string(), serde_json::Value::String(cred_str));
-    Ok(serde_json::json!({
-        "latest": {
-            "meta-data": {
-                "iam": {
-                    "security-credentials": security_credentials,
-                }
-            }
-        }
-    }))
-}
-
 /// MmdsConfig tuned for EC2 IMDS compatibility so the AWS SDK default credential
 /// chain in the guest works without env vars.
 pub fn imds_compat_mmds_config(

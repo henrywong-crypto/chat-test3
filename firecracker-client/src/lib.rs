@@ -2,7 +2,7 @@ use anyhow::{bail, Context, Result};
 use http_body_util::{BodyExt, Full};
 use hyper::{body::Bytes, client::conn::http1, Method, Request};
 use hyper_util::rt::TokioIo;
-use serde::{Deserialize, Serialize};
+use serde::Serialize;
 use std::path::Path;
 use tokio::net::UnixStream;
 
@@ -49,15 +49,6 @@ pub async fn set_network_interface(socket_path: &Path, iface: &NetworkInterface)
     send_put(socket_path, &path, body).await
 }
 
-#[derive(Deserialize)]
-pub struct NetworkInterfaceInfo {
-    pub iface_id: String,
-    pub host_dev_name: String,
-}
-
-pub async fn get_network_interfaces(socket_path: &Path) -> Result<Vec<NetworkInterfaceInfo>> {
-    send_get(socket_path, "/network-interfaces").await
-}
 
 pub async fn set_drive(socket_path: &Path, drive: &Drive) -> Result<()> {
     let path = format!("/drives/{}", drive.drive_id);
@@ -68,17 +59,6 @@ pub async fn set_drive(socket_path: &Path, drive: &Drive) -> Result<()> {
 pub async fn start_instance(socket_path: &Path) -> Result<()> {
     let body = br#"{"action_type":"InstanceStart"}"#.to_vec();
     send_put(socket_path, "/actions", body).await
-}
-
-#[derive(Serialize)]
-pub struct Vsock {
-    pub guest_cid: u32,
-    pub uds_path: String,
-}
-
-pub async fn set_vsock(socket_path: &Path, vsock: &Vsock) -> Result<()> {
-    let body = serde_json::to_vec(vsock)?;
-    send_put(socket_path, "/vsock", body).await
 }
 
 #[derive(Serialize)]
@@ -105,46 +85,8 @@ pub async fn put_mmds(socket_path: &Path, metadata: &serde_json::Value) -> Resul
     send_put(socket_path, "/mmds", body).await
 }
 
-/// Partially update MMDS using JSON Merge Patch (RFC 7396). Use this to refresh
-/// credentials without replacing the entire metadata (e.g. only update
-/// `latest.aws` or `latest.iam`). Works while the VM is running.
-pub async fn patch_mmds(socket_path: &Path, patch: &serde_json::Value) -> Result<()> {
-    let body = serde_json::to_vec(patch)?;
-    send_request(socket_path, Method::PATCH, "/mmds", body).await
-}
-
 async fn send_put(socket_path: &Path, uri: &str, body: Vec<u8>) -> Result<()> {
     send_request(socket_path, Method::PUT, uri, body).await
-}
-
-async fn send_get<T: serde::de::DeserializeOwned>(socket_path: &Path, uri: &str) -> Result<T> {
-    let stream = UnixStream::connect(socket_path).await.with_context(|| {
-        format!(
-            "failed to connect to firecracker socket {}",
-            socket_path.display()
-        )
-    })?;
-    let (mut sender, conn) = http1::handshake(TokioIo::new(stream)).await?;
-    tokio::spawn(conn);
-
-    let request = Request::builder()
-        .method(Method::GET)
-        .uri(uri)
-        .header("Host", "localhost")
-        .header("Accept", "application/json")
-        .body(Full::new(Bytes::new()))?;
-
-    let response = sender.send_request(request).await?;
-
-    if !response.status().is_success() {
-        let status = response.status();
-        let bytes = response.into_body().collect().await?.to_bytes();
-        let body = String::from_utf8_lossy(&bytes).into_owned();
-        bail!("firecracker api returned {status}: {body}");
-    }
-
-    let bytes = response.into_body().collect().await?.to_bytes();
-    serde_json::from_slice(&bytes).context("failed to parse firecracker response")
 }
 
 async fn send_request(socket_path: &Path, method: Method, uri: &str, body: Vec<u8>) -> Result<()> {

@@ -124,7 +124,6 @@ pub(crate) struct VmEntry {
     pub(crate) _guard: VmGuard,
 }
 
-#[derive(serde::Serialize)]
 pub(crate) struct VmInfo {
     pub(crate) id: String,
     pub(crate) guest_ip: String,
