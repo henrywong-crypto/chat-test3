@@ -10,13 +10,14 @@ use crate::vm::VmConfig;
 pub(crate) async fn configure_vm(
     socket_path: &Path,
     rootfs_copy: &Path,
+    kernel_path: &Path,
     vm_config: &VmConfig,
     tap_name: &str,
     mac: &str,
     boot_args: &str,
 ) -> Result<()> {
     configure_machine_config(socket_path, vm_config).await?;
-    configure_boot_source(socket_path, vm_config, boot_args).await?;
+    configure_boot_source(socket_path, kernel_path, boot_args).await?;
     configure_rootfs_drive(socket_path, rootfs_copy).await?;
     configure_network_interface(socket_path, tap_name, mac).await?;
     if let Some(metadata) = &vm_config.mmds_metadata {
@@ -38,13 +39,13 @@ async fn configure_machine_config(socket_path: &Path, vm_config: &VmConfig) -> R
 
 async fn configure_boot_source(
     socket_path: &Path,
-    vm_config: &VmConfig,
+    kernel_path: &Path,
     boot_args: &str,
 ) -> Result<()> {
     set_boot_source(
         socket_path,
         &BootSource {
-            kernel_image_path: vm_config.kernel_path.to_string_lossy().into_owned(),
+            kernel_image_path: kernel_path.to_string_lossy().into_owned(),
             boot_args: boot_args.to_string(),
         },
     )

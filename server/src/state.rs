@@ -53,6 +53,18 @@ pub(crate) struct AppConfig {
     pub(crate) database_url: String,
     #[serde(default = "default_port")]
     pub(crate) port: u16,
+    #[serde(default)]
+    pub(crate) use_jailer: bool,
+    #[serde(default = "default_jailer_path")]
+    pub(crate) jailer_path: PathBuf,
+    #[serde(default = "default_firecracker_path")]
+    pub(crate) firecracker_path: PathBuf,
+    #[serde(default)]
+    pub(crate) jailer_uid: u32,
+    #[serde(default)]
+    pub(crate) jailer_gid: u32,
+    #[serde(default = "default_jailer_chroot_base")]
+    pub(crate) jailer_chroot_base: PathBuf,
 }
 
 fn default_kernel_path() -> PathBuf {
@@ -93,6 +105,15 @@ fn default_database_url() -> String {
 }
 fn default_port() -> u16 {
     3000
+}
+fn default_jailer_path() -> PathBuf {
+    PathBuf::from("/usr/bin/jailer")
+}
+fn default_firecracker_path() -> PathBuf {
+    PathBuf::from("/usr/bin/firecracker")
+}
+fn default_jailer_chroot_base() -> PathBuf {
+    PathBuf::from("/srv/jailer")
 }
 
 pub(crate) fn load_config() -> Result<AppConfig> {

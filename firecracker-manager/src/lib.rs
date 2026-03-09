@@ -9,4 +9,4 @@ pub use cleanup::cleanup_stale_vms;
 pub use firecracker_client::put_mmds;
 pub use mmds_iam::{build_mmds_with_iam, ImdsCredential};
 pub use network::setup_host_networking;
-pub use vm::{create_vm, VmConfig, VmGuard};
+pub use vm::{create_vm, JailerConfig, VmConfig, VmGuard};

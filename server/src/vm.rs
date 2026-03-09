@@ -2,7 +2,7 @@ use anyhow::Result;
 use aws_config::default_provider::credentials::DefaultCredentialsChain;
 use aws_credential_types::{provider::ProvideCredentials, Credentials};
 use chrono::{DateTime, Utc};
-use firecracker_manager::{build_mmds_with_iam, put_mmds, ImdsCredential, VmConfig};
+use firecracker_manager::{build_mmds_with_iam, put_mmds, ImdsCredential, JailerConfig, VmConfig};
 use std::{
     path::{Path, PathBuf},
     time::SystemTime,
@@ -40,9 +40,16 @@ pub(crate) fn build_vm_config(
         net_helper_path: state.net_helper_path.clone(),
         vcpu_count: 2,
         mem_size_mib: 4096,
-        boot_args: "reboot=k panic=1 quiet loglevel=3 selinux=0".to_string(),
+        boot_args: "reboot=k panic=1 quiet loglevel=3 selinux=0 8250.nr_uarts=0".to_string(),
         mmds_metadata: Some(mmds_metadata),
         mmds_imds_compat,
+        jailer: state.use_jailer.then(|| JailerConfig {
+            jailer_path: state.jailer_path.clone(),
+            firecracker_path: state.firecracker_path.clone(),
+            uid: state.jailer_uid,
+            gid: state.jailer_gid,
+            chroot_base: state.jailer_chroot_base.clone(),
+        }),
     })
 }
 
@@ -121,7 +128,7 @@ pub(crate) async fn refresh_all_vm_mmds(app_state: &AppState) {
     }
 }
 
-
+pub(crate) async fn save_all_vm_rootfs(app_state: &AppState) {
     let vm_entries: Vec<(String, VmEntry)> = {
         let Ok(mut registry) = app_state.vms.lock() else {
             return;

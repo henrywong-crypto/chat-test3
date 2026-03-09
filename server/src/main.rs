@@ -58,7 +58,11 @@ async fn main() -> Result<()> {
     );
     let app_state = AppState::new(app_config, pg_pool);
     let port = app_state.port;
-    cleanup_stale_vms(&app_state.socket_dir, &app_state.net_helper_path);
+    cleanup_stale_vms(
+        &app_state.socket_dir,
+        &app_state.net_helper_path,
+        app_state.use_jailer.then_some(&app_state.jailer_chroot_base),
+    );
     setup_host_networking(&app_state.net_helper_path).await;
     let mmds_refresh_task = spawn_mmds_refresh_task(app_state.clone());
     let router = build_router(app_state.clone(), session_store);
