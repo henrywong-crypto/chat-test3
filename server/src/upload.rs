@@ -6,6 +6,7 @@ use axum::{
 };
 use bytes::Bytes;
 use russh::client::Handle;
+use store::upsert_user;
 use tokio::io::AsyncWriteExt;
 use tower_sessions::Session;
 use uuid::Uuid;
@@ -26,11 +27,12 @@ pub(crate) async fn upload_file_handler(
     if Uuid::parse_str(&vm_id).is_err() {
         return Ok((StatusCode::NOT_FOUND, "Not found").into_response());
     }
+    let db_user = upsert_user(&state.db, &user.email).await?;
     let (csrf_token, remote_path, data) = extract_upload_fields(multipart).await?;
     if !validate_csrf(&session, &csrf_token).await {
         return Ok((StatusCode::FORBIDDEN, "Forbidden").into_response());
     }
-    let guest_ip = find_vm_guest_ip_for_user(&state.vms, &vm_id, &user.email)
+    let guest_ip = find_vm_guest_ip_for_user(&state.vms, &vm_id, db_user.id)
         .ok_or_else(|| anyhow!("Session {vm_id} not found"))?;
     let validated_path = validate_upload_path(&remote_path, &state.upload_dir)?;
     let mut ssh_handle = connect_ssh(

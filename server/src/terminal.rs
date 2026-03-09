@@ -9,6 +9,7 @@ use axum::{
 use bytes::Bytes;
 use futures::{SinkExt, StreamExt};
 use russh::{client::Msg, Channel, ChannelMsg};
+use store::upsert_user;
 use tracing::error;
 use uuid::Uuid;
 
@@ -27,13 +28,16 @@ pub(crate) async fn handle_ws_upgrade(
     if Uuid::parse_str(&vm_id).is_err() {
         return (StatusCode::NOT_FOUND, "Not found").into_response();
     }
-    let email = user.email;
-    ws.on_upgrade(move |socket| run_terminal_session(socket, state, vm_id, email))
+    let db_user = match upsert_user(&state.db, &user.email).await {
+        Ok(db_user) => db_user,
+        Err(_) => return (StatusCode::INTERNAL_SERVER_ERROR, "Internal error").into_response(),
+    };
+    ws.on_upgrade(move |socket| run_terminal_session(socket, state, vm_id, db_user.id))
 }
 
-async fn run_terminal_session(ws: WebSocket, state: AppState, vm_id: String, email: String) {
-    let guest_ip = match find_vm_guest_ip_for_user(&state.vms, &vm_id, &email) {
-        Some(ip) => ip,
+async fn run_terminal_session(ws: WebSocket, state: AppState, vm_id: String, user_id: Uuid) {
+    let guest_ip = match find_vm_guest_ip_for_user(&state.vms, &vm_id, user_id) {
+        Some(guest_ip) => guest_ip,
         None => return,
     };
     if let Err(e) = run_ssh_relay(&guest_ip, &state, ws).await {

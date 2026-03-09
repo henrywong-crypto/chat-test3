@@ -45,7 +45,10 @@ async fn main() -> Result<()> {
                 .unwrap_or_else(|_| tracing_subscriber::EnvFilter::new("info")),
         )
         .init();
-    let app_state = AppState::new(load_config()?);
+    let app_config = load_config()?;
+    let pg_pool = store::connect_db(&app_config.database_url).await?;
+    store::run_migrations(&pg_pool).await?;
+    let app_state = AppState::new(app_config, pg_pool);
     let port = app_state.port;
     cleanup_stale_vms(&app_state.socket_dir);
     setup_host_networking().await;

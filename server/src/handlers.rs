@@ -7,6 +7,7 @@ use axum::{
 use chrono::Utc;
 use firecracker_manager::create_vm;
 use serde::Deserialize;
+use store::upsert_user;
 use tower_sessions::Session;
 use tracing::info;
 use uuid::Uuid;
@@ -53,14 +54,14 @@ fn register_vm(vms: &VmRegistry, vm_id: String, vm_entry: VmEntry) -> Result<(),
 fn remove_owned_vm(
     vms: &VmRegistry,
     vm_id: &str,
-    email: &str,
+    user_id: Uuid,
 ) -> Result<Option<VmEntry>, AppError> {
     let mut registry = vms
         .lock()
         .map_err(|_| anyhow!("vm registry lock poisoned"))?;
     let owned = registry
         .get(vm_id)
-        .map(|e| e.email == email)
+        .map(|e| e.user_id == user_id)
         .unwrap_or(false);
     if !owned {
         return Ok(None);
@@ -77,6 +78,7 @@ pub(crate) async fn get_vms_page(
     session: Session,
     State(state): State<AppState>,
 ) -> Result<Html<String>, AppError> {
+    let db_user = upsert_user(&state.db, &user.email).await?;
     let csrf_token = get_csrf_token(&session).await;
     let registry = state
         .vms
@@ -84,7 +86,7 @@ pub(crate) async fn get_vms_page(
         .map_err(|_| anyhow!("vm registry lock poisoned"))?;
     let mut vm_infos: Vec<VmInfo> = registry
         .iter()
-        .filter(|(_, e)| e.email == user.email)
+        .filter(|(_, e)| e.user_id == db_user.id)
         .map(|(id, e)| VmInfo {
             id: id.clone(),
             guest_ip: e.guest_ip.clone(),
@@ -108,12 +110,13 @@ pub(crate) async fn create_vm_handler(
     if !validate_csrf(&session, &form.csrf_token).await {
         return Ok((StatusCode::FORBIDDEN, "Forbidden").into_response());
     }
+    let db_user = upsert_user(&state.db, &user.email).await?;
     let user_vm_count = state
         .vms
         .lock()
         .map_err(|_| anyhow!("vm registry lock poisoned"))?
         .values()
-        .filter(|e| e.email == user.email)
+        .filter(|e| e.user_id == db_user.id)
         .count();
     if user_vm_count >= state.max_vms_per_user {
         return Ok((
@@ -141,7 +144,7 @@ pub(crate) async fn create_vm_handler(
         guest_ip: vm.guest_ip.clone(),
         pid: vm.pid,
         created_at,
-        email: user.email,
+        user_id: db_user.id,
         _guard: vm.into_guard(),
     };
     register_vm(&state.vms, vm_id.clone(), vm_entry)?;
@@ -161,7 +164,8 @@ pub(crate) async fn delete_vm_handler(
     if !validate_vm_id(&vm_id) {
         return Ok((StatusCode::NOT_FOUND, "Not found").into_response());
     }
-    let Some(vm_entry) = remove_owned_vm(&state.vms, &vm_id, &user.email)? else {
+    let db_user = upsert_user(&state.db, &user.email).await?;
+    let Some(vm_entry) = remove_owned_vm(&state.vms, &vm_id, db_user.id)? else {
         return Ok((StatusCode::NOT_FOUND, "Not found").into_response());
     };
     tokio::fs::create_dir_all(&state.user_rootfs_dir)
@@ -207,11 +211,15 @@ pub(crate) async fn get_terminal_page(
     if !validate_vm_id(&vm_id) {
         return (StatusCode::NOT_FOUND, "Not found").into_response();
     }
+    let db_user = match upsert_user(&state.db, &user.email).await {
+        Ok(db_user) => db_user,
+        Err(_) => return (StatusCode::INTERNAL_SERVER_ERROR, "Internal error").into_response(),
+    };
     let owned = state
         .vms
         .lock()
         .ok()
-        .and_then(|r| r.get(&vm_id).map(|e| e.email == user.email))
+        .and_then(|r| r.get(&vm_id).map(|e| e.user_id == db_user.id))
         .unwrap_or(false);
     if !owned {
         return (StatusCode::NOT_FOUND, "Not found").into_response();

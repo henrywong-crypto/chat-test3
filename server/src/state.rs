@@ -11,7 +11,9 @@ use std::{
     path::PathBuf,
     sync::{Arc, Mutex},
 };
+use store::PgPool;
 use tracing::error;
+use uuid::Uuid;
 
 #[derive(Clone, Deserialize)]
 pub(crate) struct AppConfig {
@@ -45,6 +47,8 @@ pub(crate) struct AppConfig {
     pub(crate) upload_dir: String,
     #[serde(default = "default_max_vms_per_user")]
     pub(crate) max_vms_per_user: usize,
+    #[serde(default = "default_database_url")]
+    pub(crate) database_url: String,
     #[serde(default = "default_port")]
     pub(crate) port: u16,
 }
@@ -79,6 +83,9 @@ fn default_upload_dir() -> String {
 fn default_max_vms_per_user() -> usize {
     2
 }
+fn default_database_url() -> String {
+    "postgres://localhost/webcode".to_string()
+}
 fn default_port() -> u16 {
     3000
 }
@@ -95,13 +102,15 @@ pub(crate) fn load_config() -> Result<AppConfig> {
 #[derive(Clone)]
 pub(crate) struct AppState {
     pub(crate) config: AppConfig,
+    pub(crate) db: PgPool,
     pub(crate) vms: VmRegistry,
 }
 
 impl AppState {
-    pub(crate) fn new(config: AppConfig) -> Self {
+    pub(crate) fn new(config: AppConfig, pg_pool: PgPool) -> Self {
         AppState {
             config,
+            db: pg_pool,
             vms: Arc::new(Mutex::new(HashMap::new())),
         }
     }
@@ -120,7 +129,7 @@ pub(crate) struct VmEntry {
     pub(crate) guest_ip: String,
     pub(crate) pid: u32,
     pub(crate) created_at: u64,
-    pub(crate) email: String,
+    pub(crate) user_id: Uuid,
     pub(crate) _guard: VmGuard,
 }
 
@@ -153,9 +162,9 @@ impl<E: Into<anyhow::Error>> From<E> for AppError {
 pub(crate) fn find_vm_guest_ip_for_user(
     vms: &VmRegistry,
     vm_id: &str,
-    email: &str,
+    user_id: Uuid,
 ) -> Option<String> {
     let registry = vms.lock().ok()?;
-    let entry = registry.get(vm_id)?;
-    (entry.email == email).then(|| entry.guest_ip.clone())
+    let vm_entry = registry.get(vm_id)?;
+    (vm_entry.user_id == user_id).then(|| vm_entry.guest_ip.clone())
 }
