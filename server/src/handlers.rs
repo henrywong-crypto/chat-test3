@@ -158,6 +158,7 @@ pub(crate) async fn delete_user_rootfs_handler(
 
 pub(crate) async fn get_terminal_page(
     user: User,
+    session: Session,
     Path(vm_id): Path<String>,
     State(state): State<AppState>,
 ) -> Response {
@@ -173,5 +174,6 @@ pub(crate) async fn get_terminal_page(
     if !owned {
         return (StatusCode::NOT_FOUND, "Not found").into_response();
     }
-    Html(render_terminal_page(&vm_id).into_string()).into_response()
+    let csrf_token = get_csrf_token(&session).await;
+    Html(render_terminal_page(&vm_id, &csrf_token, &state.upload_dir).into_string()).into_response()
 }

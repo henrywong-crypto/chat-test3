@@ -123,9 +123,10 @@ fn render_disk_panel(csrf_token: &str, has_user_rootfs: bool) -> Markup {
     }
 }
 
-pub(crate) fn render_terminal_page(vm_id: &str) -> Markup {
+pub(crate) fn render_terminal_page(vm_id: &str, csrf_token: &str, upload_dir: &str) -> Markup {
     let short_id = format!("{}…", vm_id.get(..8).unwrap_or(vm_id));
     let terminal_script = format_terminal_script(vm_id);
+    let upload_action = format!("/vms/{vm_id}/upload");
     html! {
         (DOCTYPE)
         html lang="en" {
@@ -135,7 +136,7 @@ pub(crate) fn render_terminal_page(vm_id: &str) -> Markup {
                 link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/xterm@5/css/xterm.css";
                 style {
                     "body { margin: 0; background: #000; font-family: ui-monospace, monospace; }"
-                    "#term-container { height: calc(100vh - 45px); }"
+                    "#term-container { height: calc(100vh - 45px - 46px); }"
                 }
             }
             body {
@@ -143,13 +144,42 @@ pub(crate) fn render_terminal_page(vm_id: &str) -> Markup {
                     a href="/vms" style="color:#c9d1d9;text-decoration:none;font-size:13px" { "← VMs" }
                     span style="font-size:12px;color:#8b949e" { (short_id) }
                 }
+                form id="upload-form" method="post" action=(upload_action) enctype="multipart/form-data"
+                    style="display:flex;align-items:center;gap:8px;padding:6px 12px;background:#0d1117;border-bottom:1px solid #30363d" {
+                    input type="hidden" name="csrf_token" value=(csrf_token);
+                    input type="file" name="file" required
+                        style="font-size:12px;color:#c9d1d9;background:transparent;border:none;flex:0 0 auto";
+                    input type="text" name="path" value=(format!("{upload_dir}/")) required
+                        style="font-size:12px;color:#c9d1d9;background:#161b22;border:1px solid #30363d;border-radius:4px;padding:2px 6px;flex:1 1 auto";
+                    button type="submit"
+                        style="font-size:12px;color:#c9d1d9;background:#21262d;border:1px solid #30363d;border-radius:4px;padding:2px 10px;cursor:pointer" {
+                        "Upload"
+                    }
+                    span id="upload-status" style="font-size:12px;color:#8b949e" {}
+                }
                 div id="term-container" {}
                 script src="https://cdn.jsdelivr.net/npm/xterm@5/lib/xterm.js" {}
                 script src="https://cdn.jsdelivr.net/npm/xterm-addon-fit@0.8/lib/xterm-addon-fit.js" {}
                 script { (PreEscaped(terminal_script)) }
+                script { (PreEscaped(upload_script())) }
             }
         }
     }
+}
+
+fn upload_script() -> &'static str {
+    r#"document.getElementById('upload-form').addEventListener('submit', async function(e) {
+  e.preventDefault();
+  const status = document.getElementById('upload-status');
+  status.textContent = 'Uploading…';
+  try {
+    const res = await fetch(this.action, { method: 'POST', body: new FormData(this) });
+    status.textContent = res.ok ? 'Uploaded.' : 'Upload failed.';
+  } catch (err) {
+    status.textContent = 'Upload error.';
+  }
+  setTimeout(() => { status.textContent = ''; }, 3000);
+});"#
 }
 
 fn format_terminal_script(vm_id: &str) -> String {

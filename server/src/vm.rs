@@ -3,10 +3,10 @@ use std::path::{Path, PathBuf};
 use aws_config::default_provider::credentials::DefaultCredentialsChain;
 use aws_credential_types::provider::ProvideCredentials;
 use firecracker_manager::{build_mmds_with_iam, system_time_to_iso8601, ImdsCredential, VmConfig};
-use tracing::warn;
+use tracing::{error, info, warn};
 use uuid::Uuid;
 
-use crate::state::AppState;
+use crate::state::{AppState, VmEntry};
 
 pub(crate) fn build_vm_config(
     state: &AppState,
@@ -65,4 +65,26 @@ pub(crate) async fn fetch_host_iam_credentials() -> Option<(String, ImdsCredenti
             expiration,
         ),
     ))
+}
+
+pub(crate) async fn save_all_vm_rootfs(app_state: &AppState) {
+    let entries: Vec<(String, VmEntry)> = {
+        let Ok(mut registry) = app_state.vms.lock() else { return };
+        registry.drain().collect()
+    };
+    if entries.is_empty() {
+        return;
+    }
+    info!("saving rootfs for {} running vm(s) before shutdown", entries.len());
+    if let Err(e) = tokio::fs::create_dir_all(&app_state.user_rootfs_dir).await {
+        error!("failed to create user rootfs dir on shutdown: {e}");
+        return;
+    }
+    for (vm_id, entry) in entries {
+        let user_rootfs = user_rootfs_path(&app_state.user_rootfs_dir, &entry.email);
+        info!(email = %entry.email, vm_id = %vm_id, dest = %user_rootfs.display(), "saving rootfs on shutdown");
+        if let Err(e) = entry._guard.save_rootfs_to(&user_rootfs).await {
+            error!(email = %entry.email, vm_id = %vm_id, "failed to save rootfs on shutdown: {e}");
+        }
+    }
 }

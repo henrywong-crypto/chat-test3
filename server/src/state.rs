@@ -39,10 +39,10 @@ pub(crate) struct Args {
     pub(crate) cognito_region: String,
     #[arg(long, env = "COGNITO_USER_POOL_ID", default_value = "")]
     pub(crate) cognito_user_pool_id: String,
-    #[arg(long, env = "UPLOAD_DIR", default_value = "/home/ubuntu")]
-    pub(crate) upload_dir: String,
     #[arg(long, env = "USER_ROOTFS_DIR", default_value = "/home/ubuntu/fc-users")]
     pub(crate) user_rootfs_dir: PathBuf,
+    #[arg(long, env = "UPLOAD_DIR", default_value = "/home/ubuntu")]
+    pub(crate) upload_dir: String,
     #[arg(long, env = "PORT", default_value = "3000")]
     pub(crate) port: u16,
 }
@@ -61,8 +61,8 @@ pub(crate) struct AppState {
     pub(crate) cognito_redirect_uri: String,
     pub(crate) cognito_region: String,
     pub(crate) cognito_user_pool_id: String,
-    pub(crate) upload_dir: String,
     pub(crate) user_rootfs_dir: PathBuf,
+    pub(crate) upload_dir: String,
     pub(crate) vms: VmRegistry,
 }
 
@@ -113,8 +113,8 @@ pub(crate) fn build_app_state(args: Args) -> Result<AppState> {
         cognito_redirect_uri: args.cognito_redirect_uri,
         cognito_region: args.cognito_region,
         cognito_user_pool_id: args.cognito_user_pool_id,
-        upload_dir: args.upload_dir,
         user_rootfs_dir: args.user_rootfs_dir,
+        upload_dir: args.upload_dir,
         vms: Arc::new(Mutex::new(HashMap::new())),
     })
 }

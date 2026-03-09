@@ -4,6 +4,7 @@ mod ssh;
 mod state;
 mod templates;
 mod terminal;
+mod upload;
 mod vm;
 
 use anyhow::{Context, Result};
@@ -27,6 +28,8 @@ use crate::{
     handlers::{create_vm_handler, delete_user_rootfs_handler, delete_vm_handler, get_redirect_to_vms, get_terminal_page, get_vms_page},
     state::{build_app_state, AppState, Args},
     terminal::handle_ws_upgrade,
+    upload::upload_file_handler,
+    vm::save_all_vm_rootfs,
 };
 
 #[tokio::main]
@@ -42,8 +45,8 @@ async fn main() -> Result<()> {
     cleanup_stale_vms(&args.socket_dir);
     setup_host_networking().await;
     let app_state = build_app_state(args)?;
-    let router = build_router(app_state);
-    serve_router(router, port).await
+    let router = build_router(app_state.clone());
+    serve_router(router, port, app_state).await
 }
 
 fn build_router(app_state: AppState) -> Router {
@@ -52,6 +55,7 @@ fn build_router(app_state: AppState) -> Router {
         .route("/", get(get_redirect_to_vms))
         .route("/vms", get(get_vms_page).post(create_vm_handler))
         .route("/vms/{id}/delete", post(delete_vm_handler))
+        .route("/vms/{id}/upload", post(upload_file_handler))
         .route("/rootfs/delete", post(delete_user_rootfs_handler))
         .route("/terminal/{id}", get(get_terminal_page))
         .route("/ws/{id}", get(handle_ws_upgrade))
@@ -92,10 +96,33 @@ async fn add_security_headers(request: Request, next: Next) -> Response {
     response
 }
 
-async fn serve_router(router: Router, port: u16) -> Result<()> {
+async fn serve_router(router: Router, port: u16, app_state: AppState) -> Result<()> {
     let tcp_listener = TcpListener::bind(format!("0.0.0.0:{port}"))
         .await
         .with_context(|| format!("failed to bind to port {port}"))?;
     info!("listening on http://0.0.0.0:{port}");
-    axum::serve(tcp_listener, router).await.context("server error")
+    axum::serve(tcp_listener, router)
+        .with_graceful_shutdown(shutdown_signal())
+        .await
+        .context("server error")?;
+    save_all_vm_rootfs(&app_state).await;
+    Ok(())
+}
+
+async fn shutdown_signal() {
+    use tokio::signal;
+    let ctrl_c = async {
+        signal::ctrl_c().await.expect("failed to install Ctrl+C handler");
+    };
+    let terminate = async {
+        signal::unix::signal(signal::unix::SignalKind::terminate())
+            .expect("failed to install SIGTERM handler")
+            .recv()
+            .await;
+    };
+    tokio::select! {
+        _ = ctrl_c => {}
+        _ = terminate => {}
+    }
+    info!("shutdown signal received, saving vm rootfs before exit");
 }
