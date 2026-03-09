@@ -69,7 +69,7 @@ fn remove_owned_vm(
 }
 
 pub(crate) async fn get_redirect_to_vms(_user: User) -> Redirect {
-    Redirect::to("/vms")
+    Redirect::to("/sessions")
 }
 
 pub(crate) async fn get_vms_page(

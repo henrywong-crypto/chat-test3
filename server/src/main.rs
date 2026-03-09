@@ -57,9 +57,9 @@ fn build_router(app_state: AppState) -> Router {
     let session_layer = build_session_layer();
     Router::new()
         .route("/", get(get_redirect_to_vms))
-        .route("/vms", get(get_vms_page).post(create_vm_handler))
-        .route("/vms/{id}/delete", post(delete_vm_handler))
-        .route("/vms/{id}/upload", post(upload_file_handler))
+        .route("/sessions", get(get_vms_page).post(create_vm_handler))
+        .route("/sessions/{id}/delete", post(delete_vm_handler))
+        .route("/sessions/{id}/upload", post(upload_file_handler))
         .route("/rootfs/delete", post(delete_user_rootfs_handler))
         .route("/terminal/{id}", get(get_terminal_page))
         .route("/ws/{id}", get(handle_ws_upgrade))

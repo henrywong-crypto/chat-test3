@@ -124,7 +124,7 @@ pub(crate) fn render_vms_page(vms: &[VmInfo], csrf_token: &str, has_user_rootfs:
             body {
                 div class="topbar" {
                     span class="topbar-title" { "WebCode" }
-                    form method="post" action="/vms" {
+                    form method="post" action="/sessions" {
                         input type="hidden" name="csrf_token" value=(csrf_token);
                         button type="submit" class="btn btn-primary" { "+ New Session" }
                     }
@@ -181,7 +181,7 @@ fn render_vm_row(vm: &VmInfo, csrf_token: &str) -> Markup {
             td {
                 div class="actions" {
                     a href={ "/terminal/" (vm.id) } class="btn" { "Connect" }
-                    form method="post" action={ "/vms/" (vm.id) "/delete" } {
+                    form method="post" action={ "/sessions/" (vm.id) "/delete" } {
                         input type="hidden" name="csrf_token" value=(csrf_token);
                         button type="submit" class="btn btn-danger" { "Delete" }
                     }
@@ -216,7 +216,7 @@ fn render_disk_section(csrf_token: &str, has_user_rootfs: bool) -> Markup {
 pub(crate) fn render_terminal_page(vm_id: &str, csrf_token: &str, upload_dir: &str) -> Markup {
     let short_id = format!("{}…", vm_id.get(..8).unwrap_or(vm_id));
     let terminal_script = format_terminal_script(vm_id);
-    let upload_action = format!("/vms/{vm_id}/upload");
+    let upload_action = format!("/sessions/{vm_id}/upload");
     let default_path = format!("{upload_dir}/");
     html! {
         (DOCTYPE)
@@ -273,7 +273,7 @@ fn render_terminal_topbar(short_id: &str) -> Markup {
     html! {
         div id="topbar" {
             div id="topbar-left" {
-                a href="/vms" class="btn btn-ghost" style="padding:4px 8px" { "← Sessions" }
+                a href="/sessions" class="btn btn-ghost" style="padding:4px 8px" { "← Sessions" }
                 span id="vm-id" { (short_id) }
             }
             div id="topbar-right" {

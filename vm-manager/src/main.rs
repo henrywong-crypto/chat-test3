@@ -71,8 +71,8 @@ async fn main() -> Result<()> {
 
     let app = Router::new()
         .route("/", get(handle_index))
-        .route("/vms", get(list_vms).post(create_vm_endpoint))
-        .route("/vms/{id}", get(get_vm).delete(delete_vm_endpoint))
+        .route("/sessions", get(list_vms).post(create_vm_endpoint))
+        .route("/sessions/{id}", get(get_vm).delete(delete_vm_endpoint))
         .with_state(state);
 
     let port = std::env::var("PORT").unwrap_or_else(|_| "3001".to_string());
@@ -285,7 +285,7 @@ const FRONTEND_HTML: &str = r#"<!DOCTYPE html>
   }
 
   async function loadVms() {
-    const vms = await fetch('/vms').then(r => r.json());
+    const vms = await fetch('/sessions').then(r => r.json());
     const wrap = document.getElementById('vm-table-wrap');
     if (!vms.length) { wrap.innerHTML = '<p class="empty">No running sessions.</p>'; return; }
     wrap.innerHTML = `<table><thead><tr><th>ID</th><th>IP</th><th>Started</th><th></th></tr></thead><tbody>
@@ -343,7 +343,7 @@ const FRONTEND_HTML: &str = r#"<!DOCTYPE html>
     const btn = document.getElementById('new-btn');
     btn.disabled = true; btn.textContent = 'Starting\u2026';
     try {
-      const res = await fetch('/vms', { method: 'POST', headers: {'Content-Type':'application/json'},
+      const res = await fetch('/sessions', { method: 'POST', headers: {'Content-Type':'application/json'},
         body: JSON.stringify({ socket_path: socketPath }) });
       if (!res.ok) { alert('Failed to create session'); return; }
       const vm = await res.json();
@@ -354,7 +354,7 @@ const FRONTEND_HTML: &str = r#"<!DOCTYPE html>
   function connectVm(id) { openTerminal(id); }
 
   async function deleteVm(id) {
-    await fetch('/vms/' + id, { method: 'DELETE' });
+    await fetch('/sessions/' + id, { method: 'DELETE' });
     loadVms();
   }
 

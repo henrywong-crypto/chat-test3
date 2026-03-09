@@ -56,7 +56,7 @@ pub(crate) async fn get_cognito_login_handler(
 
 pub(crate) async fn get_demo_handler(session: Session) -> impl IntoResponse {
     let _ = session.insert("email", "demo").await;
-    Redirect::to("/vms")
+    Redirect::to("/sessions")
 }
 
 pub(crate) async fn get_callback_handler(
