@@ -116,16 +116,33 @@ pub async fn create_vm(vm_config: &VmConfig) -> Result<Vm> {
         vm_config.boot_args
     );
 
+    eprintln!("[vm] creating vm={} tap={tap_name} guest_ip={guest_ip}", vm_config.id);
+
+    eprintln!("[vm] step 1/7: create tap");
     create_tap(&tap_name, &tap_ip).await?;
+
+    eprintln!("[vm] step 2/7: copy rootfs {} -> {}", vm_config.rootfs_path.display(), rootfs_copy.display());
     copy_rootfs(&vm_config.rootfs_path, &rootfs_copy).await?;
+
+    eprintln!("[vm] step 3/7: spawn firecracker");
     let mut child = spawn_firecracker(&socket_path)?;
     let pid = child.id().ok_or(Error::ProcessExited)?;
+    eprintln!("[vm] firecracker pid={pid}");
     write_vm_meta(&meta_path, pid, &tap_name, &rootfs_copy);
+
+    eprintln!("[vm] step 4/7: wait for socket {}", socket_path.display());
     wait_for_socket(&socket_path).await?;
+
+    eprintln!("[vm] step 5/7: configure vm");
     configure_vm(&socket_path, &rootfs_copy, vm_config, &tap_name, &mac, &boot_args).await?;
+
+    eprintln!("[vm] step 6/7: start instance");
     start_instance(&socket_path).await?;
+
+    eprintln!("[vm] step 7/7: check still running");
     check_still_running(&mut child).await?;
 
+    eprintln!("[vm] vm={} started successfully", vm_config.id);
     Ok(Vm { id: vm_config.id.clone(), guest_ip, socket_path, pid, _child: child, tap_name, rootfs_copy, meta_path })
 }
 
