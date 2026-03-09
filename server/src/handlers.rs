@@ -71,7 +71,7 @@ pub(crate) async fn get_or_create_terminal(
 
     let iam_creds = fetch_host_iam_credentials().await;
     let has_iam_creds = iam_creds.is_some();
-    let user_rootfs = ensure_user_rootfs(&state.user_rootfs_dir, &state.rootfs_path, db_user.id).await?;
+    let user_rootfs = ensure_user_rootfs(&state.user_rootfs_dir, &state.rootfs_path, db_user.id, &state.rootfs_locks).await?;
     info!(user_id = %db_user.id, rootfs = %user_rootfs.display(), "using rootfs");
     let vm_config = build_vm_config(&state, iam_creds, Some(&user_rootfs))?;
     let vm_guard = create_vm(&vm_config).await?;

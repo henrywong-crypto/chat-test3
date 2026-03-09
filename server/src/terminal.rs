@@ -16,7 +16,7 @@ use uuid::Uuid;
 use crate::{
     auth::User,
     ssh::{connect_ssh, open_terminal_channel},
-    state::{find_vm_guest_ip_for_user, AppState},
+    state::{find_vm_guest_ip_for_user, get_rootfs_lock, AppState},
     vm::user_rootfs_path,
 };
 
@@ -62,6 +62,8 @@ async fn save_and_drop_vm(state: &AppState, vm_id: &str, user_id: Uuid) {
         return;
     }
     let user_rootfs = user_rootfs_path(&state.user_rootfs_dir, user_id);
+    let lock = get_rootfs_lock(&state.rootfs_locks, user_id);
+    let _guard = lock.lock().await;
     info!(vm_id = %vm_id, user_id = %user_id, dest = %user_rootfs.display(), "saving rootfs on disconnect");
     if let Err(e) = vm_entry._guard.save_rootfs_to(&user_rootfs).await {
         error!(vm_id = %vm_id, "failed to save rootfs on disconnect: {e}");

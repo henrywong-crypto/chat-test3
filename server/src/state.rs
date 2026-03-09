@@ -12,6 +12,7 @@ use std::{
     sync::{Arc, Mutex},
 };
 use store::PgPool;
+use tokio::sync::Mutex as AsyncMutex;
 use tracing::error;
 use uuid::Uuid;
 
@@ -125,6 +126,7 @@ pub(crate) struct AppState {
     pub(crate) config: AppConfig,
     pub(crate) db: PgPool,
     pub(crate) vms: VmRegistry,
+    pub(crate) rootfs_locks: RootfsLocks,
 }
 
 impl AppState {
@@ -133,6 +135,7 @@ impl AppState {
             config,
             db: pg_pool,
             vms: Arc::new(Mutex::new(HashMap::new())),
+            rootfs_locks: Arc::new(Mutex::new(HashMap::new())),
         }
     }
 }
@@ -145,6 +148,7 @@ impl std::ops::Deref for AppState {
 }
 
 pub(crate) type VmRegistry = Arc<Mutex<HashMap<String, VmEntry>>>;
+pub(crate) type RootfsLocks = Arc<Mutex<HashMap<Uuid, Arc<AsyncMutex<()>>>>>;
 
 pub(crate) struct VmEntry {
     pub(crate) guest_ip: String,
@@ -180,4 +184,13 @@ pub(crate) fn find_vm_guest_ip_for_user(
     let registry = vms.lock().ok()?;
     let vm_entry = registry.get(vm_id)?;
     (vm_entry.user_id == user_id).then(|| vm_entry.guest_ip.clone())
+}
+
+pub(crate) fn get_rootfs_lock(locks: &RootfsLocks, user_id: Uuid) -> Arc<AsyncMutex<()>> {
+    locks
+        .lock()
+        .unwrap_or_else(|e| e.into_inner())
+        .entry(user_id)
+        .or_insert_with(|| Arc::new(AsyncMutex::new(())))
+        .clone()
 }
