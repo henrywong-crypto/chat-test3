@@ -29,7 +29,7 @@ pub(crate) fn render_login_page() -> Markup {
     }
 }
 
-pub(crate) fn render_vms_page(vms: &[VmInfo], csrf_token: &str) -> Markup {
+pub(crate) fn render_vms_page(vms: &[VmInfo], csrf_token: &str, has_user_rootfs: bool) -> Markup {
     html! {
         (DOCTYPE)
         html lang="en" data-theme="dark" {
@@ -50,6 +50,7 @@ pub(crate) fn render_vms_page(vms: &[VmInfo], csrf_token: &str) -> Markup {
                         }
                     }
                     (render_vm_table(vms, csrf_token))
+                    (render_disk_panel(csrf_token, has_user_rootfs))
                 }
             }
         }
@@ -99,6 +100,24 @@ fn render_vm_row(vm: &VmInfo, csrf_token: &str) -> Markup {
                     input type="hidden" name="csrf_token" value=(csrf_token);
                     button type="submit" class="btn btn-error btn-sm" { "Delete" }
                 }
+            }
+        }
+    }
+}
+
+fn render_disk_panel(csrf_token: &str, has_user_rootfs: bool) -> Markup {
+    html! {
+        div class="mt-6 flex items-center gap-3 p-3 bg-base-100 rounded-lg" {
+            span class="text-sm text-base-content/70" { "Saved disk:" }
+            @if has_user_rootfs {
+                span class="badge badge-success badge-sm" { "exists" }
+                form method="post" action="/rootfs/delete" {
+                    input type="hidden" name="csrf_token" value=(csrf_token);
+                    button type="submit" class="btn btn-ghost btn-xs text-error" { "Delete" }
+                }
+            } @else {
+                span class="badge badge-neutral badge-sm" { "none" }
+                span class="text-xs text-base-content/50" { "(base image used on next VM)" }
             }
         }
     }

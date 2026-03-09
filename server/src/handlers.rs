@@ -9,13 +9,14 @@ use axum::{
 use firecracker_manager::create_vm;
 use serde::Deserialize;
 use tower_sessions::Session;
+use tracing::info;
 use uuid::Uuid;
 
 use crate::{
     auth::User,
     state::{AppError, AppState, VmEntry, VmInfo},
     templates::{render_terminal_page, render_vms_page},
-    vm::{build_vm_config, fetch_host_iam_credentials},
+    vm::{build_vm_config, fetch_host_iam_credentials, find_user_rootfs, user_rootfs_path},
 };
 
 #[derive(Deserialize)]
@@ -65,7 +66,8 @@ pub(crate) async fn get_vms_page(
         })
         .collect();
     vms.sort_by_key(|v| v.created_at);
-    Ok(Html(render_vms_page(&vms, &csrf_token).into_string()))
+    let has_user_rootfs = find_user_rootfs(&state.user_rootfs_dir, &user.email).is_some();
+    Ok(Html(render_vms_page(&vms, &csrf_token, has_user_rootfs).into_string()))
 }
 
 pub(crate) async fn create_vm_handler(
@@ -78,8 +80,14 @@ pub(crate) async fn create_vm_handler(
         return Ok((StatusCode::FORBIDDEN, "Forbidden").into_response());
     }
     let iam_creds = fetch_host_iam_credentials().await;
-    let vm_config = build_vm_config(&state, iam_creds);
+    let user_rootfs = find_user_rootfs(&state.user_rootfs_dir, &user.email);
+    match &user_rootfs {
+        Some(path) => info!(email = %user.email, rootfs = %path.display(), "reattaching saved rootfs"),
+        None => info!(email = %user.email, rootfs = %state.rootfs_path.display(), "creating rootfs from base image"),
+    }
+    let vm_config = build_vm_config(&state, iam_creds, user_rootfs.as_deref());
     let vm = create_vm(&vm_config).await?;
+    info!(email = %user.email, vm_id = %vm.id, guest_ip = %vm.guest_ip, pid = vm.pid, "vm started");
     let created_at = SystemTime::now()
         .duration_since(UNIX_EPOCH)
         .unwrap_or_default()
@@ -115,12 +123,34 @@ pub(crate) async fn delete_vm_handler(
     if !is_valid_vm_id(&vm_id) {
         return Ok((StatusCode::NOT_FOUND, "Not found").into_response());
     }
-    let mut registry = state.vms.lock().map_err(|_| anyhow!("vm registry lock poisoned"))?;
-    let owned = registry.get(&vm_id).map(|e| e.email == user.email).unwrap_or(false);
-    if !owned {
-        return Ok((StatusCode::NOT_FOUND, "Not found").into_response());
+    let entry = {
+        let mut registry = state.vms.lock().map_err(|_| anyhow!("vm registry lock poisoned"))?;
+        let owned = registry.get(&vm_id).map(|e| e.email == user.email).unwrap_or(false);
+        if !owned {
+            return Ok((StatusCode::NOT_FOUND, "Not found").into_response());
+        }
+        registry.remove(&vm_id).expect("just checked")
+    };
+    tokio::fs::create_dir_all(&state.user_rootfs_dir).await?;
+    let user_rootfs = user_rootfs_path(&state.user_rootfs_dir, &user.email);
+    info!(email = %user.email, vm_id = %vm_id, dest = %user_rootfs.display(), "saving rootfs from deleted vm");
+    entry._guard.save_rootfs_to(&user_rootfs).await?;
+    info!(email = %user.email, dest = %user_rootfs.display(), "rootfs saved");
+    Ok(Redirect::to("/vms").into_response())
+}
+
+pub(crate) async fn delete_user_rootfs_handler(
+    user: User,
+    session: Session,
+    State(state): State<AppState>,
+    Form(form): Form<CsrfForm>,
+) -> Result<Response, AppError> {
+    if !validate_csrf(&session, &form.csrf_token).await {
+        return Ok((StatusCode::FORBIDDEN, "Forbidden").into_response());
     }
-    registry.remove(&vm_id);
+    let rootfs_path = user_rootfs_path(&state.user_rootfs_dir, &user.email);
+    info!(email = %user.email, path = %rootfs_path.display(), "deleting saved rootfs");
+    let _ = tokio::fs::remove_file(&rootfs_path).await;
     Ok(Redirect::to("/vms").into_response())
 }
 

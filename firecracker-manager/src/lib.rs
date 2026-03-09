@@ -77,6 +77,13 @@ impl VmGuard {
     pub fn delete(self) {
         // drop runs the cleanup
     }
+
+    pub async fn save_rootfs_to(&self, dest: &Path) -> std::io::Result<()> {
+        if tokio::fs::rename(&self.rootfs_copy, dest).await.is_err() {
+            tokio::fs::copy(&self.rootfs_copy, dest).await?;
+        }
+        Ok(())
+    }
 }
 
 impl Drop for VmGuard {

@@ -24,7 +24,7 @@ use tracing::info;
 
 use crate::{
     auth::{get_callback_handler, get_cognito_login_handler, get_demo_handler, get_login_handler, get_logout_handler},
-    handlers::{create_vm_handler, delete_vm_handler, get_redirect_to_vms, get_terminal_page, get_vms_page},
+    handlers::{create_vm_handler, delete_user_rootfs_handler, delete_vm_handler, get_redirect_to_vms, get_terminal_page, get_vms_page},
     state::{build_app_state, AppState, Args},
     terminal::handle_ws_upgrade,
 };
@@ -47,6 +47,7 @@ fn build_router(app_state: AppState) -> Router {
         .route("/", get(get_redirect_to_vms))
         .route("/vms", get(get_vms_page).post(create_vm_handler))
         .route("/vms/{id}/delete", post(delete_vm_handler))
+        .route("/rootfs/delete", post(delete_user_rootfs_handler))
         .route("/terminal/{id}", get(get_terminal_page))
         .route("/ws/{id}", get(handle_ws_upgrade))
         .route("/login", get(get_login_handler))
