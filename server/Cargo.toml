@@ -8,25 +8,24 @@ name = "server"
 path = "src/main.rs"
 
 [dependencies]
-anyhow = "1.0.0"
-async-trait = "0.1.0"
-axum = { version = "0.8.0", features = ["multipart", "ws"] }
-aws-config = "1.0.0"
-aws-credential-types = "1.0.0"
-bytes = "1.0.0"
-config = "0.14.0"
+anyhow = "1.0.102"
+axum = { version = "0.8.8", features = ["multipart", "ws"] }
+aws-config = "1.8.15"
+aws-credential-types = "1.2.14"
+bytes = "1.11.1"
+chrono = "0.4.44"
+config = "0.15.19"
 firecracker-manager = { path = "../firecracker-manager" }
-futures = "0.3.0"
-maud = "0.26"
+futures = "0.3.32"
+maud = "0.27.0"
 handlers = { git = "https://github.com/llm-proxy-rs/cognito.git", version = "0.1.0" }
-russh = "0.46.0"
-russh-keys = "0.46.0"
+russh = "0.57.1"
 russh-sftp = "2.1.1"
-serde = { version = "1.0.0", features = ["derive"] }
-serde_json = "1.0.0"
-time = "0.3.0"
-tokio = { version = "1.0.0", features = ["full"] }
-tracing = "0.1.0"
-tracing-subscriber = { version = "0.3.0", features = ["env-filter"] }
+serde = { version = "1.0.228", features = ["derive"] }
+serde_json = "1.0.149"
+time = "0.3.47"
+tokio = { version = "1.50.0", features = ["full"] }
+tracing = "0.1.44"
+tracing-subscriber = { version = "0.3.22", features = ["env-filter"] }
 tower-sessions = "0.15.0"
-uuid = { version = "1.0.0", features = ["v4"] }
+uuid = { version = "1.22.0", features = ["v4"] }

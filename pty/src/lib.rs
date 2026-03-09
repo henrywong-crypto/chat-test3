@@ -1,9 +1,3 @@
-use std::{
-    io,
-    os::fd::{AsRawFd, BorrowedFd, OwnedFd, RawFd},
-    pin::Pin,
-    task::{ready, Context, Poll},
-};
 use anyhow::{Context as _, Result};
 use libc::{c_void, read as libc_read, write as libc_write};
 use nix::{
@@ -12,6 +6,12 @@ use nix::{
     sys::termios::{cfmakeraw, tcgetattr, tcsetattr, OutputFlags, SetArg},
 };
 use rustix::termios::{tcsetwinsize, Winsize};
+use std::{
+    io,
+    os::fd::{AsRawFd, BorrowedFd, OwnedFd, RawFd},
+    pin::Pin,
+    task::{ready, Context, Poll},
+};
 use tokio::io::{unix::AsyncFd, AsyncRead, AsyncWrite, ReadBuf};
 
 pub struct TerminalSize {
@@ -48,17 +48,28 @@ pub fn open_pty() -> Result<PtyPair> {
     let pty = openpty(None, None)?;
     set_raw_mode(&pty.master)?;
     set_nonblocking_fd(&pty.master)?;
-    let master = PtyMaster { fd: AsyncFd::new(pty.master)? };
+    let master = PtyMaster {
+        fd: AsyncFd::new(pty.master)?,
+    };
     let slave = PtySlave { fd: pty.slave };
     Ok(PtyPair { master, slave })
 }
 
 pub fn resize_pty(pty_master: &PtyMaster, terminal_size: &TerminalSize) -> Result<()> {
-    resize_pty_fd(pty_master.as_raw_fd(), terminal_size.rows, terminal_size.cols)
+    resize_pty_fd(
+        pty_master.as_raw_fd(),
+        terminal_size.rows,
+        terminal_size.cols,
+    )
 }
 
 pub fn resize_pty_fd(fd: RawFd, rows: u16, cols: u16) -> Result<()> {
-    let winsize = Winsize { ws_row: rows, ws_col: cols, ws_xpixel: 0, ws_ypixel: 0 };
+    let winsize = Winsize {
+        ws_row: rows,
+        ws_col: cols,
+        ws_xpixel: 0,
+        ws_ypixel: 0,
+    };
     let borrowed_fd = unsafe { BorrowedFd::borrow_raw(fd) };
     tcsetwinsize(borrowed_fd, winsize)
         .map_err(io::Error::from)
@@ -76,9 +87,9 @@ fn set_raw_mode(fd: &OwnedFd) -> Result<()> {
 }
 
 fn set_nonblocking_fd(fd: &OwnedFd) -> Result<()> {
-    let flags = fcntl(fd.as_raw_fd(), FcntlArg::F_GETFL)?;
+    let flags = fcntl(fd, FcntlArg::F_GETFL)?;
     let flags = OFlag::from_bits_truncate(flags) | OFlag::O_NONBLOCK;
-    fcntl(fd.as_raw_fd(), FcntlArg::F_SETFL(flags))?;
+    fcntl(fd, FcntlArg::F_SETFL(flags))?;
     Ok(())
 }
 
@@ -94,9 +105,8 @@ impl AsyncRead for PtyMaster {
             let result = guard.try_io(|inner| {
                 let fd = inner.get_ref().as_raw_fd();
                 let unfilled = buf.initialize_unfilled();
-                let n = unsafe {
-                    libc_read(fd, unfilled.as_mut_ptr() as *mut c_void, unfilled.len())
-                };
+                let n =
+                    unsafe { libc_read(fd, unfilled.as_mut_ptr() as *mut c_void, unfilled.len()) };
                 if n == -1 {
                     Err(io::Error::last_os_error())
                 } else {
@@ -123,9 +133,7 @@ impl AsyncWrite for PtyMaster {
             let mut guard = ready!(this.fd.poll_write_ready(cx))?;
             let result = guard.try_io(|inner| {
                 let fd = inner.get_ref().as_raw_fd();
-                let n = unsafe {
-                    libc_write(fd, buf.as_ptr() as *const c_void, buf.len())
-                };
+                let n = unsafe { libc_write(fd, buf.as_ptr() as *const c_void, buf.len()) };
                 if n == -1 {
                     Err(io::Error::last_os_error())
                 } else {

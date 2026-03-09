@@ -1,28 +1,13 @@
 use std::path::Path;
 
+use anyhow::{bail, Context, Result};
 use http_body_util::{BodyExt, Full};
 use hyper::body::Bytes;
 use hyper::client::conn::http1;
-use hyper::http::Error as HttpError;
-use hyper::{Method, Request, StatusCode};
+use hyper::{Method, Request};
 use hyper_util::rt::TokioIo;
 use serde::{Deserialize, Serialize};
-use thiserror::Error;
 use tokio::net::UnixStream;
-
-#[derive(Debug, Error)]
-pub enum Error {
-    #[error(transparent)]
-    Io(#[from] std::io::Error),
-    #[error(transparent)]
-    Hyper(#[from] hyper::Error),
-    #[error(transparent)]
-    Http(#[from] HttpError),
-    #[error("firecracker api returned {status}: {body}")]
-    Api { status: StatusCode, body: String },
-}
-
-pub type Result<T> = std::result::Result<T, Error>;
 
 #[derive(Serialize)]
 pub struct MachineConfig {
@@ -136,7 +121,12 @@ async fn send_put(socket_path: &Path, uri: &str, body: Vec<u8>) -> Result<()> {
 }
 
 async fn send_get<T: serde::de::DeserializeOwned>(socket_path: &Path, uri: &str) -> Result<T> {
-    let stream = UnixStream::connect(socket_path).await?;
+    let stream = UnixStream::connect(socket_path).await.with_context(|| {
+        format!(
+            "failed to connect to firecracker socket {}",
+            socket_path.display()
+        )
+    })?;
     let (mut sender, conn) = http1::handshake(TokioIo::new(stream)).await?;
     tokio::spawn(conn);
 
@@ -153,22 +143,20 @@ async fn send_get<T: serde::de::DeserializeOwned>(socket_path: &Path, uri: &str)
         let status = response.status();
         let bytes = response.into_body().collect().await?.to_bytes();
         let body = String::from_utf8_lossy(&bytes).into_owned();
-        return Err(Error::Api { status, body });
+        bail!("firecracker api returned {status}: {body}");
     }
 
     let bytes = response.into_body().collect().await?.to_bytes();
-    serde_json::from_slice(&bytes).map_err(|e| {
-        Error::Api { status: StatusCode::OK, body: format!("failed to parse response: {e}") }
-    })
+    serde_json::from_slice(&bytes).context("failed to parse firecracker response")
 }
 
-async fn send_request(
-    socket_path: &Path,
-    method: Method,
-    uri: &str,
-    body: Vec<u8>,
-) -> Result<()> {
-    let stream = UnixStream::connect(socket_path).await?;
+async fn send_request(socket_path: &Path, method: Method, uri: &str, body: Vec<u8>) -> Result<()> {
+    let stream = UnixStream::connect(socket_path).await.with_context(|| {
+        format!(
+            "failed to connect to firecracker socket {}",
+            socket_path.display()
+        )
+    })?;
     let (mut sender, conn) = http1::handshake(TokioIo::new(stream)).await?;
     tokio::spawn(conn);
 
@@ -186,7 +174,7 @@ async fn send_request(
         let status = response.status();
         let bytes = response.into_body().collect().await?.to_bytes();
         let body = String::from_utf8_lossy(&bytes).into_owned();
-        return Err(Error::Api { status, body });
+        bail!("firecracker api returned {status}: {body}");
     }
 
     Ok(())

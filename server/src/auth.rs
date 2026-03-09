@@ -6,10 +6,7 @@ use axum::{
 use handlers::{callback, login, AppState as CognitoState, CallbackQuery};
 use tower_sessions::Session;
 
-use crate::{
-    state::AppState,
-    templates::render_login_page,
-};
+use crate::{state::AppState, templates::render_login_page};
 
 pub(crate) struct User {
     pub(crate) email: String,
@@ -70,9 +67,11 @@ pub(crate) async fn get_callback_handler(
     let cognito_state = build_cognito_state(&state);
     match callback(query, session, State(cognito_state)).await {
         Ok(response) => response,
-        Err(callback_error) => {
-            (StatusCode::INTERNAL_SERVER_ERROR, callback_error.to_string()).into_response()
-        }
+        Err(callback_error) => (
+            StatusCode::INTERNAL_SERVER_ERROR,
+            callback_error.to_string(),
+        )
+            .into_response(),
     }
 }
 

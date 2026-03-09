@@ -18,13 +18,19 @@ use axum::{
 };
 use firecracker_manager::{cleanup_stale_vms, setup_host_networking};
 use time::Duration;
-use tokio::net::TcpListener;
+use tokio::{net::TcpListener, signal};
 use tower_sessions::{cookie::SameSite, Expiry, MemoryStore, SessionManagerLayer};
 use tracing::info;
 
 use crate::{
-    auth::{get_callback_handler, get_cognito_login_handler, get_demo_handler, get_login_handler, get_logout_handler},
-    handlers::{create_vm_handler, delete_user_rootfs_handler, delete_vm_handler, get_redirect_to_vms, get_terminal_page, get_vms_page},
+    auth::{
+        get_callback_handler, get_cognito_login_handler, get_demo_handler, get_login_handler,
+        get_logout_handler,
+    },
+    handlers::{
+        create_vm_handler, delete_user_rootfs_handler, delete_vm_handler, get_redirect_to_vms,
+        get_terminal_page, get_vms_page,
+    },
     state::{load_config, AppState},
     terminal::handle_ws_upgrade,
     upload::upload_file_handler,
@@ -78,8 +84,14 @@ async fn add_security_headers(request: Request, next: Next) -> Response {
     let mut response = next.run(request).await;
     let headers = response.headers_mut();
     headers.insert("x-frame-options", HeaderValue::from_static("DENY"));
-    headers.insert("x-content-type-options", HeaderValue::from_static("nosniff"));
-    headers.insert("referrer-policy", HeaderValue::from_static("strict-origin-when-cross-origin"));
+    headers.insert(
+        "x-content-type-options",
+        HeaderValue::from_static("nosniff"),
+    );
+    headers.insert(
+        "referrer-policy",
+        HeaderValue::from_static("strict-origin-when-cross-origin"),
+    );
     headers.insert(
         "content-security-policy",
         HeaderValue::from_static(
@@ -108,9 +120,10 @@ async fn serve_router(router: Router, port: u16, app_state: AppState) -> Result<
 }
 
 async fn shutdown_signal() {
-    use tokio::signal;
     let ctrl_c = async {
-        signal::ctrl_c().await.expect("failed to install Ctrl+C handler");
+        signal::ctrl_c()
+            .await
+            .expect("failed to install Ctrl+C handler");
     };
     let terminate = async {
         signal::unix::signal(signal::unix::SignalKind::terminate())

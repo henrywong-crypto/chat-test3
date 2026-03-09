@@ -1,5 +1,4 @@
-use std::time::{SystemTime, UNIX_EPOCH};
-
+use chrono::Utc;
 use maud::{html, Markup, PreEscaped, DOCTYPE};
 
 use crate::state::VmInfo;
@@ -172,13 +171,13 @@ fn render_vm_section(vms: &[VmInfo], csrf_token: &str) -> Markup {
 
 fn render_vm_row(vm: &VmInfo, csrf_token: &str) -> Markup {
     let short_id = format!("{}…", vm.id.get(..8).unwrap_or(&vm.id));
-    let started = format_time_ago(vm.created_at);
+    let time_ago = format_time_ago(vm.created_at);
     html! {
         tr {
             td title=(vm.id) { (short_id) }
             td style="color:var(--text-muted)" { (vm.guest_ip) }
             td style="color:var(--text-muted)" { (vm.pid) }
-            td style="color:var(--text-muted)" { (started) }
+            td style="color:var(--text-muted)" { (time_ago) }
             td {
                 div class="actions" {
                     a href={ "/terminal/" (vm.id) } class="btn" { "Connect" }
@@ -258,30 +257,46 @@ pub(crate) fn render_terminal_page(vm_id: &str, csrf_token: &str, upload_dir: &s
                 ")) }
             }
             body {
-                div id="topbar" {
-                    div id="topbar-left" {
-                        a href="/vms" class="btn btn-ghost" style="padding:4px 8px" { "← VMs" }
-                        span id="vm-id" { (short_id) }
-                    }
-                    div id="topbar-right" {
-                        button id="upload-toggle" class="btn" onclick="toggleUpload()" { "↑ Upload" }
-                    }
-                }
-                form id="upload-drawer" method="post" action=(upload_action) enctype="multipart/form-data" {
-                    input type="hidden" name="csrf_token" value=(csrf_token);
-                    input type="file" id="file-input" name="file" style="display:none";
-                    label id="file-label" for="file-input" { "📎 Choose file" }
-                    span id="file-name" { "No file chosen" }
-                    input id="upload-path" type="text" name="path" value=(default_path);
-                    button type="submit" class="btn btn-primary" { "Upload" }
-                    span id="upload-status" {}
-                }
+                (render_terminal_topbar(&short_id))
+                (render_terminal_upload_drawer(&upload_action, csrf_token, &default_path))
                 div id="term-container" {}
                 script src="https://cdn.jsdelivr.net/npm/xterm@5/lib/xterm.js" {}
                 script src="https://cdn.jsdelivr.net/npm/xterm-addon-fit@0.8/lib/xterm-addon-fit.js" {}
                 script { (PreEscaped(terminal_script)) }
                 script { (PreEscaped(upload_script())) }
             }
+        }
+    }
+}
+
+fn render_terminal_topbar(short_id: &str) -> Markup {
+    html! {
+        div id="topbar" {
+            div id="topbar-left" {
+                a href="/vms" class="btn btn-ghost" style="padding:4px 8px" { "← VMs" }
+                span id="vm-id" { (short_id) }
+            }
+            div id="topbar-right" {
+                button id="upload-toggle" class="btn" onclick="toggleUpload()" { "↑ Upload" }
+            }
+        }
+    }
+}
+
+fn render_terminal_upload_drawer(
+    upload_action: &str,
+    csrf_token: &str,
+    default_path: &str,
+) -> Markup {
+    html! {
+        form id="upload-drawer" method="post" action=(upload_action) enctype="multipart/form-data" {
+            input type="hidden" name="csrf_token" value=(csrf_token);
+            input type="file" id="file-input" name="file" style="display:none";
+            label id="file-label" for="file-input" { "📎 Choose file" }
+            span id="file-name" { "No file chosen" }
+            input id="upload-path" type="text" name="path" value=(default_path);
+            button type="submit" class="btn btn-primary" { "Upload" }
+            span id="upload-status" {}
         }
     }
 }
@@ -340,18 +355,15 @@ new ResizeObserver(() => fitAddon.fit()).observe(container);
 }
 
 fn format_time_ago(created_at: u64) -> String {
-    let now = SystemTime::now()
-        .duration_since(UNIX_EPOCH)
-        .unwrap_or_default()
-        .as_secs();
-    let diff = now.saturating_sub(created_at);
-    if diff < 60 {
-        format!("{diff}s ago")
-    } else if diff < 3600 {
-        format!("{}m ago", diff / 60)
-    } else if diff < 86400 {
-        format!("{}h ago", diff / 3600)
+    let now = Utc::now().timestamp() as u64;
+    let elapsed_secs = now.saturating_sub(created_at);
+    if elapsed_secs < 60 {
+        format!("{elapsed_secs}s ago")
+    } else if elapsed_secs < 3600 {
+        format!("{}m ago", elapsed_secs / 60)
+    } else if elapsed_secs < 86400 {
+        format!("{}h ago", elapsed_secs / 3600)
     } else {
-        format!("{}d ago", diff / 86400)
+        format!("{}d ago", elapsed_secs / 86400)
     }
 }

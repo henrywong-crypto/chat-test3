@@ -13,7 +13,7 @@ use uuid::Uuid;
 use crate::{
     auth::User,
     ssh::{connect_ssh, open_sftp_session, SshClient},
-    state::{AppError, AppState, find_vm_guest_ip_for_user},
+    state::{find_vm_guest_ip_for_user, AppError, AppState},
 };
 
 pub(crate) async fn upload_file_handler(
@@ -33,8 +33,13 @@ pub(crate) async fn upload_file_handler(
     let guest_ip = find_vm_guest_ip_for_user(&state.vms, &vm_id, &user.email)
         .ok_or_else(|| anyhow!("VM {vm_id} not found"))?;
     let validated_path = validate_upload_path(&remote_path, &state.upload_dir)?;
-    let mut ssh_handle =
-        connect_ssh(&guest_ip, &state.ssh_key_path, &state.ssh_user, &state.vm_host_key_path).await?;
+    let mut ssh_handle = connect_ssh(
+        &guest_ip,
+        &state.ssh_key_path,
+        &state.ssh_user,
+        &state.vm_host_key_path,
+    )
+    .await?;
     write_file_via_sftp(&mut ssh_handle, &validated_path, &data).await?;
     Ok((StatusCode::OK, "").into_response())
 }
@@ -50,10 +55,19 @@ async fn extract_upload_fields(mut multipart: Multipart) -> Result<(String, Stri
     let mut csrf_token: Option<String> = None;
     let mut remote_path: Option<String> = None;
     let mut file_data: Option<Bytes> = None;
-    while let Some(field) = multipart.next_field().await.context("failed to read multipart field")? {
+    while let Some(field) = multipart
+        .next_field()
+        .await
+        .context("failed to read multipart field")?
+    {
         match field.name() {
             Some("csrf_token") => {
-                csrf_token = Some(field.text().await.context("failed to read csrf_token field")?);
+                csrf_token = Some(
+                    field
+                        .text()
+                        .await
+                        .context("failed to read csrf_token field")?,
+                );
             }
             Some("path") => {
                 remote_path = Some(field.text().await.context("failed to read path field")?);
@@ -75,15 +89,16 @@ fn validate_upload_path(remote_path: &str, upload_dir: &str) -> Result<String> {
     for part in remote_path.split('/') {
         match part {
             "" | "." => {}
-            ".." => { components.pop(); }
+            ".." => {
+                components.pop();
+            }
             c => components.push(c),
         }
     }
     let normalized = format!("/{}", components.join("/"));
     let upload_dir = upload_dir.trim_end_matches('/');
     if !normalized.starts_with(upload_dir)
-        || (normalized.len() > upload_dir.len()
-            && !normalized[upload_dir.len()..].starts_with('/'))
+        || (normalized.len() > upload_dir.len() && !normalized[upload_dir.len()..].starts_with('/'))
     {
         bail!("upload path {remote_path:?} is outside the upload directory");
     }
@@ -95,10 +110,17 @@ async fn write_file_via_sftp(
     remote_path: &str,
     data: &[u8],
 ) -> Result<()> {
-    let sftp = open_sftp_session(ssh_handle).await?;
-    let mut file = sftp.create(remote_path).await.context("failed to create remote file")?;
-    file.write_all(data).await.context("failed to write file data")?;
-    file.shutdown().await.context("failed to close remote file")?;
+    let sftp_session = open_sftp_session(ssh_handle).await?;
+    let mut file = sftp_session
+        .create(remote_path)
+        .await
+        .context("failed to create remote file")?;
+    file.write_all(data)
+        .await
+        .context("failed to write file data")?;
+    file.shutdown()
+        .await
+        .context("failed to close remote file")?;
     Ok(())
 }
 

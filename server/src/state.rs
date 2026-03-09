@@ -1,8 +1,3 @@
-use std::{
-    collections::HashMap,
-    path::PathBuf,
-    sync::{Arc, Mutex},
-};
 use anyhow::Result;
 use axum::{
     http::StatusCode,
@@ -11,6 +6,11 @@ use axum::{
 use config::{Config, Environment, File};
 use firecracker_manager::VmGuard;
 use serde::Deserialize;
+use std::{
+    collections::HashMap,
+    path::PathBuf,
+    sync::{Arc, Mutex},
+};
 use tracing::error;
 
 #[derive(Clone, Deserialize)]
@@ -49,17 +49,39 @@ pub(crate) struct AppConfig {
     pub(crate) port: u16,
 }
 
-fn default_kernel_path() -> PathBuf        { PathBuf::from("/var/lib/fc/vmlinux") }
-fn default_rootfs_path() -> PathBuf        { PathBuf::from("/var/lib/fc/rootfs.ext4") }
-fn default_socket_dir() -> PathBuf         { PathBuf::from("/tmp") }
-fn default_ssh_key_path() -> PathBuf       { PathBuf::from("/var/lib/fc/id_rsa") }
-fn default_ssh_user() -> String            { "root".to_string() }
-fn default_vm_host_key_path() -> PathBuf   { PathBuf::from("/var/lib/fc/vm_host_key.pub") }
-fn default_cognito_redirect_uri() -> String { "http://localhost:3000/callback".to_string() }
-fn default_user_rootfs_dir() -> PathBuf    { PathBuf::from("/home/ubuntu/fc-users") }
-fn default_upload_dir() -> String          { "/home/ubuntu".to_string() }
-fn default_max_vms_per_user() -> usize     { 2 }
-fn default_port() -> u16                   { 3000 }
+fn default_kernel_path() -> PathBuf {
+    PathBuf::from("/var/lib/fc/vmlinux")
+}
+fn default_rootfs_path() -> PathBuf {
+    PathBuf::from("/var/lib/fc/rootfs.ext4")
+}
+fn default_socket_dir() -> PathBuf {
+    PathBuf::from("/tmp")
+}
+fn default_ssh_key_path() -> PathBuf {
+    PathBuf::from("/var/lib/fc/id_rsa")
+}
+fn default_ssh_user() -> String {
+    "root".to_string()
+}
+fn default_vm_host_key_path() -> PathBuf {
+    PathBuf::from("/var/lib/fc/vm_host_key.pub")
+}
+fn default_cognito_redirect_uri() -> String {
+    "http://localhost:3000/callback".to_string()
+}
+fn default_user_rootfs_dir() -> PathBuf {
+    PathBuf::from("/home/ubuntu/fc-users")
+}
+fn default_upload_dir() -> String {
+    "/home/ubuntu".to_string()
+}
+fn default_max_vms_per_user() -> usize {
+    2
+}
+fn default_port() -> u16 {
+    3000
+}
 
 pub(crate) fn load_config() -> Result<AppConfig> {
     let app_config = Config::builder()
@@ -78,7 +100,10 @@ pub(crate) struct AppState {
 
 impl AppState {
     pub(crate) fn new(config: AppConfig) -> Self {
-        AppState { config, vms: Arc::new(Mutex::new(HashMap::new())) }
+        AppState {
+            config,
+            vms: Arc::new(Mutex::new(HashMap::new())),
+        }
     }
 }
 
@@ -112,7 +137,11 @@ pub(crate) struct AppError(pub(crate) anyhow::Error);
 impl IntoResponse for AppError {
     fn into_response(self) -> Response {
         error!("internal error: {}", self.0);
-        (StatusCode::INTERNAL_SERVER_ERROR, "An internal error occurred").into_response()
+        (
+            StatusCode::INTERNAL_SERVER_ERROR,
+            "An internal error occurred",
+        )
+            .into_response()
     }
 }
 
@@ -122,7 +151,11 @@ impl<E: Into<anyhow::Error>> From<E> for AppError {
     }
 }
 
-pub(crate) fn find_vm_guest_ip_for_user(vms: &VmRegistry, vm_id: &str, email: &str) -> Option<String> {
+pub(crate) fn find_vm_guest_ip_for_user(
+    vms: &VmRegistry,
+    vm_id: &str,
+    email: &str,
+) -> Option<String> {
     let registry = vms.lock().ok()?;
     let entry = registry.get(vm_id)?;
     (entry.email == email).then(|| entry.guest_ip.clone())

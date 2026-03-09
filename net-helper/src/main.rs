@@ -123,7 +123,10 @@ fn validate_iface_name(name: &str) -> Result<(), &'static str> {
     if name == "." || name == ".." {
         return Err("interface name must not be '.' or '..'");
     }
-    if !name.chars().all(|c| c.is_alphanumeric() || matches!(c, '-' | '_' | '@' | '.')) {
+    if !name
+        .chars()
+        .all(|c| c.is_alphanumeric() || matches!(c, '-' | '_' | '@' | '.'))
+    {
         return Err("interface name contains invalid characters");
     }
     Ok(())
@@ -172,10 +175,31 @@ fn cmd_setup_nat(iface: &str) -> i32 {
     }
     // Best-effort delete to avoid duplicates on restart
     let _ = Command::new("iptables")
-        .args(["-t", "nat", "-D", "POSTROUTING", "-o", iface, "-j", "MASQUERADE"])
+        .args([
+            "-t",
+            "nat",
+            "-D",
+            "POSTROUTING",
+            "-o",
+            iface,
+            "-j",
+            "MASQUERADE",
+        ])
         .stderr(std::process::Stdio::null())
         .status();
-    run_cmd("iptables", &["-t", "nat", "-A", "POSTROUTING", "-o", iface, "-j", "MASQUERADE"])
+    run_cmd(
+        "iptables",
+        &[
+            "-t",
+            "nat",
+            "-A",
+            "POSTROUTING",
+            "-o",
+            iface,
+            "-j",
+            "MASQUERADE",
+        ],
+    )
 }
 
 fn raise_ambient_net_admin() -> std::io::Result<()> {
@@ -187,12 +211,22 @@ fn raise_ambient_net_admin() -> std::io::Result<()> {
         const PR_CAP_AMBIENT_RAISE: libc::c_ulong = 2;
 
         #[repr(C)]
-        struct CapHdr { version: u32, pid: i32 }
+        struct CapHdr {
+            version: u32,
+            pid: i32,
+        }
         #[repr(C)]
         #[derive(Clone, Copy, Default)]
-        struct CapData { effective: u32, permitted: u32, inheritable: u32 }
+        struct CapData {
+            effective: u32,
+            permitted: u32,
+            inheritable: u32,
+        }
 
-        let mut hdr = CapHdr { version: CAP_V3, pid: 0 };
+        let mut hdr = CapHdr {
+            version: CAP_V3,
+            pid: 0,
+        };
         let mut data = [CapData::default(); 2];
 
         // capget — read current sets
@@ -206,7 +240,14 @@ fn raise_ambient_net_admin() -> std::io::Result<()> {
             return Err(std::io::Error::last_os_error());
         }
         // Raise to ambient so exec'd children inherit it
-        if libc::prctl(PR_CAP_AMBIENT, PR_CAP_AMBIENT_RAISE, CAP_NET_ADMIN as libc::c_ulong, 0, 0) < 0 {
+        if libc::prctl(
+            PR_CAP_AMBIENT,
+            PR_CAP_AMBIENT_RAISE,
+            CAP_NET_ADMIN as libc::c_ulong,
+            0,
+            0,
+        ) < 0
+        {
             return Err(std::io::Error::last_os_error());
         }
     }
