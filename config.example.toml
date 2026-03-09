@@ -35,8 +35,8 @@ port = 3000
 
 # Jailer process isolation (disabled by default)
 # use_jailer = false
-# jailer_path = "/usr/bin/jailer"
-# firecracker_path = "/usr/bin/firecracker"
+# jailer_path = "/usr/local/bin/jailer"
+# firecracker_path = "/usr/local/bin/firecracker"
 # jailer_uid = 1000   # uid of dedicated firecracker system user — do not use 0
 # jailer_gid = 1000   # gid of dedicated firecracker system group — do not use 0
 # jailer_chroot_base = "/srv/jailer"

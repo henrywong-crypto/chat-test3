@@ -107,10 +107,10 @@ fn default_port() -> u16 {
     3000
 }
 fn default_jailer_path() -> PathBuf {
-    PathBuf::from("/usr/bin/jailer")
+    PathBuf::from("/usr/local/bin/jailer")
 }
 fn default_firecracker_path() -> PathBuf {
-    PathBuf::from("/usr/bin/firecracker")
+    PathBuf::from("/usr/local/bin/firecracker")
 }
 fn default_jailer_chroot_base() -> PathBuf {
     PathBuf::from("/srv/jailer")
