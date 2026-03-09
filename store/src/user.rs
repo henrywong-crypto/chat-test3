@@ -1,12 +1,10 @@
 use anyhow::Result;
-use chrono::{DateTime, Utc};
 use sqlx::PgPool;
 use uuid::Uuid;
 
 pub struct User {
     pub id: Uuid,
     pub email: String,
-    pub created_at: DateTime<Utc>,
 }
 
 pub async fn upsert_user(pg_pool: &PgPool, email: &str) -> Result<User> {
@@ -16,7 +14,7 @@ pub async fn upsert_user(pg_pool: &PgPool, email: &str) -> Result<User> {
         INSERT INTO users (email)
         VALUES ($1)
         ON CONFLICT (email) DO UPDATE SET email = EXCLUDED.email
-        RETURNING id, email, created_at
+        RETURNING id, email
         "#,
         email
     )
