@@ -140,7 +140,7 @@ term.loadAddon(fitAddon);
 const container = document.getElementById('term-container');
 term.open(container);
 fitAddon.fit();
-const ws = new WebSocket('ws://' + location.host + '/ws/' + vmId);
+const ws = new WebSocket((location.protocol === 'https:' ? 'wss:' : 'ws:') + '//' + location.host + '/ws/' + vmId);
 ws.binaryType = 'arraybuffer';
 function sendResize() {{
   if (ws.readyState === WebSocket.OPEN)
