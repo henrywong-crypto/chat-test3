@@ -57,9 +57,6 @@ impl VmGuard {
         &self.socket_path
     }
 
-    pub fn delete(self) {
-    }
-
     pub async fn save_rootfs_to(&self, dest: &Path) -> Result<()> {
         let Some(rootfs_copy) = &self.rootfs_copy else {
             return Ok(());

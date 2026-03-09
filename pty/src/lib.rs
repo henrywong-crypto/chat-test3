@@ -46,8 +46,8 @@ impl PtySlave {
 
 pub fn open_pty() -> Result<PtyPair> {
     let pty = openpty(None, None)?;
-    // set_raw_mode(&pty.master)?;
-    // set_nonblocking_fd(&pty.master)?;
+    set_raw_mode(&pty.master)?;
+    set_nonblocking_fd(&pty.master)?;
     let master = PtyMaster {
         fd: AsyncFd::new(pty.master)?,
     };
