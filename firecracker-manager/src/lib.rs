@@ -6,6 +6,7 @@ use firecracker_client::{
     NetworkInterface,
 };
 pub use mmds_iam::{build_mmds_with_iam, ImdsCredential};
+use mmds_iam::imds_compat_mmds_config;
 use nix::{
     sys::signal::{kill, Signal},
     unistd::Pid,
