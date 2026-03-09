@@ -1,0 +1,42 @@
+# All fields are optional — defaults are shown below.
+
+# VM kernel image
+kernel_path = "/var/lib/fc/vmlinux"
+
+# Base rootfs image (copied per-user on first login)
+rootfs_path = "/var/lib/fc/rootfs.ext4"
+
+# Directory for Firecracker Unix sockets
+socket_dir = "/tmp"
+
+# SSH private key for connecting to VMs
+ssh_key_path = "/var/lib/fc/id_rsa"
+
+# SSH user inside the VM
+ssh_user = "root"
+
+# VM host public key for SSH host verification
+vm_host_key_path = "/var/lib/fc/vm_host_key.pub"
+
+# Directory where per-user rootfs files are stored ({uuid}.ext4)
+user_rootfs_dir = "/home/ubuntu/fc-users"
+
+# Directory inside the VM that file uploads are restricted to
+upload_dir = "/home/ubuntu"
+
+# Maximum concurrent VMs per user
+max_vms_per_user = 2
+
+# PostgreSQL connection URL
+database_url = "postgres://localhost/webcode"
+
+# Port the server listens on
+port = 3000
+
+# Cognito OAuth (leave empty to use demo login only)
+cognito_client_id = ""
+cognito_client_secret = ""
+cognito_domain = ""
+cognito_redirect_uri = "http://localhost:3000/callback"
+cognito_region = ""
+cognito_user_pool_id = ""
