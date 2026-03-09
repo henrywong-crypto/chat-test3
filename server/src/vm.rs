@@ -36,17 +36,27 @@ pub(crate) fn build_vm_config(
     })
 }
 
-pub(crate) fn user_rootfs_path(user_rootfs_dir: &Path, email: &str) -> PathBuf {
-    let sanitized: String = email
-        .chars()
-        .map(|c| if c.is_alphanumeric() { c } else { '_' })
-        .collect();
-    user_rootfs_dir.join(format!("{sanitized}.ext4"))
+pub(crate) fn user_rootfs_path(user_rootfs_dir: &Path, user_id: Uuid) -> PathBuf {
+    user_rootfs_dir.join(format!("{user_id}.ext4"))
 }
 
-pub(crate) fn find_user_rootfs(user_rootfs_dir: &Path, email: &str) -> Option<PathBuf> {
-    let path = user_rootfs_path(user_rootfs_dir, email);
-    path.exists().then_some(path)
+pub(crate) fn find_user_rootfs(user_rootfs_dir: &Path, user_id: Uuid) -> Option<PathBuf> {
+    let rootfs_path = user_rootfs_path(user_rootfs_dir, user_id);
+    rootfs_path.exists().then_some(rootfs_path)
+}
+
+pub(crate) async fn ensure_user_rootfs(
+    user_rootfs_dir: &Path,
+    base_rootfs_path: &Path,
+    user_id: Uuid,
+) -> Result<PathBuf> {
+    let rootfs_path = user_rootfs_path(user_rootfs_dir, user_id);
+    if rootfs_path.exists() {
+        return Ok(rootfs_path);
+    }
+    tokio::fs::create_dir_all(user_rootfs_dir).await?;
+    tokio::fs::copy(base_rootfs_path, &rootfs_path).await?;
+    Ok(rootfs_path)
 }
 
 pub(crate) async fn fetch_host_iam_credentials() -> Option<(String, ImdsCredential)> {
@@ -97,9 +107,9 @@ pub(crate) async fn save_all_vm_rootfs(app_state: &AppState) {
 }
 
 async fn save_vm_entry_rootfs(user_rootfs_dir: &Path, vm_id: &str, vm_entry: VmEntry) {
-    let user_rootfs = user_rootfs_path(user_rootfs_dir, &vm_entry.email);
-    info!(email = %vm_entry.email, vm_id = %vm_id, dest = %user_rootfs.display(), "saving rootfs on shutdown");
-    if let Err(e) = vm_entry._guard.save_rootfs_to(&user_rootfs).await {
-        error!(email = %vm_entry.email, vm_id = %vm_id, "failed to save rootfs on shutdown: {e}");
+    let rootfs_path = user_rootfs_path(user_rootfs_dir, vm_entry.user_id);
+    info!(user_id = %vm_entry.user_id, vm_id = %vm_id, dest = %rootfs_path.display(), "saving rootfs on shutdown");
+    if let Err(e) = vm_entry._guard.save_rootfs_to(&rootfs_path).await {
+        error!(user_id = %vm_entry.user_id, vm_id = %vm_id, "failed to save rootfs on shutdown: {e}");
     }
 }

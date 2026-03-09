@@ -16,7 +16,7 @@ use crate::{
     auth::User,
     state::{AppError, AppState, VmEntry, VmInfo, VmRegistry},
     templates::{render_terminal_page, render_vms_page},
-    vm::{build_vm_config, fetch_host_iam_credentials, find_user_rootfs, user_rootfs_path},
+    vm::{build_vm_config, ensure_user_rootfs, fetch_host_iam_credentials, find_user_rootfs, user_rootfs_path},
 };
 
 #[derive(Deserialize)]
@@ -95,7 +95,7 @@ pub(crate) async fn get_vms_page(
         })
         .collect();
     vm_infos.sort_by_key(|v| v.created_at);
-    let has_user_rootfs = find_user_rootfs(&state.user_rootfs_dir, &user.email).is_some();
+    let has_user_rootfs = find_user_rootfs(&state.user_rootfs_dir, db_user.id).is_some();
     Ok(Html(
         render_vms_page(&vm_infos, &csrf_token, has_user_rootfs).into_string(),
     ))
@@ -126,18 +126,11 @@ pub(crate) async fn create_vm_handler(
             .into_response());
     }
     let iam_creds = fetch_host_iam_credentials().await;
-    let user_rootfs = find_user_rootfs(&state.user_rootfs_dir, &user.email);
-    match &user_rootfs {
-        Some(path) => {
-            info!(email = %user.email, rootfs = %path.display(), "reattaching saved rootfs")
-        }
-        None => {
-            info!(email = %user.email, rootfs = %state.rootfs_path.display(), "creating rootfs from base image")
-        }
-    }
-    let vm_config = build_vm_config(&state, iam_creds, user_rootfs.as_deref())?;
+    let user_rootfs = ensure_user_rootfs(&state.user_rootfs_dir, &state.rootfs_path, db_user.id).await?;
+    info!(user_id = %db_user.id, rootfs = %user_rootfs.display(), "using rootfs");
+    let vm_config = build_vm_config(&state, iam_creds, Some(&user_rootfs))?;
     let vm = create_vm(&vm_config).await?;
-    info!(email = %user.email, vm_id = %vm.id, guest_ip = %vm.guest_ip, pid = vm.pid, "vm started");
+    info!(user_id = %db_user.id, vm_id = %vm.id, guest_ip = %vm.guest_ip, pid = vm.pid, "vm started");
     let created_at = Utc::now().timestamp() as u64;
     let vm_id = vm.id.clone();
     let vm_entry = VmEntry {
@@ -176,14 +169,14 @@ pub(crate) async fn delete_vm_handler(
                 state.user_rootfs_dir.display()
             )
         })?;
-    let user_rootfs = user_rootfs_path(&state.user_rootfs_dir, &user.email);
-    info!(email = %user.email, vm_id = %vm_id, dest = %user_rootfs.display(), "saving rootfs from deleted vm");
+    let user_rootfs = user_rootfs_path(&state.user_rootfs_dir, db_user.id);
+    info!(user_id = %db_user.id, vm_id = %vm_id, dest = %user_rootfs.display(), "saving rootfs from deleted vm");
     vm_entry
         ._guard
         .save_rootfs_to(&user_rootfs)
         .await
         .with_context(|| format!("failed to save rootfs to {}", user_rootfs.display()))?;
-    info!(email = %user.email, dest = %user_rootfs.display(), "rootfs saved");
+    info!(user_id = %db_user.id, dest = %user_rootfs.display(), "rootfs saved");
     Ok(Redirect::to("/sessions").into_response())
 }
 
@@ -196,8 +189,9 @@ pub(crate) async fn delete_user_rootfs_handler(
     if !validate_csrf(&session, &form.csrf_token).await {
         return Ok((StatusCode::FORBIDDEN, "Forbidden").into_response());
     }
-    let rootfs_path = user_rootfs_path(&state.user_rootfs_dir, &user.email);
-    info!(email = %user.email, path = %rootfs_path.display(), "deleting saved rootfs");
+    let db_user = upsert_user(&state.db, &user.email).await?;
+    let rootfs_path = user_rootfs_path(&state.user_rootfs_dir, db_user.id);
+    info!(user_id = %db_user.id, path = %rootfs_path.display(), "deleting saved rootfs");
     let _ = tokio::fs::remove_file(&rootfs_path).await;
     Ok(Redirect::to("/sessions").into_response())
 }
