@@ -59,6 +59,7 @@ pub struct Vm {
     _child: Child,
     tap_name: String,
     rootfs_copy: PathBuf,
+    meta_path: PathBuf,
 }
 
 pub struct VmGuard {
@@ -68,6 +69,7 @@ pub struct VmGuard {
     pub pid: u32,
     tap_name: String,
     rootfs_copy: PathBuf,
+    meta_path: PathBuf,
 }
 
 impl VmGuard {
@@ -81,6 +83,7 @@ impl Drop for VmGuard {
         let _ = kill(Pid::from_raw(self.pid as i32), Signal::SIGTERM);
         delete_tap(&self.tap_name);
         let _ = std::fs::remove_file(&self.rootfs_copy);
+        let _ = std::fs::remove_file(&self.meta_path);
     }
 }
 
@@ -93,6 +96,7 @@ impl Vm {
             pid: self.pid,
             tap_name: self.tap_name,
             rootfs_copy: self.rootfs_copy,
+            meta_path: self.meta_path,
         }
     }
 }
@@ -105,6 +109,7 @@ pub async fn create_vm(vm_config: &VmConfig) -> Result<Vm> {
     let guest_ip = vm_guest_ip(net_idx);
     let socket_path = vm_config.socket_dir.join(format!("fc-{}.socket", vm_config.id));
     let rootfs_copy = vm_config.socket_dir.join(format!("rootfs-{}.ext4", vm_config.id));
+    let meta_path = vm_config.socket_dir.join(format!("fc-{}.meta", vm_config.id));
 
     let boot_args = format!(
         "{} ip={guest_ip}::172.16.{net_idx}.1:255.255.255.252::eth0:none",
@@ -115,12 +120,44 @@ pub async fn create_vm(vm_config: &VmConfig) -> Result<Vm> {
     copy_rootfs(&vm_config.rootfs_path, &rootfs_copy).await?;
     let mut child = spawn_firecracker(&socket_path)?;
     let pid = child.id().ok_or(Error::ProcessExited)?;
+    write_vm_meta(&meta_path, pid, &tap_name, &rootfs_copy);
     wait_for_socket(&socket_path).await?;
     configure_vm(&socket_path, &rootfs_copy, vm_config, &tap_name, &mac, &boot_args).await?;
     start_instance(&socket_path).await?;
     check_still_running(&mut child).await?;
 
-    Ok(Vm { id: vm_config.id.clone(), guest_ip, socket_path, pid, _child: child, tap_name, rootfs_copy })
+    Ok(Vm { id: vm_config.id.clone(), guest_ip, socket_path, pid, _child: child, tap_name, rootfs_copy, meta_path })
+}
+
+/// Kill and clean up any VMs left over from a previous server run.
+/// Call this once on startup before accepting requests.
+pub fn cleanup_stale_vms(socket_dir: &Path) {
+    let Ok(entries) = std::fs::read_dir(socket_dir) else { return };
+    for entry in entries.flatten() {
+        let path = entry.path();
+        let Some(file_name) = path.file_name().and_then(|n| n.to_str()) else { continue };
+        if !file_name.starts_with("fc-") || !file_name.ends_with(".meta") { continue }
+        cleanup_stale_vm(&path);
+    }
+}
+
+fn cleanup_stale_vm(meta_path: &Path) {
+    let Ok(content) = std::fs::read_to_string(meta_path) else { return };
+    let lines: Vec<&str> = content.lines().collect();
+    if lines.len() >= 3 {
+        if let Ok(pid) = lines[0].trim().parse::<i32>() {
+            let _ = kill(Pid::from_raw(pid), Signal::SIGTERM);
+        }
+        delete_tap(lines[1].trim());
+        let _ = std::fs::remove_file(lines[2].trim());
+    }
+    let _ = std::fs::remove_file(meta_path.with_extension("socket"));
+    let _ = std::fs::remove_file(meta_path);
+}
+
+fn write_vm_meta(meta_path: &Path, pid: u32, tap_name: &str, rootfs_copy: &Path) {
+    let content = format!("{pid}\n{tap_name}\n{}", rootfs_copy.display());
+    let _ = std::fs::write(meta_path, content);
 }
 
 async fn copy_rootfs(src: &Path, dst: &Path) -> Result<()> {

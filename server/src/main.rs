@@ -12,7 +12,7 @@ use axum::{
     Router,
 };
 use clap::Parser;
-use firecracker_manager::setup_host_networking;
+use firecracker_manager::{cleanup_stale_vms, setup_host_networking};
 use time::Duration;
 use tokio::net::TcpListener;
 use tower_sessions::{cookie::SameSite, Expiry, MemoryStore, SessionManagerLayer};
@@ -28,6 +28,7 @@ use crate::{
 async fn main() -> Result<()> {
     let args = Args::parse();
     let port = args.port;
+    cleanup_stale_vms(&args.socket_dir);
     setup_host_networking().await;
     let app_state = build_app_state(args)?;
     let router = build_router(app_state);
