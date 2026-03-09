@@ -180,7 +180,7 @@ pub(crate) async fn delete_vm_handler(
         .await
         .with_context(|| format!("failed to save rootfs to {}", user_rootfs.display()))?;
     info!(email = %user.email, dest = %user_rootfs.display(), "rootfs saved");
-    Ok(Redirect::to("/vms").into_response())
+    Ok(Redirect::to("/sessions").into_response())
 }
 
 pub(crate) async fn delete_user_rootfs_handler(
@@ -195,7 +195,7 @@ pub(crate) async fn delete_user_rootfs_handler(
     let rootfs_path = user_rootfs_path(&state.user_rootfs_dir, &user.email);
     info!(email = %user.email, path = %rootfs_path.display(), "deleting saved rootfs");
     let _ = tokio::fs::remove_file(&rootfs_path).await;
-    Ok(Redirect::to("/vms").into_response())
+    Ok(Redirect::to("/sessions").into_response())
 }
 
 pub(crate) async fn get_terminal_page(
