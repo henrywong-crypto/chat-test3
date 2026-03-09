@@ -8,62 +8,85 @@ use axum::{
     http::StatusCode,
     response::{IntoResponse, Response},
 };
-use clap::Parser;
+use config::{Config, Environment, File};
 use firecracker_manager::VmGuard;
-use serde::Serialize;
+use serde::Deserialize;
 use tracing::error;
 
-#[derive(Parser)]
-pub(crate) struct Args {
-    #[arg(long, env = "KERNEL_PATH", default_value = "/var/lib/fc/vmlinux")]
+#[derive(Clone, Deserialize)]
+pub(crate) struct AppConfig {
+    #[serde(default = "default_kernel_path")]
     pub(crate) kernel_path: PathBuf,
-    #[arg(long, env = "ROOTFS_PATH", default_value = "/var/lib/fc/rootfs.ext4")]
+    #[serde(default = "default_rootfs_path")]
     pub(crate) rootfs_path: PathBuf,
-    #[arg(long, env = "SOCKET_DIR", default_value = "/tmp")]
+    #[serde(default = "default_socket_dir")]
     pub(crate) socket_dir: PathBuf,
-    #[arg(long, env = "SSH_KEY_PATH", default_value = "/var/lib/fc/id_rsa")]
+    #[serde(default = "default_ssh_key_path")]
     pub(crate) ssh_key_path: PathBuf,
-    #[arg(long, env = "SSH_USER", default_value = "root")]
+    #[serde(default = "default_ssh_user")]
     pub(crate) ssh_user: String,
-    #[arg(long, env = "VM_HOST_KEY_PATH", default_value = "/var/lib/fc/vm_host_key.pub")]
+    #[serde(default = "default_vm_host_key_path")]
     pub(crate) vm_host_key_path: PathBuf,
-    #[arg(long, env = "COGNITO_CLIENT_ID", default_value = "")]
+    #[serde(default)]
     pub(crate) cognito_client_id: String,
-    #[arg(long, env = "COGNITO_CLIENT_SECRET", default_value = "")]
+    #[serde(default)]
     pub(crate) cognito_client_secret: String,
-    #[arg(long, env = "COGNITO_DOMAIN", default_value = "")]
+    #[serde(default)]
     pub(crate) cognito_domain: String,
-    #[arg(long, env = "COGNITO_REDIRECT_URI", default_value = "http://localhost:3000/callback")]
+    #[serde(default = "default_cognito_redirect_uri")]
     pub(crate) cognito_redirect_uri: String,
-    #[arg(long, env = "COGNITO_REGION", default_value = "")]
+    #[serde(default)]
     pub(crate) cognito_region: String,
-    #[arg(long, env = "COGNITO_USER_POOL_ID", default_value = "")]
+    #[serde(default)]
     pub(crate) cognito_user_pool_id: String,
-    #[arg(long, env = "USER_ROOTFS_DIR", default_value = "/home/ubuntu/fc-users")]
+    #[serde(default = "default_user_rootfs_dir")]
     pub(crate) user_rootfs_dir: PathBuf,
-    #[arg(long, env = "UPLOAD_DIR", default_value = "/home/ubuntu")]
+    #[serde(default = "default_upload_dir")]
     pub(crate) upload_dir: String,
-    #[arg(long, env = "PORT", default_value = "3000")]
+    #[serde(default = "default_max_vms_per_user")]
+    pub(crate) max_vms_per_user: usize,
+    #[serde(default = "default_port")]
     pub(crate) port: u16,
+}
+
+fn default_kernel_path() -> PathBuf        { PathBuf::from("/var/lib/fc/vmlinux") }
+fn default_rootfs_path() -> PathBuf        { PathBuf::from("/var/lib/fc/rootfs.ext4") }
+fn default_socket_dir() -> PathBuf         { PathBuf::from("/tmp") }
+fn default_ssh_key_path() -> PathBuf       { PathBuf::from("/var/lib/fc/id_rsa") }
+fn default_ssh_user() -> String            { "root".to_string() }
+fn default_vm_host_key_path() -> PathBuf   { PathBuf::from("/var/lib/fc/vm_host_key.pub") }
+fn default_cognito_redirect_uri() -> String { "http://localhost:3000/callback".to_string() }
+fn default_user_rootfs_dir() -> PathBuf    { PathBuf::from("/home/ubuntu/fc-users") }
+fn default_upload_dir() -> String          { "/home/ubuntu".to_string() }
+fn default_max_vms_per_user() -> usize     { 2 }
+fn default_port() -> u16                   { 3000 }
+
+pub(crate) fn load_config() -> Result<AppConfig> {
+    let app_config = Config::builder()
+        .add_source(File::with_name("config").required(false))
+        .add_source(Environment::default())
+        .build()?
+        .try_deserialize()?;
+    Ok(app_config)
 }
 
 #[derive(Clone)]
 pub(crate) struct AppState {
-    pub(crate) kernel_path: PathBuf,
-    pub(crate) rootfs_path: PathBuf,
-    pub(crate) socket_dir: PathBuf,
-    pub(crate) ssh_key_path: PathBuf,
-    pub(crate) ssh_user: String,
-    pub(crate) vm_host_key_path: PathBuf,
-    pub(crate) cognito_client_id: String,
-    pub(crate) cognito_client_secret: String,
-    pub(crate) cognito_domain: String,
-    pub(crate) cognito_redirect_uri: String,
-    pub(crate) cognito_region: String,
-    pub(crate) cognito_user_pool_id: String,
-    pub(crate) user_rootfs_dir: PathBuf,
-    pub(crate) upload_dir: String,
+    pub(crate) config: AppConfig,
     pub(crate) vms: VmRegistry,
+}
+
+impl AppState {
+    pub(crate) fn new(config: AppConfig) -> Self {
+        AppState { config, vms: Arc::new(Mutex::new(HashMap::new())) }
+    }
+}
+
+impl std::ops::Deref for AppState {
+    type Target = AppConfig;
+    fn deref(&self) -> &AppConfig {
+        &self.config
+    }
 }
 
 pub(crate) type VmRegistry = Arc<Mutex<HashMap<String, VmEntry>>>;
@@ -76,7 +99,7 @@ pub(crate) struct VmEntry {
     pub(crate) _guard: VmGuard,
 }
 
-#[derive(Serialize)]
+#[derive(serde::Serialize)]
 pub(crate) struct VmInfo {
     pub(crate) id: String,
     pub(crate) guest_ip: String,
@@ -97,26 +120,6 @@ impl<E: Into<anyhow::Error>> From<E> for AppError {
     fn from(app_error: E) -> Self {
         AppError(app_error.into())
     }
-}
-
-pub(crate) fn build_app_state(args: Args) -> Result<AppState> {
-    Ok(AppState {
-        kernel_path: args.kernel_path,
-        rootfs_path: args.rootfs_path,
-        socket_dir: args.socket_dir,
-        ssh_key_path: args.ssh_key_path,
-        ssh_user: args.ssh_user,
-        vm_host_key_path: args.vm_host_key_path,
-        cognito_client_id: args.cognito_client_id,
-        cognito_client_secret: args.cognito_client_secret,
-        cognito_domain: args.cognito_domain,
-        cognito_redirect_uri: args.cognito_redirect_uri,
-        cognito_region: args.cognito_region,
-        cognito_user_pool_id: args.cognito_user_pool_id,
-        user_rootfs_dir: args.user_rootfs_dir,
-        upload_dir: args.upload_dir,
-        vms: Arc::new(Mutex::new(HashMap::new())),
-    })
 }
 
 pub(crate) fn find_vm_guest_ip_for_user(vms: &VmRegistry, vm_id: &str, email: &str) -> Option<String> {

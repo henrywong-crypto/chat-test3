@@ -6,10 +6,10 @@ use firecracker_manager::{build_mmds_with_iam, system_time_to_iso8601, ImdsCrede
 use tracing::{error, info, warn};
 use uuid::Uuid;
 
-use crate::state::{AppState, VmEntry};
+use crate::state::{AppConfig, AppState, VmEntry};
 
 pub(crate) fn build_vm_config(
-    state: &AppState,
+    state: &AppConfig,
     iam_creds: Option<(String, ImdsCredential)>,
     user_rootfs: Option<&Path>,
 ) -> VmConfig {

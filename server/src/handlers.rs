@@ -79,6 +79,16 @@ pub(crate) async fn create_vm_handler(
     if !validate_csrf(&session, &form.csrf_token).await {
         return Ok((StatusCode::FORBIDDEN, "Forbidden").into_response());
     }
+    let user_vm_count = state
+        .vms
+        .lock()
+        .map_err(|_| anyhow!("vm registry lock poisoned"))?
+        .values()
+        .filter(|e| e.email == user.email)
+        .count();
+    if user_vm_count >= state.max_vms_per_user {
+        return Ok((StatusCode::FORBIDDEN, format!("VM limit reached (max {})", state.max_vms_per_user)).into_response());
+    }
     let iam_creds = fetch_host_iam_credentials().await;
     let user_rootfs = find_user_rootfs(&state.user_rootfs_dir, &user.email);
     match &user_rootfs {

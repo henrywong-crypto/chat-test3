@@ -16,7 +16,6 @@ use axum::{
     routing::{get, post},
     Router,
 };
-use clap::Parser;
 use firecracker_manager::{cleanup_stale_vms, setup_host_networking};
 use time::Duration;
 use tokio::net::TcpListener;
@@ -26,7 +25,7 @@ use tracing::info;
 use crate::{
     auth::{get_callback_handler, get_cognito_login_handler, get_demo_handler, get_login_handler, get_logout_handler},
     handlers::{create_vm_handler, delete_user_rootfs_handler, delete_vm_handler, get_redirect_to_vms, get_terminal_page, get_vms_page},
-    state::{build_app_state, AppState, Args},
+    state::{load_config, AppState},
     terminal::handle_ws_upgrade,
     upload::upload_file_handler,
     vm::save_all_vm_rootfs,
@@ -40,11 +39,10 @@ async fn main() -> Result<()> {
                 .unwrap_or_else(|_| tracing_subscriber::EnvFilter::new("info")),
         )
         .init();
-    let args = Args::parse();
-    let port = args.port;
-    cleanup_stale_vms(&args.socket_dir);
+    let app_state = AppState::new(load_config()?);
+    let port = app_state.port;
+    cleanup_stale_vms(&app_state.socket_dir);
     setup_host_networking().await;
-    let app_state = build_app_state(args)?;
     let router = build_router(app_state.clone());
     serve_router(router, port, app_state).await
 }
