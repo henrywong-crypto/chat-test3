@@ -15,7 +15,7 @@ use firecracker_client::{
 use nix::sys::signal::{kill, Signal};
 use nix::unistd::Pid;
 use thiserror::Error;
-use tracing::warn;
+use tracing::{info, warn};
 use tokio::process::{Child, Command};
 
 #[derive(Debug, Error)]
@@ -125,6 +125,7 @@ pub async fn create_vm(vm_config: &VmConfig) -> Result<Vm> {
     );
 
     create_tap(&tap_name, &tap_ip).await?;
+    info!(src = %vm_config.rootfs_path.display(), dst = %rootfs_copy.display(), "copying rootfs");
     copy_rootfs(&vm_config.rootfs_path, &rootfs_copy).await?;
     let mut child = spawn_firecracker(&socket_path)?;
     let pid = child.id().ok_or(Error::ProcessExited)?;

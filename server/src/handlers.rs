@@ -1,6 +1,6 @@
 use std::time::{SystemTime, UNIX_EPOCH};
 
-use anyhow::anyhow;
+use anyhow::{anyhow, Context};
 use axum::{
     extract::{Form, Path, State},
     http::StatusCode,
@@ -131,10 +131,12 @@ pub(crate) async fn delete_vm_handler(
         }
         registry.remove(&vm_id).expect("just checked")
     };
-    tokio::fs::create_dir_all(&state.user_rootfs_dir).await?;
+    tokio::fs::create_dir_all(&state.user_rootfs_dir).await
+        .with_context(|| format!("failed to create user rootfs dir {}", state.user_rootfs_dir.display()))?;
     let user_rootfs = user_rootfs_path(&state.user_rootfs_dir, &user.email);
     info!(email = %user.email, vm_id = %vm_id, dest = %user_rootfs.display(), "saving rootfs from deleted vm");
-    entry._guard.save_rootfs_to(&user_rootfs).await?;
+    entry._guard.save_rootfs_to(&user_rootfs).await
+        .with_context(|| format!("failed to save rootfs to {}", user_rootfs.display()))?;
     info!(email = %user.email, dest = %user_rootfs.display(), "rootfs saved");
     Ok(Redirect::to("/vms").into_response())
 }
