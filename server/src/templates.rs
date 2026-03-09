@@ -161,7 +161,7 @@ fn render_terminal_topbar(short_id: &str, csrf_token: &str, has_user_rootfs: boo
                 @if has_user_rootfs {
                     form method="post" action="/rootfs/delete" {
                         input type="hidden" name="csrf_token" value=(csrf_token);
-                        button type="submit" class="btn btn-ghost" { "Delete disk" }
+                        button type="submit" class="btn btn-ghost" { "Reset" }
                     }
                 }
                 button id="upload-toggle" class="btn" onclick="toggleUpload()" { "↑ Upload" }
