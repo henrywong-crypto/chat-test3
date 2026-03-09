@@ -1,10 +1,9 @@
-use anyhow::{anyhow, Context};
+use anyhow::anyhow;
 use axum::{
     extract::{Form, Path, State},
     http::StatusCode,
     response::{Html, IntoResponse, Redirect, Response},
 };
-use chrono::Utc;
 use firecracker_manager::create_vm;
 use serde::Deserialize;
 use store::upsert_user;
@@ -51,24 +50,6 @@ fn register_vm(vms: &VmRegistry, vm_id: String, vm_entry: VmEntry) -> Result<(),
     Ok(())
 }
 
-fn remove_owned_vm(
-    vms: &VmRegistry,
-    vm_id: &str,
-    user_id: Uuid,
-) -> Result<Option<VmEntry>, AppError> {
-    let mut registry = vms
-        .lock()
-        .map_err(|_| anyhow!("vm registry lock poisoned"))?;
-    let owned = registry
-        .get(vm_id)
-        .map(|e| e.user_id == user_id)
-        .unwrap_or(false);
-    if !owned {
-        return Ok(None);
-    }
-    Ok(registry.remove(vm_id))
-}
-
 fn find_user_vm_id(vms: &VmRegistry, user_id: Uuid) -> Option<String> {
     let registry = vms.lock().ok()?;
     registry
@@ -95,12 +76,9 @@ pub(crate) async fn get_or_create_terminal(
     let vm_config = build_vm_config(&state, iam_creds, Some(&user_rootfs))?;
     let vm_guard = create_vm(&vm_config).await?;
     info!(user_id = %db_user.id, vm_id = %vm_guard.id, guest_ip = %vm_guard.guest_ip, pid = vm_guard.pid, "vm started");
-    let created_at = Utc::now().timestamp() as u64;
     let vm_id = vm_guard.id.clone();
     let vm_entry = VmEntry {
         guest_ip: vm_guard.guest_ip.clone(),
-        pid: vm_guard.pid,
-        created_at,
         user_id: db_user.id,
         has_iam_creds,
         _guard: vm_guard,
@@ -110,42 +88,6 @@ pub(crate) async fn get_or_create_terminal(
     let csrf_token = get_csrf_token(&session).await;
     let has_user_rootfs = find_user_rootfs(&state.user_rootfs_dir, db_user.id).is_some();
     Ok(Html(render_terminal_page(&vm_id, &csrf_token, &state.upload_dir, has_user_rootfs).into_string()).into_response())
-}
-
-pub(crate) async fn delete_vm_handler(
-    user: User,
-    session: Session,
-    Path(vm_id): Path<String>,
-    State(state): State<AppState>,
-    Form(form): Form<CsrfForm>,
-) -> Result<Response, AppError> {
-    if !validate_csrf(&session, &form.csrf_token).await {
-        return Ok((StatusCode::FORBIDDEN, "Forbidden").into_response());
-    }
-    if !validate_vm_id(&vm_id) {
-        return Ok((StatusCode::NOT_FOUND, "Not found").into_response());
-    }
-    let db_user = upsert_user(&state.db, &user.email).await?;
-    let Some(vm_entry) = remove_owned_vm(&state.vms, &vm_id, db_user.id)? else {
-        return Ok((StatusCode::NOT_FOUND, "Not found").into_response());
-    };
-    tokio::fs::create_dir_all(&state.user_rootfs_dir)
-        .await
-        .with_context(|| {
-            format!(
-                "failed to create user rootfs dir {}",
-                state.user_rootfs_dir.display()
-            )
-        })?;
-    let user_rootfs = user_rootfs_path(&state.user_rootfs_dir, db_user.id);
-    info!(user_id = %db_user.id, vm_id = %vm_id, dest = %user_rootfs.display(), "saving rootfs from stopped vm");
-    vm_entry
-        ._guard
-        .save_rootfs_to(&user_rootfs)
-        .await
-        .with_context(|| format!("failed to save rootfs to {}", user_rootfs.display()))?;
-    info!(user_id = %db_user.id, dest = %user_rootfs.display(), "rootfs saved");
-    Ok(Redirect::to("/").into_response())
 }
 
 pub(crate) async fn delete_user_rootfs_handler(

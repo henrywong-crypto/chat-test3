@@ -10,13 +10,14 @@ use bytes::Bytes;
 use futures::{SinkExt, StreamExt};
 use russh::{client::Msg, Channel, ChannelMsg};
 use store::upsert_user;
-use tracing::error;
+use tracing::{error, info};
 use uuid::Uuid;
 
 use crate::{
     auth::User,
     ssh::{connect_ssh, open_terminal_channel},
     state::{find_vm_guest_ip_for_user, AppState},
+    vm::user_rootfs_path,
 };
 
 pub(crate) async fn handle_ws_upgrade(
@@ -42,6 +43,28 @@ async fn run_terminal_session(ws: WebSocket, state: AppState, vm_id: String, use
     };
     if let Err(e) = run_ssh_relay(&guest_ip, &state, ws).await {
         error!("terminal session error: {e}");
+    }
+    save_and_drop_vm(&state, &vm_id, user_id).await;
+}
+
+async fn save_and_drop_vm(state: &AppState, vm_id: &str, user_id: Uuid) {
+    let vm_entry = {
+        let Ok(mut registry) = state.vms.lock() else {
+            return;
+        };
+        registry.remove(vm_id)
+    };
+    let Some(vm_entry) = vm_entry else {
+        return;
+    };
+    if let Err(e) = tokio::fs::create_dir_all(&state.user_rootfs_dir).await {
+        error!(vm_id = %vm_id, "failed to create user rootfs dir on disconnect: {e}");
+        return;
+    }
+    let user_rootfs = user_rootfs_path(&state.user_rootfs_dir, user_id);
+    info!(vm_id = %vm_id, user_id = %user_id, dest = %user_rootfs.display(), "saving rootfs on disconnect");
+    if let Err(e) = vm_entry._guard.save_rootfs_to(&user_rootfs).await {
+        error!(vm_id = %vm_id, "failed to save rootfs on disconnect: {e}");
     }
 }
 

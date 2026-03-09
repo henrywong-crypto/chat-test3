@@ -1,4 +1,5 @@
 mod auth;
+mod download;
 mod handlers;
 mod ssh;
 mod state;
@@ -28,8 +29,9 @@ use crate::{
         get_callback_handler, get_cognito_login_handler, get_demo_handler, get_login_handler,
         get_logout_handler,
     },
+    download::download_file_handler,
     handlers::{
-        delete_user_rootfs_handler, delete_vm_handler, get_or_create_terminal, get_terminal_page,
+        delete_user_rootfs_handler, get_or_create_terminal, get_terminal_page,
     },
     state::{load_config, AppState},
     terminal::handle_ws_upgrade,
@@ -74,7 +76,7 @@ fn build_router(app_state: AppState, session_store: PostgresStore) -> Router {
     let session_layer = build_session_layer(session_store);
     Router::new()
         .route("/", get(get_or_create_terminal))
-        .route("/sessions/{id}/delete", post(delete_vm_handler))
+        .route("/sessions/{id}/download", get(download_file_handler))
         .route("/sessions/{id}/upload", post(upload_file_handler))
         .route("/rootfs/delete", post(delete_user_rootfs_handler))
         .route("/terminal/{id}", get(get_terminal_page))

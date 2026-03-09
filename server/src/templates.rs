@@ -89,7 +89,7 @@ pub(crate) fn render_terminal_page(vm_id: &str, csrf_token: &str, upload_dir: &s
     let short_id = format!("{}…", vm_id.get(..8).unwrap_or(vm_id));
     let terminal_script = format_terminal_script(vm_id);
     let upload_action = format!("/sessions/{vm_id}/upload");
-    let stop_action = format!("/sessions/{vm_id}/delete");
+    let download_action = format!("/sessions/{vm_id}/download");
     let default_path = format!("{upload_dir}/");
     html! {
         (DOCTYPE)
@@ -126,12 +126,20 @@ pub(crate) fn render_terminal_page(vm_id: &str, csrf_token: &str, upload_dir: &s
                     #upload-status { font-size: 12px; white-space: nowrap; }
                     #upload-status.ok  { color: var(--success); }
                     #upload-status.err { color: var(--danger); }
+                    #download-drawer {
+                        display: none; align-items: center; gap: 10px;
+                        padding: 0 16px; height: 44px; flex-shrink: 0;
+                        background: var(--surface2); border-bottom: 1px solid var(--border);
+                    }
+                    #download-drawer.open { display: flex; }
+                    #download-path { flex: 1; min-width: 0; }
                     #term-container { flex: 1; min-height: 0; background: #000; }
                 ")) }
             }
             body {
-                (render_terminal_topbar(&short_id, &stop_action, csrf_token, has_user_rootfs))
+                (render_terminal_topbar(&short_id, csrf_token, has_user_rootfs))
                 (render_terminal_upload_drawer(&upload_action, csrf_token, &default_path))
+                (render_terminal_download_drawer(&download_action, &default_path))
                 div id="term-container" {}
                 script src="https://cdn.jsdelivr.net/npm/xterm@5/lib/xterm.js" {}
                 script src="https://cdn.jsdelivr.net/npm/xterm-addon-fit@0.8/lib/xterm-addon-fit.js" {}
@@ -142,7 +150,7 @@ pub(crate) fn render_terminal_page(vm_id: &str, csrf_token: &str, upload_dir: &s
     }
 }
 
-fn render_terminal_topbar(short_id: &str, stop_action: &str, csrf_token: &str, has_user_rootfs: bool) -> Markup {
+fn render_terminal_topbar(short_id: &str, csrf_token: &str, has_user_rootfs: bool) -> Markup {
     html! {
         div id="topbar" {
             div id="topbar-left" {
@@ -157,10 +165,7 @@ fn render_terminal_topbar(short_id: &str, stop_action: &str, csrf_token: &str, h
                     }
                 }
                 button id="upload-toggle" class="btn" onclick="toggleUpload()" { "↑ Upload" }
-                form method="post" action=(stop_action) {
-                    input type="hidden" name="csrf_token" value=(csrf_token);
-                    button type="submit" class="btn btn-danger" { "■ Stop" }
-                }
+                button id="download-toggle" class="btn" onclick="toggleDownload()" { "↓ Download" }
             }
         }
     }
@@ -184,9 +189,23 @@ fn render_terminal_upload_drawer(
     }
 }
 
+fn render_terminal_download_drawer(download_action: &str, default_path: &str) -> Markup {
+    html! {
+        form id="download-drawer" method="get" action=(download_action) target="_blank" {
+            input id="download-path" type="text" name="path" value=(default_path);
+            button type="submit" class="btn btn-primary" { "Download" }
+        }
+    }
+}
+
 fn upload_script() -> &'static str {
     r#"function toggleUpload() {
   document.getElementById('upload-drawer').classList.toggle('open');
+  document.getElementById('download-drawer').classList.remove('open');
+}
+function toggleDownload() {
+  document.getElementById('download-drawer').classList.toggle('open');
+  document.getElementById('upload-drawer').classList.remove('open');
 }
 document.getElementById('file-input').addEventListener('change', function() {
   const name = this.files[0]?.name || 'No file chosen';

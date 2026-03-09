@@ -148,8 +148,6 @@ pub(crate) type VmRegistry = Arc<Mutex<HashMap<String, VmEntry>>>;
 
 pub(crate) struct VmEntry {
     pub(crate) guest_ip: String,
-    pub(crate) pid: u32,
-    pub(crate) created_at: u64,
     pub(crate) user_id: Uuid,
     pub(crate) has_iam_creds: bool,
     pub(crate) _guard: VmGuard,
