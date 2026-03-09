@@ -18,8 +18,9 @@ use axum::{
 };
 use firecracker_manager::{cleanup_stale_vms, setup_host_networking};
 use time::Duration;
-use tokio::{net::TcpListener, signal};
-use tower_sessions::{cookie::SameSite, Expiry, MemoryStore, SessionManagerLayer};
+use tokio::{net::TcpListener, signal, task::AbortHandle};
+use tower_sessions::{cookie::SameSite, Expiry, SessionManagerLayer};
+use tower_sessions_sqlx_store::PostgresStore;
 use tracing::info;
 
 use crate::{
@@ -48,16 +49,25 @@ async fn main() -> Result<()> {
     let app_config = load_config()?;
     let pg_pool = store::connect_db(&app_config.database_url).await?;
     store::run_migrations(&pg_pool).await?;
+    let session_store = PostgresStore::new(pg_pool.clone());
+    session_store.migrate().await?;
+    let deletion_task = tokio::task::spawn(
+        session_store
+            .clone()
+            .continuously_delete_expired(tokio::time::Duration::from_secs(3600)),
+    );
     let app_state = AppState::new(app_config, pg_pool);
     let port = app_state.port;
     cleanup_stale_vms(&app_state.socket_dir);
     setup_host_networking().await;
-    let router = build_router(app_state.clone());
-    serve_router(router, port, app_state).await
+    let router = build_router(app_state.clone(), session_store);
+    serve_router(router, port, app_state, deletion_task.abort_handle()).await?;
+    deletion_task.await??;
+    Ok(())
 }
 
-fn build_router(app_state: AppState) -> Router {
-    let session_layer = build_session_layer();
+fn build_router(app_state: AppState, session_store: PostgresStore) -> Router {
+    let session_layer = build_session_layer(session_store);
     Router::new()
         .route("/", get(get_redirect_to_vms))
         .route("/sessions", get(get_vms_page).post(create_vm_handler))
@@ -76,8 +86,8 @@ fn build_router(app_state: AppState) -> Router {
         .layer(middleware::from_fn(add_security_headers))
 }
 
-fn build_session_layer() -> SessionManagerLayer<MemoryStore> {
-    SessionManagerLayer::new(MemoryStore::default())
+fn build_session_layer(session_store: PostgresStore) -> SessionManagerLayer<PostgresStore> {
+    SessionManagerLayer::new(session_store)
         .with_secure(true)
         .with_same_site(SameSite::Lax)
         .with_expiry(Expiry::OnInactivity(Duration::seconds(86400)))
@@ -109,20 +119,25 @@ async fn add_security_headers(request: Request, next: Next) -> Response {
     response
 }
 
-async fn serve_router(router: Router, port: u16, app_state: AppState) -> Result<()> {
+async fn serve_router(
+    router: Router,
+    port: u16,
+    app_state: AppState,
+    deletion_task_abort_handle: AbortHandle,
+) -> Result<()> {
     let tcp_listener = TcpListener::bind(format!("0.0.0.0:{port}"))
         .await
         .with_context(|| format!("failed to bind to port {port}"))?;
     info!("listening on http://0.0.0.0:{port}");
     axum::serve(tcp_listener, router)
-        .with_graceful_shutdown(shutdown_signal())
+        .with_graceful_shutdown(shutdown_signal(deletion_task_abort_handle))
         .await
         .context("server error")?;
     save_all_vm_rootfs(&app_state).await;
     Ok(())
 }
 
-async fn shutdown_signal() {
+async fn shutdown_signal(deletion_task_abort_handle: AbortHandle) {
     let ctrl_c = async {
         if let Err(e) = signal::ctrl_c().await {
             tracing::error!("failed to install Ctrl+C handler: {e}");
@@ -141,4 +156,5 @@ async fn shutdown_signal() {
         _ = terminate => {}
     }
     info!("shutdown signal received, saving vm rootfs before exit");
+    deletion_task_abort_handle.abort();
 }
