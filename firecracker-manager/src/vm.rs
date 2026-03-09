@@ -13,7 +13,7 @@ use tracing::info;
 use crate::configure::configure_vm;
 use crate::network::{create_tap, delete_tap, format_guest_ip, format_guest_mac, format_tap_ip, format_tap_name};
 use crate::process::{
-    build_chroot_dir, build_vm_boot_args, build_vm_file_paths, check_still_running, copy_rootfs,
+    build_chroot_dir, build_socket_path, build_vm_boot_args, copy_rootfs,
     prepare_jail_resources, spawn_firecracker, spawn_firecracker_jailed, wait_for_socket,
 };
 
@@ -47,7 +47,7 @@ pub struct VmGuard {
     pub pid: u32,
     net_helper_path: PathBuf,
     tap_name: String,
-    rootfs_copy: PathBuf,
+    rootfs_copy: Option<PathBuf>,
     socket_path: PathBuf,
     chroot_dir: Option<PathBuf>,
 }
@@ -61,8 +61,11 @@ impl VmGuard {
     }
 
     pub async fn save_rootfs_to(&self, dest: &Path) -> Result<()> {
-        if tokio::fs::rename(&self.rootfs_copy, dest).await.is_err() {
-            tokio::fs::copy(&self.rootfs_copy, dest)
+        let Some(rootfs_copy) = &self.rootfs_copy else {
+            return Ok(());
+        };
+        if tokio::fs::rename(rootfs_copy, dest).await.is_err() {
+            tokio::fs::copy(rootfs_copy, dest)
                 .await
                 .with_context(|| format!("failed to copy rootfs to {}", dest.display()))?;
         }
@@ -77,7 +80,9 @@ impl Drop for VmGuard {
         if let Some(chroot_dir) = &self.chroot_dir {
             let _ = std::fs::remove_dir_all(chroot_dir);
         } else {
-            let _ = std::fs::remove_file(&self.rootfs_copy);
+            if let Some(rootfs_copy) = &self.rootfs_copy {
+                let _ = std::fs::remove_file(rootfs_copy);
+            }
             let _ = std::fs::remove_file(&self.socket_path);
         }
     }
@@ -117,7 +122,7 @@ async fn create_vm_jailed(
     prepare_jail_resources(&chroot_dir, &vm_config.kernel_path).await?;
     info!(src = %vm_config.rootfs_path.display(), dst = %rootfs_copy.display(), "copying rootfs");
     copy_rootfs(&vm_config.rootfs_path, &rootfs_copy).await?;
-    let mut child = spawn_firecracker_jailed(&vm_config.id, jailer)?;
+    let child = spawn_firecracker_jailed(&vm_config.id, jailer)?;
     let pid = child
         .id()
         .context("process exited before pid was available")?;
@@ -133,7 +138,6 @@ async fn create_vm_jailed(
     )
     .await?;
     start_instance(&socket_path).await?;
-    check_still_running(&mut child).await?;
 
     Ok(VmGuard {
         id: vm_config.id.clone(),
@@ -141,7 +145,7 @@ async fn create_vm_jailed(
         pid,
         net_helper_path: vm_config.net_helper_path.clone(),
         tap_name,
-        rootfs_copy,
+        rootfs_copy: Some(rootfs_copy),
         socket_path,
         chroot_dir: Some(chroot_dir),
     })
@@ -154,18 +158,16 @@ async fn create_vm_direct(
     guest_ip: String,
     boot_args: String,
 ) -> Result<VmGuard> {
-    let (socket_path, rootfs_copy) = build_vm_file_paths(&vm_config.socket_dir, &vm_config.id);
+    let socket_path = build_socket_path(&vm_config.socket_dir, &vm_config.id);
 
-    info!(src = %vm_config.rootfs_path.display(), dst = %rootfs_copy.display(), "copying rootfs");
-    copy_rootfs(&vm_config.rootfs_path, &rootfs_copy).await?;
-    let mut child = spawn_firecracker(&socket_path)?;
+    let child = spawn_firecracker(&socket_path)?;
     let pid = child
         .id()
         .context("process exited before pid was available")?;
     wait_for_socket(&socket_path).await?;
     configure_vm(
         &socket_path,
-        &rootfs_copy,
+        &vm_config.rootfs_path,
         &vm_config.kernel_path,
         vm_config,
         &tap_name,
@@ -174,7 +176,6 @@ async fn create_vm_direct(
     )
     .await?;
     start_instance(&socket_path).await?;
-    check_still_running(&mut child).await?;
 
     Ok(VmGuard {
         id: vm_config.id.clone(),
@@ -182,7 +183,7 @@ async fn create_vm_direct(
         pid,
         net_helper_path: vm_config.net_helper_path.clone(),
         tap_name,
-        rootfs_copy,
+        rootfs_copy: None,
         socket_path,
         chroot_dir: None,
     })

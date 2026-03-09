@@ -1,4 +1,4 @@
-use anyhow::{Context, Result};
+use anyhow::{bail, Context, Result};
 use std::{
     io::ErrorKind,
     path::{Path, PathBuf},
@@ -77,18 +77,8 @@ pub(crate) async fn wait_for_socket(socket_path: &Path) -> Result<()> {
     .context("timed out waiting for firecracker socket")
 }
 
-pub(crate) async fn check_still_running(child: &mut Child) -> Result<()> {
-    tokio::time::sleep(Duration::from_millis(500)).await;
-    match child.try_wait()? {
-        Some(status) => bail!("firecracker exited immediately after start: {status}"),
-        None => Ok(()),
-    }
-}
-
-pub(crate) fn build_vm_file_paths(socket_dir: &Path, vm_id: &str) -> (PathBuf, PathBuf) {
-    let socket_path = socket_dir.join(format!("fc-{vm_id}.socket"));
-    let rootfs_copy = socket_dir.join(format!("rootfs-{vm_id}.ext4"));
-    (socket_path, rootfs_copy)
+pub(crate) fn build_socket_path(socket_dir: &Path, vm_id: &str) -> PathBuf {
+    socket_dir.join(format!("fc-{vm_id}.socket"))
 }
 
 pub(crate) fn build_vm_boot_args(base_boot_args: &str, guest_ip: &str, net_idx: u32) -> String {
