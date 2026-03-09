@@ -19,7 +19,7 @@ use axum::{
 use firecracker_manager::{cleanup_stale_vms, setup_host_networking};
 use time::Duration;
 use tokio::{net::TcpListener, signal, task::AbortHandle};
-use tower_sessions::{cookie::SameSite, Expiry, SessionManagerLayer};
+use tower_sessions::{cookie::SameSite, Expiry, ExpiredDeletion, SessionManagerLayer};
 use tower_sessions_sqlx_store::PostgresStore;
 use tracing::info;
 
