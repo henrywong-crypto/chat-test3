@@ -91,6 +91,7 @@ impl Drop for VmGuard {
         let _ = kill(Pid::from_raw(self.pid as i32), Signal::SIGTERM);
         delete_tap(&self.tap_name);
         let _ = std::fs::remove_file(&self.rootfs_copy);
+        let _ = std::fs::remove_file(&self.socket_path);
         let _ = std::fs::remove_file(&self.meta_path);
     }
 }
