@@ -28,12 +28,13 @@ async fn run_terminal_session(ws: WebSocket, state: AppState, vm_id: String) {
     let guest_ip = match find_vm_guest_ip(&state.vms, &vm_id) {
         Some(ip) => ip,
         None => {
-            eprintln!("VM {vm_id} not found");
+            eprintln!("[terminal] VM {vm_id} not found in registry");
             return;
         }
     };
+    eprintln!("[terminal] starting session for vm={vm_id} ip={guest_ip}");
     if let Err(e) = run_ssh_relay(&guest_ip, &state, ws).await {
-        eprintln!("SSH session error [{vm_id}]: {e}");
+        eprintln!("[terminal] session error vm={vm_id}: {e}");
     }
 }
 
