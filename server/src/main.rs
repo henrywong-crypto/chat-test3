@@ -121,15 +121,17 @@ async fn serve_router(router: Router, port: u16, app_state: AppState) -> Result<
 
 async fn shutdown_signal() {
     let ctrl_c = async {
-        signal::ctrl_c()
-            .await
-            .expect("failed to install Ctrl+C handler");
+        if let Err(e) = signal::ctrl_c().await {
+            tracing::error!("failed to install Ctrl+C handler: {e}");
+        }
     };
     let terminate = async {
-        signal::unix::signal(signal::unix::SignalKind::terminate())
-            .expect("failed to install SIGTERM handler")
-            .recv()
-            .await;
+        match signal::unix::signal(signal::unix::SignalKind::terminate()) {
+            Ok(mut sig) => {
+                sig.recv().await;
+            }
+            Err(e) => tracing::error!("failed to install SIGTERM handler: {e}"),
+        }
     };
     tokio::select! {
         _ = ctrl_c => {}

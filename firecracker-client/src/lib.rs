@@ -1,12 +1,9 @@
-use std::path::Path;
-
 use anyhow::{bail, Context, Result};
 use http_body_util::{BodyExt, Full};
-use hyper::body::Bytes;
-use hyper::client::conn::http1;
-use hyper::{Method, Request};
+use hyper::{body::Bytes, client::conn::http1, Method, Request};
 use hyper_util::rt::TokioIo;
 use serde::{Deserialize, Serialize};
+use std::path::Path;
 use tokio::net::UnixStream;
 
 #[derive(Serialize)]
@@ -30,12 +27,12 @@ pub struct Drive {
 }
 
 pub async fn set_machine_config(socket_path: &Path, machine_config: &MachineConfig) -> Result<()> {
-    let body = serde_json::to_vec(machine_config).unwrap();
+    let body = serde_json::to_vec(machine_config)?;
     send_put(socket_path, "/machine-config", body).await
 }
 
 pub async fn set_boot_source(socket_path: &Path, boot_source: &BootSource) -> Result<()> {
-    let body = serde_json::to_vec(boot_source).unwrap();
+    let body = serde_json::to_vec(boot_source)?;
     send_put(socket_path, "/boot-source", body).await
 }
 
@@ -48,7 +45,7 @@ pub struct NetworkInterface {
 
 pub async fn set_network_interface(socket_path: &Path, iface: &NetworkInterface) -> Result<()> {
     let path = format!("/network-interfaces/{}", iface.iface_id);
-    let body = serde_json::to_vec(iface).unwrap();
+    let body = serde_json::to_vec(iface)?;
     send_put(socket_path, &path, body).await
 }
 
@@ -64,7 +61,7 @@ pub async fn get_network_interfaces(socket_path: &Path) -> Result<Vec<NetworkInt
 
 pub async fn set_drive(socket_path: &Path, drive: &Drive) -> Result<()> {
     let path = format!("/drives/{}", drive.drive_id);
-    let body = serde_json::to_vec(drive).unwrap();
+    let body = serde_json::to_vec(drive)?;
     send_put(socket_path, &path, body).await
 }
 
@@ -80,7 +77,7 @@ pub struct Vsock {
 }
 
 pub async fn set_vsock(socket_path: &Path, vsock: &Vsock) -> Result<()> {
-    let body = serde_json::to_vec(vsock).unwrap();
+    let body = serde_json::to_vec(vsock)?;
     send_put(socket_path, "/vsock", body).await
 }
 
@@ -99,12 +96,12 @@ pub struct MmdsConfig {
 }
 
 pub async fn set_mmds_config(socket_path: &Path, config: &MmdsConfig) -> Result<()> {
-    let body = serde_json::to_vec(config).unwrap();
+    let body = serde_json::to_vec(config)?;
     send_put(socket_path, "/mmds/config", body).await
 }
 
 pub async fn put_mmds(socket_path: &Path, metadata: &serde_json::Value) -> Result<()> {
-    let body = serde_json::to_vec(metadata).unwrap();
+    let body = serde_json::to_vec(metadata)?;
     send_put(socket_path, "/mmds", body).await
 }
 
@@ -112,7 +109,7 @@ pub async fn put_mmds(socket_path: &Path, metadata: &serde_json::Value) -> Resul
 /// credentials without replacing the entire metadata (e.g. only update
 /// `latest.aws` or `latest.iam`). Works while the VM is running.
 pub async fn patch_mmds(socket_path: &Path, patch: &serde_json::Value) -> Result<()> {
-    let body = serde_json::to_vec(patch).unwrap();
+    let body = serde_json::to_vec(patch)?;
     send_request(socket_path, Method::PATCH, "/mmds", body).await
 }
 

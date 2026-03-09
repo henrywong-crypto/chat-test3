@@ -132,7 +132,7 @@ pub(crate) async fn create_vm_handler(
             info!(email = %user.email, rootfs = %state.rootfs_path.display(), "creating rootfs from base image")
         }
     }
-    let vm_config = build_vm_config(&state, iam_creds, user_rootfs.as_deref());
+    let vm_config = build_vm_config(&state, iam_creds, user_rootfs.as_deref())?;
     let vm = create_vm(&vm_config).await?;
     info!(email = %user.email, vm_id = %vm.id, guest_ip = %vm.guest_ip, pid = vm.pid, "vm started");
     let created_at = Utc::now().timestamp() as u64;

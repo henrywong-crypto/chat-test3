@@ -1,14 +1,13 @@
 mod mmds_iam;
-pub use mmds_iam::{
-    build_mmds_iam_refresh_patch, build_mmds_with_iam, imds_compat_mmds_config,
-    system_time_to_iso8601, ImdsCredential,
-};
-
 use anyhow::{bail, Context, Result};
 use firecracker_client::{
     put_mmds, set_boot_source, set_drive, set_machine_config, set_mmds_config,
     set_network_interface, start_instance, BootSource, Drive, MachineConfig, MmdsConfig,
     NetworkInterface,
+};
+pub use mmds_iam::{
+    build_mmds_iam_refresh_patch, build_mmds_with_iam, imds_compat_mmds_config,
+    system_time_to_iso8601, ImdsCredential,
 };
 use nix::{
     sys::signal::{kill, Signal},

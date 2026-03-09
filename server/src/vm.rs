@@ -1,3 +1,4 @@
+use anyhow::Result;
 use aws_config::default_provider::credentials::DefaultCredentialsChain;
 use aws_credential_types::{provider::ProvideCredentials, Credentials};
 use firecracker_manager::{build_mmds_with_iam, system_time_to_iso8601, ImdsCredential, VmConfig};
@@ -11,16 +12,16 @@ pub(crate) fn build_vm_config(
     state: &AppConfig,
     iam_creds: Option<(String, ImdsCredential)>,
     user_rootfs: Option<&Path>,
-) -> VmConfig {
+) -> Result<VmConfig> {
     let vm_id = Uuid::new_v4().to_string();
     let (mmds_metadata, mmds_imds_compat) = match iam_creds {
-        Some((role_name, cred)) => (build_mmds_with_iam(&vm_id, &role_name, &cred), true),
+        Some((role_name, cred)) => (build_mmds_with_iam(&vm_id, &role_name, &cred)?, true),
         None => (
             serde_json::json!({ "latest": { "meta-data": { "instance-id": &vm_id } } }),
             false,
         ),
     };
-    VmConfig {
+    Ok(VmConfig {
         id: vm_id,
         socket_dir: state.socket_dir.clone(),
         kernel_path: state.kernel_path.clone(),
@@ -32,7 +33,7 @@ pub(crate) fn build_vm_config(
         boot_args: "reboot=k panic=1 quiet loglevel=3 selinux=0".to_string(),
         mmds_metadata: Some(mmds_metadata),
         mmds_imds_compat,
-    }
+    })
 }
 
 pub(crate) fn user_rootfs_path(user_rootfs_dir: &Path, email: &str) -> PathBuf {

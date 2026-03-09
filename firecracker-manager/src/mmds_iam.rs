@@ -3,10 +3,10 @@
 //!
 //! See [docs/mmds-iam-role.md](../../docs/mmds-iam-role.md) for the full design.
 
-use std::time::SystemTime;
-
+use anyhow::Result;
 use chrono::{DateTime, Utc};
 use serde::Serialize;
+use std::time::SystemTime;
 
 /// EC2 IMDS credential response shape. The guest (e.g. AWS SDK) expects this
 /// exact structure at `latest/meta-data/iam/security-credentials/<role-name>`.
@@ -58,14 +58,14 @@ pub fn build_mmds_with_iam(
     instance_id: &str,
     role_name: &str,
     credential: &ImdsCredential,
-) -> serde_json::Value {
+) -> Result<serde_json::Value> {
     // Store credentials as a JSON string (leaf node), not a nested object.
     // MMDS treats nested objects as directories and returns key listings instead
     // of JSON, which breaks the AWS CLI and SDK credential parsers.
-    let cred_str = serde_json::to_string(credential).unwrap();
+    let cred_str = serde_json::to_string(credential)?;
     let mut security_credentials = serde_json::Map::new();
     security_credentials.insert(role_name.to_string(), serde_json::Value::String(cred_str));
-    serde_json::json!({
+    Ok(serde_json::json!({
         "latest": {
             "meta-data": {
                 "instance-id": instance_id,
@@ -74,7 +74,7 @@ pub fn build_mmds_with_iam(
                 }
             }
         }
-    })
+    }))
 }
 
 /// Build MMDS PATCH payload to refresh only the IAM credentials. Merge this
@@ -82,11 +82,11 @@ pub fn build_mmds_with_iam(
 pub fn build_mmds_iam_refresh_patch(
     role_name: &str,
     credential: &ImdsCredential,
-) -> serde_json::Value {
-    let cred_str = serde_json::to_string(credential).unwrap();
+) -> Result<serde_json::Value> {
+    let cred_str = serde_json::to_string(credential)?;
     let mut security_credentials = serde_json::Map::new();
     security_credentials.insert(role_name.to_string(), serde_json::Value::String(cred_str));
-    serde_json::json!({
+    Ok(serde_json::json!({
         "latest": {
             "meta-data": {
                 "iam": {
@@ -94,7 +94,7 @@ pub fn build_mmds_iam_refresh_patch(
                 }
             }
         }
-    })
+    }))
 }
 
 /// MmdsConfig tuned for EC2 IMDS compatibility so the AWS SDK default credential
