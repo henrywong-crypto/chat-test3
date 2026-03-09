@@ -38,7 +38,7 @@ pub(crate) struct Args {
     pub(crate) cognito_region: String,
     #[arg(long, env = "COGNITO_USER_POOL_ID", default_value = "")]
     pub(crate) cognito_user_pool_id: String,
-    #[arg(long, env = "UPLOAD_DIR", default_value = "/home/user/uploads")]
+    #[arg(long, env = "UPLOAD_DIR", default_value = "/home/ubuntu")]
     pub(crate) upload_dir: String,
     #[arg(long, env = "PORT", default_value = "3000")]
     pub(crate) port: u16,
