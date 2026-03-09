@@ -14,7 +14,7 @@ use crate::configure::configure_vm;
 use crate::network::{create_tap, delete_tap, format_guest_ip, format_guest_mac, format_tap_ip, format_tap_name};
 use crate::process::{
     build_vm_boot_args, build_vm_file_paths, check_still_running, copy_rootfs, spawn_firecracker,
-    wait_for_socket, write_vm_meta,
+    wait_for_socket,
 };
 
 pub(crate) static VM_NET_COUNTER: AtomicU32 = AtomicU32::new(0);
@@ -38,7 +38,6 @@ pub struct VmGuard {
     tap_name: String,
     rootfs_copy: PathBuf,
     socket_path: PathBuf,
-    meta_path: PathBuf,
 }
 
 impl VmGuard {
@@ -61,7 +60,6 @@ impl Drop for VmGuard {
         delete_tap(&self.tap_name);
         let _ = std::fs::remove_file(&self.rootfs_copy);
         let _ = std::fs::remove_file(&self.socket_path);
-        let _ = std::fs::remove_file(&self.meta_path);
     }
 }
 
@@ -71,8 +69,7 @@ pub async fn create_vm(vm_config: &VmConfig) -> Result<VmGuard> {
     let tap_ip = format_tap_ip(net_idx);
     let mac = format_guest_mac(net_idx);
     let guest_ip = format_guest_ip(net_idx);
-    let (socket_path, rootfs_copy, meta_path) =
-        build_vm_file_paths(&vm_config.socket_dir, &vm_config.id);
+    let (socket_path, rootfs_copy) = build_vm_file_paths(&vm_config.socket_dir, &vm_config.id);
     let boot_args = build_vm_boot_args(&vm_config.boot_args, &guest_ip, net_idx);
 
     create_tap(&tap_name, &tap_ip).await?;
@@ -82,7 +79,6 @@ pub async fn create_vm(vm_config: &VmConfig) -> Result<VmGuard> {
     let pid = child
         .id()
         .context("process exited before pid was available")?;
-    write_vm_meta(&meta_path, pid, &tap_name, &rootfs_copy);
     wait_for_socket(&socket_path).await?;
     configure_vm(
         &socket_path,
@@ -103,6 +99,5 @@ pub async fn create_vm(vm_config: &VmConfig) -> Result<VmGuard> {
         tap_name,
         rootfs_copy,
         socket_path,
-        meta_path,
     })
 }

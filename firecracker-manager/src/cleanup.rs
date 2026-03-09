@@ -1,39 +1,54 @@
-use nix::{
-    sys::signal::{kill, Signal},
-    unistd::Pid,
-};
 use std::path::Path;
 
 use crate::network::delete_tap;
 
 pub fn cleanup_stale_vms(socket_dir: &Path) {
+    kill_stale_firecracker_processes();
+    delete_stale_socket_dir_files(socket_dir);
+    delete_stale_tap_interfaces();
+}
+
+fn kill_stale_firecracker_processes() {
+    let _ = std::process::Command::new("pkill")
+        .args(["-f", "firecracker"])
+        .status();
+}
+
+fn delete_stale_socket_dir_files(socket_dir: &Path) {
     let Ok(entries) = std::fs::read_dir(socket_dir) else {
         return;
     };
     for entry in entries.flatten() {
         let path = entry.path();
-        let Some(file_name) = path.file_name().and_then(|n| n.to_str()) else {
+        let Some(name) = path.file_name().and_then(|n| n.to_str()) else {
             continue;
         };
-        if !file_name.starts_with("fc-") || !file_name.ends_with(".meta") {
-            continue;
+        if (name.starts_with("fc-") && name.ends_with(".socket"))
+            || (name.starts_with("rootfs-") && name.ends_with(".ext4"))
+        {
+            let _ = std::fs::remove_file(&path);
         }
-        cleanup_stale_vm(&path);
     }
 }
 
-fn cleanup_stale_vm(meta_path: &Path) {
-    let Ok(content) = std::fs::read_to_string(meta_path) else {
+fn delete_stale_tap_interfaces() {
+    let Ok(output) = std::process::Command::new("ip")
+        .args(["link", "show", "type", "tun"])
+        .output()
+    else {
         return;
     };
-    let lines: Vec<&str> = content.lines().collect();
-    if lines.len() >= 3 {
-        if let Ok(pid) = lines[0].trim().parse::<i32>() {
-            let _ = kill(Pid::from_raw(pid), Signal::SIGTERM);
-        }
-        delete_tap(lines[1].trim());
-        let _ = std::fs::remove_file(lines[2].trim());
+    let output = String::from_utf8_lossy(&output.stdout);
+    for line in output.lines() {
+        let Some(name) = parse_tap_interface_name(line) else {
+            continue;
+        };
+        delete_tap(name);
     }
-    let _ = std::fs::remove_file(meta_path.with_extension("socket"));
-    let _ = std::fs::remove_file(meta_path);
+}
+
+fn parse_tap_interface_name(line: &str) -> Option<&str> {
+    // lines look like: "5: tap0: <...> ..."
+    let name = line.split(':').nth(1)?.trim();
+    name.starts_with("tap").then_some(name)
 }

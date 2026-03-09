@@ -54,16 +54,10 @@ pub(crate) async fn check_still_running(child: &mut Child) -> Result<()> {
     }
 }
 
-pub(crate) fn write_vm_meta(meta_path: &Path, pid: u32, tap_name: &str, rootfs_copy: &Path) {
-    let content = format!("{pid}\n{tap_name}\n{}", rootfs_copy.display());
-    let _ = std::fs::write(meta_path, content);
-}
-
-pub(crate) fn build_vm_file_paths(socket_dir: &Path, vm_id: &str) -> (PathBuf, PathBuf, PathBuf) {
+pub(crate) fn build_vm_file_paths(socket_dir: &Path, vm_id: &str) -> (PathBuf, PathBuf) {
     let socket_path = socket_dir.join(format!("fc-{vm_id}.socket"));
     let rootfs_copy = socket_dir.join(format!("rootfs-{vm_id}.ext4"));
-    let meta_path = socket_dir.join(format!("fc-{vm_id}.meta"));
-    (socket_path, rootfs_copy, meta_path)
+    (socket_path, rootfs_copy)
 }
 
 pub(crate) fn build_vm_boot_args(base_boot_args: &str, guest_ip: &str, net_idx: u32) -> String {
