@@ -47,8 +47,6 @@ pub(crate) struct AppConfig {
     pub(crate) user_rootfs_dir: PathBuf,
     #[serde(default = "default_upload_dir")]
     pub(crate) upload_dir: String,
-    #[serde(default = "default_max_vms_per_user")]
-    pub(crate) max_vms_per_user: usize,
     #[serde(default = "default_database_url")]
     pub(crate) database_url: String,
     #[serde(default = "default_port")]
@@ -96,9 +94,6 @@ fn default_user_rootfs_dir() -> PathBuf {
 }
 fn default_upload_dir() -> String {
     "/home/ubuntu".to_string()
-}
-fn default_max_vms_per_user() -> usize {
-    2
 }
 fn default_database_url() -> String {
     "postgres://localhost/webcode".to_string()
@@ -158,13 +153,6 @@ pub(crate) struct VmEntry {
     pub(crate) user_id: Uuid,
     pub(crate) has_iam_creds: bool,
     pub(crate) _guard: VmGuard,
-}
-
-pub(crate) struct VmInfo {
-    pub(crate) id: String,
-    pub(crate) guest_ip: String,
-    pub(crate) pid: u32,
-    pub(crate) created_at: u64,
 }
 
 pub(crate) struct AppError(pub(crate) anyhow::Error);

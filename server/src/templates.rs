@@ -1,7 +1,4 @@
-use chrono::Utc;
 use maud::{html, Markup, PreEscaped, DOCTYPE};
-
-use crate::state::VmInfo;
 
 // Shared CSS design tokens and component styles
 fn base_styles() -> &'static str {
@@ -88,135 +85,11 @@ pub(crate) fn render_login_page() -> Markup {
     }
 }
 
-pub(crate) fn render_vms_page(vms: &[VmInfo], csrf_token: &str, has_user_rootfs: bool) -> Markup {
-    html! {
-        (DOCTYPE)
-        html lang="en" {
-            head {
-                meta charset="utf-8";
-                meta name="viewport" content="width=device-width, initial-scale=1";
-                title { "WebCode" }
-                style { (PreEscaped(base_styles())) (PreEscaped("
-                    .topbar {
-                        display: flex; align-items: center; justify-content: space-between;
-                        padding: 12px 24px; border-bottom: 1px solid var(--border);
-                        background: var(--surface);
-                    }
-                    .topbar-title { font-size: 14px; font-weight: 600; }
-                    .content { max-width: 900px; margin: 0 auto; padding: 24px; }
-                    .section { background: var(--surface); border: 1px solid var(--border); border-radius: var(--radius); overflow: hidden; }
-                    .section + .section { margin-top: 16px; }
-                    .section-header {
-                        display: flex; align-items: center; justify-content: space-between;
-                        padding: 10px 16px; border-bottom: 1px solid var(--border);
-                        font-size: 12px; color: var(--text-muted); font-weight: 600; text-transform: uppercase; letter-spacing: 0.05em;
-                    }
-                    table { width: 100%; border-collapse: collapse; }
-                    th { padding: 8px 16px; text-align: left; font-size: 11px; color: var(--text-muted); text-transform: uppercase; letter-spacing: 0.05em; font-weight: 600; }
-                    td { padding: 10px 16px; border-top: 1px solid var(--border); font-size: 13px; }
-                    tr:hover td { background: var(--surface2); }
-                    .actions { display: flex; gap: 8px; justify-content: flex-end; }
-                    .empty { padding: 40px 16px; text-align: center; color: var(--text-muted); font-size: 13px; }
-                    .disk-row { display: flex; align-items: center; gap: 10px; padding: 10px 16px; font-size: 12px; }
-                    .disk-label { color: var(--text-muted); }
-                ")) }
-            }
-            body {
-                div class="topbar" {
-                    span class="topbar-title" { "WebCode" }
-                    form method="post" action="/sessions" {
-                        input type="hidden" name="csrf_token" value=(csrf_token);
-                        button type="submit" class="btn btn-primary" { "+ New Session" }
-                    }
-                }
-                div class="content" {
-                    (render_vm_section(vms, csrf_token))
-                    (render_disk_section(csrf_token, has_user_rootfs))
-                }
-            }
-        }
-    }
-}
-
-fn render_vm_section(vms: &[VmInfo], csrf_token: &str) -> Markup {
-    html! {
-        div class="section" {
-            div class="section-header" {
-                span { "Sessions" }
-                span { (vms.len()) " running" }
-            }
-            @if vms.is_empty() {
-                div class="empty" { "No running sessions. Create one to get started." }
-            } @else {
-                table {
-                    thead {
-                        tr {
-                            th { "ID" }
-                            th { "IP address" }
-                            th { "PID" }
-                            th { "Started" }
-                            th {}
-                        }
-                    }
-                    tbody {
-                        @for vm in vms {
-                            (render_vm_row(vm, csrf_token))
-                        }
-                    }
-                }
-            }
-        }
-    }
-}
-
-fn render_vm_row(vm: &VmInfo, csrf_token: &str) -> Markup {
-    let short_id = format!("{}…", vm.id.get(..8).unwrap_or(&vm.id));
-    let time_ago = format_time_ago(vm.created_at);
-    html! {
-        tr {
-            td title=(vm.id) { (short_id) }
-            td style="color:var(--text-muted)" { (vm.guest_ip) }
-            td style="color:var(--text-muted)" { (vm.pid) }
-            td style="color:var(--text-muted)" { (time_ago) }
-            td {
-                div class="actions" {
-                    a href={ "/terminal/" (vm.id) } class="btn" { "Connect" }
-                    form method="post" action={ "/sessions/" (vm.id) "/delete" } {
-                        input type="hidden" name="csrf_token" value=(csrf_token);
-                        button type="submit" class="btn btn-danger" { "Delete" }
-                    }
-                }
-            }
-        }
-    }
-}
-
-fn render_disk_section(csrf_token: &str, has_user_rootfs: bool) -> Markup {
-    html! {
-        div class="section" {
-            div class="section-header" { span { "Saved disk" } }
-            div class="disk-row" {
-                span class="disk-label" { "Status:" }
-                @if has_user_rootfs {
-                    span class="badge badge-green" { "saved" }
-                    span style="color:var(--text-muted)" { "Your disk will be restored on the next session." }
-                    form method="post" action="/rootfs/delete" style="margin-left:auto" {
-                        input type="hidden" name="csrf_token" value=(csrf_token);
-                        button type="submit" class="btn btn-danger" { "Delete saved disk" }
-                    }
-                } @else {
-                    span class="badge badge-gray" { "none" }
-                    span style="color:var(--text-muted)" { "Base image will be used on next session." }
-                }
-            }
-        }
-    }
-}
-
-pub(crate) fn render_terminal_page(vm_id: &str, csrf_token: &str, upload_dir: &str) -> Markup {
+pub(crate) fn render_terminal_page(vm_id: &str, csrf_token: &str, upload_dir: &str, has_user_rootfs: bool) -> Markup {
     let short_id = format!("{}…", vm_id.get(..8).unwrap_or(vm_id));
     let terminal_script = format_terminal_script(vm_id);
     let upload_action = format!("/sessions/{vm_id}/upload");
+    let stop_action = format!("/sessions/{vm_id}/delete");
     let default_path = format!("{upload_dir}/");
     html! {
         (DOCTYPE)
@@ -257,7 +130,7 @@ pub(crate) fn render_terminal_page(vm_id: &str, csrf_token: &str, upload_dir: &s
                 ")) }
             }
             body {
-                (render_terminal_topbar(&short_id))
+                (render_terminal_topbar(&short_id, &stop_action, csrf_token, has_user_rootfs))
                 (render_terminal_upload_drawer(&upload_action, csrf_token, &default_path))
                 div id="term-container" {}
                 script src="https://cdn.jsdelivr.net/npm/xterm@5/lib/xterm.js" {}
@@ -269,15 +142,25 @@ pub(crate) fn render_terminal_page(vm_id: &str, csrf_token: &str, upload_dir: &s
     }
 }
 
-fn render_terminal_topbar(short_id: &str) -> Markup {
+fn render_terminal_topbar(short_id: &str, stop_action: &str, csrf_token: &str, has_user_rootfs: bool) -> Markup {
     html! {
         div id="topbar" {
             div id="topbar-left" {
-                a href="/sessions" class="btn btn-ghost" style="padding:4px 8px" { "← Sessions" }
+                span class="topbar-title" style="font-size:14px;font-weight:600" { "WebCode" }
                 span id="vm-id" { (short_id) }
             }
             div id="topbar-right" {
+                @if has_user_rootfs {
+                    form method="post" action="/rootfs/delete" {
+                        input type="hidden" name="csrf_token" value=(csrf_token);
+                        button type="submit" class="btn btn-ghost" { "Delete disk" }
+                    }
+                }
                 button id="upload-toggle" class="btn" onclick="toggleUpload()" { "↑ Upload" }
+                form method="post" action=(stop_action) {
+                    input type="hidden" name="csrf_token" value=(csrf_token);
+                    button type="submit" class="btn btn-danger" { "■ Stop" }
+                }
             }
         }
     }
@@ -354,16 +237,3 @@ new ResizeObserver(() => fitAddon.fit()).observe(container);
     )
 }
 
-fn format_time_ago(created_at: u64) -> String {
-    let now = Utc::now().timestamp() as u64;
-    let elapsed_secs = now.saturating_sub(created_at);
-    if elapsed_secs < 60 {
-        format!("{elapsed_secs}s ago")
-    } else if elapsed_secs < 3600 {
-        format!("{}m ago", elapsed_secs / 60)
-    } else if elapsed_secs < 86400 {
-        format!("{}h ago", elapsed_secs / 3600)
-    } else {
-        format!("{}d ago", elapsed_secs / 86400)
-    }
-}

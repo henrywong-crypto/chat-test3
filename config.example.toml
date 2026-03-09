@@ -24,9 +24,6 @@ user_rootfs_dir = "/home/ubuntu/fc-users"
 # Directory inside the VM that file uploads are restricted to
 upload_dir = "/home/ubuntu"
 
-# Maximum concurrent VMs per user
-max_vms_per_user = 2
-
 # PostgreSQL connection URL
 database_url = "postgres://localhost/webcode"
 

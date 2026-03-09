@@ -41,6 +41,44 @@ sudo install -o root -g root -m 0755 target/release/net-helper /usr/local/bin/ne
 sudo setcap cap_net_admin=eip /usr/local/bin/net-helper
 ```
 
+## Install Firecracker and Jailer
+
+Download the release archive from the [Firecracker releases page](https://github.com/firecracker-microvm/firecracker/releases) and install both binaries:
+
+```bash
+tar -xzf firecracker-v1.x.x-x86_64.tgz
+sudo install -o root -g root -m 0755 firecracker-v1.x.x-x86_64 /usr/local/bin/firecracker
+sudo install -o root -g root -m 0755 jailer-v1.x.x-x86_64      /usr/local/bin/jailer
+sudo chmod u+s /usr/local/bin/jailer
+```
+
+The jailer binary must be setuid root so it can chroot and drop privileges without the server running as root.
+
+## Jailer setup (optional)
+
+The jailer chroots each Firecracker process into its own directory and drops it to a dedicated uid/gid, providing process isolation. To enable it:
+
+1. Create a dedicated system user for Firecracker:
+
+```bash
+sudo useradd -r -s /sbin/nologin firecracker
+```
+
+2. Create and grant access to the chroot base directory:
+
+```bash
+sudo mkdir -p /srv/jailer
+sudo chown ubuntu:ubuntu /srv/jailer
+```
+
+3. Enable in `config.toml`:
+
+```toml
+use_jailer         = true
+jailer_uid         = 1001  # id -u firecracker
+jailer_gid         = 1001  # id -g firecracker
+```
+
 ## Building the root filesystem
 
 Use the latest Firecracker minor version (e.g. `v1.14`) and pick the highest kernel version from the S3 listing at `http://spec.ccfc.min.s3.amazonaws.com/?prefix=firecracker-ci/v1.14/x86_64/vmlinux-&list-type=2`.
@@ -158,6 +196,12 @@ Open http://localhost:3000 — each page load boots a fresh VM and opens an SSH 
 | `PORT` | `3000` | HTTP listen port |
 | `NET_HELPER_PATH` | `/usr/local/bin/net-helper` | Path to the net-helper binary |
 | `AWS_ROLE_NAME` | `vm-role` | IAM role name forwarded to the VM via MMDS |
+| `USE_JAILER` | `false` | Enable jailer process isolation |
+| `JAILER_PATH` | `/usr/local/bin/jailer` | Path to the jailer binary |
+| `FIRECRACKER_PATH` | `/usr/local/bin/firecracker` | Path to the firecracker binary |
+| `JAILER_UID` | `0` | uid to drop privileges to inside the jail |
+| `JAILER_GID` | `0` | gid to drop privileges to inside the jail |
+| `JAILER_CHROOT_BASE` | `/srv/jailer` | Base directory for per-VM chroot trees |
 | `COGNITO_CLIENT_ID` | — | Cognito app client ID |
 | `COGNITO_CLIENT_SECRET` | — | Cognito app client secret |
 | `COGNITO_REGION` | — | AWS region of the user pool |

@@ -14,8 +14,8 @@ use uuid::Uuid;
 
 use crate::{
     auth::User,
-    state::{AppError, AppState, VmEntry, VmInfo, VmRegistry},
-    templates::{render_terminal_page, render_vms_page},
+    state::{AppError, AppState, VmEntry, VmRegistry},
+    templates::render_terminal_page,
     vm::{build_vm_config, ensure_user_rootfs, fetch_host_iam_credentials, find_user_rootfs, user_rootfs_path},
 };
 
@@ -69,62 +69,25 @@ fn remove_owned_vm(
     Ok(registry.remove(vm_id))
 }
 
-pub(crate) async fn get_redirect_to_vms(_user: User) -> Redirect {
-    Redirect::to("/sessions")
-}
-
-pub(crate) async fn get_vms_page(
-    user: User,
-    session: Session,
-    State(state): State<AppState>,
-) -> Result<Html<String>, AppError> {
-    let db_user = upsert_user(&state.db, &user.email).await?;
-    let csrf_token = get_csrf_token(&session).await;
-    let registry = state
-        .vms
-        .lock()
-        .map_err(|_| anyhow!("vm registry lock poisoned"))?;
-    let mut vm_infos: Vec<VmInfo> = registry
+fn find_user_vm_id(vms: &VmRegistry, user_id: Uuid) -> Option<String> {
+    let registry = vms.lock().ok()?;
+    registry
         .iter()
-        .filter(|(_, e)| e.user_id == db_user.id)
-        .map(|(id, e)| VmInfo {
-            id: id.clone(),
-            guest_ip: e.guest_ip.clone(),
-            pid: e.pid,
-            created_at: e.created_at,
-        })
-        .collect();
-    vm_infos.sort_by_key(|v| v.created_at);
-    let has_user_rootfs = find_user_rootfs(&state.user_rootfs_dir, db_user.id).is_some();
-    Ok(Html(
-        render_vms_page(&vm_infos, &csrf_token, has_user_rootfs).into_string(),
-    ))
+        .find(|(_, e)| e.user_id == user_id)
+        .map(|(id, _)| id.clone())
 }
 
-pub(crate) async fn create_vm_handler(
+pub(crate) async fn get_or_create_terminal(
     user: User,
     session: Session,
     State(state): State<AppState>,
-    Form(form): Form<CsrfForm>,
 ) -> Result<Response, AppError> {
-    if !validate_csrf(&session, &form.csrf_token).await {
-        return Ok((StatusCode::FORBIDDEN, "Forbidden").into_response());
-    }
     let db_user = upsert_user(&state.db, &user.email).await?;
-    let user_vm_count = state
-        .vms
-        .lock()
-        .map_err(|_| anyhow!("vm registry lock poisoned"))?
-        .values()
-        .filter(|e| e.user_id == db_user.id)
-        .count();
-    if user_vm_count >= state.max_vms_per_user {
-        return Ok((
-            StatusCode::FORBIDDEN,
-            format!("Session limit reached (max {})", state.max_vms_per_user),
-        )
-            .into_response());
+
+    if let Some(vm_id) = find_user_vm_id(&state.vms, db_user.id) {
+        return Ok(Redirect::to(&format!("/terminal/{vm_id}")).into_response());
     }
+
     let iam_creds = fetch_host_iam_credentials().await;
     let has_iam_creds = iam_creds.is_some();
     let user_rootfs = ensure_user_rootfs(&state.user_rootfs_dir, &state.rootfs_path, db_user.id).await?;
@@ -143,7 +106,10 @@ pub(crate) async fn create_vm_handler(
         _guard: vm_guard,
     };
     register_vm(&state.vms, vm_id.clone(), vm_entry)?;
-    Ok(Redirect::to(&format!("/terminal/{vm_id}")).into_response())
+
+    let csrf_token = get_csrf_token(&session).await;
+    let has_user_rootfs = find_user_rootfs(&state.user_rootfs_dir, db_user.id).is_some();
+    Ok(Html(render_terminal_page(&vm_id, &csrf_token, &state.upload_dir, has_user_rootfs).into_string()).into_response())
 }
 
 pub(crate) async fn delete_vm_handler(
@@ -172,14 +138,14 @@ pub(crate) async fn delete_vm_handler(
             )
         })?;
     let user_rootfs = user_rootfs_path(&state.user_rootfs_dir, db_user.id);
-    info!(user_id = %db_user.id, vm_id = %vm_id, dest = %user_rootfs.display(), "saving rootfs from deleted vm");
+    info!(user_id = %db_user.id, vm_id = %vm_id, dest = %user_rootfs.display(), "saving rootfs from stopped vm");
     vm_entry
         ._guard
         .save_rootfs_to(&user_rootfs)
         .await
         .with_context(|| format!("failed to save rootfs to {}", user_rootfs.display()))?;
     info!(user_id = %db_user.id, dest = %user_rootfs.display(), "rootfs saved");
-    Ok(Redirect::to("/sessions").into_response())
+    Ok(Redirect::to("/").into_response())
 }
 
 pub(crate) async fn delete_user_rootfs_handler(
@@ -195,7 +161,11 @@ pub(crate) async fn delete_user_rootfs_handler(
     let rootfs_path = user_rootfs_path(&state.user_rootfs_dir, db_user.id);
     info!(user_id = %db_user.id, path = %rootfs_path.display(), "deleting saved rootfs");
     let _ = tokio::fs::remove_file(&rootfs_path).await;
-    Ok(Redirect::to("/sessions").into_response())
+    let redirect_to = match find_user_vm_id(&state.vms, db_user.id) {
+        Some(vm_id) => format!("/terminal/{vm_id}"),
+        None => "/".to_string(),
+    };
+    Ok(Redirect::to(&redirect_to).into_response())
 }
 
 pub(crate) async fn get_terminal_page(
@@ -221,5 +191,6 @@ pub(crate) async fn get_terminal_page(
         return (StatusCode::NOT_FOUND, "Not found").into_response();
     }
     let csrf_token = get_csrf_token(&session).await;
-    Html(render_terminal_page(&vm_id, &csrf_token, &state.upload_dir).into_string()).into_response()
+    let has_user_rootfs = find_user_rootfs(&state.user_rootfs_dir, db_user.id).is_some();
+    Html(render_terminal_page(&vm_id, &csrf_token, &state.upload_dir, has_user_rootfs).into_string()).into_response()
 }

@@ -29,8 +29,7 @@ use crate::{
         get_logout_handler,
     },
     handlers::{
-        create_vm_handler, delete_user_rootfs_handler, delete_vm_handler, get_redirect_to_vms,
-        get_terminal_page, get_vms_page,
+        delete_user_rootfs_handler, delete_vm_handler, get_or_create_terminal, get_terminal_page,
     },
     state::{load_config, AppState},
     terminal::handle_ws_upgrade,
@@ -74,8 +73,7 @@ async fn main() -> Result<()> {
 fn build_router(app_state: AppState, session_store: PostgresStore) -> Router {
     let session_layer = build_session_layer(session_store);
     Router::new()
-        .route("/", get(get_redirect_to_vms))
-        .route("/sessions", get(get_vms_page).post(create_vm_handler))
+        .route("/", get(get_or_create_terminal))
         .route("/sessions/{id}/delete", post(delete_vm_handler))
         .route("/sessions/{id}/upload", post(upload_file_handler))
         .route("/rootfs/delete", post(delete_user_rootfs_handler))
