@@ -2,10 +2,10 @@ use std::path::Path;
 
 use crate::network::delete_tap;
 
-pub fn cleanup_stale_vms(socket_dir: &Path) {
+pub fn cleanup_stale_vms(socket_dir: &Path, net_helper_path: &Path) {
     kill_stale_firecracker_processes();
     delete_stale_socket_dir_files(socket_dir);
-    delete_stale_tap_interfaces();
+    delete_stale_tap_interfaces(net_helper_path);
 }
 
 fn kill_stale_firecracker_processes() {
@@ -30,7 +30,7 @@ fn delete_stale_socket_dir_files(socket_dir: &Path) {
     }
 }
 
-fn delete_stale_tap_interfaces() {
+fn delete_stale_tap_interfaces(net_helper_path: &Path) {
     let Ok(output) = std::process::Command::new("ip")
         .args(["link", "show", "type", "tun"])
         .output()
@@ -42,7 +42,7 @@ fn delete_stale_tap_interfaces() {
         let Some(name) = parse_tap_interface_name(line) else {
             continue;
         };
-        delete_tap(name);
+        delete_tap(net_helper_path, name);
     }
 }
 

@@ -126,6 +126,7 @@ pub(crate) async fn create_vm_handler(
             .into_response());
     }
     let iam_creds = fetch_host_iam_credentials().await;
+    let has_iam_creds = iam_creds.is_some();
     let user_rootfs = ensure_user_rootfs(&state.user_rootfs_dir, &state.rootfs_path, db_user.id).await?;
     info!(user_id = %db_user.id, rootfs = %user_rootfs.display(), "using rootfs");
     let vm_config = build_vm_config(&state, iam_creds, Some(&user_rootfs))?;
@@ -138,6 +139,7 @@ pub(crate) async fn create_vm_handler(
         pid: vm_guard.pid,
         created_at,
         user_id: db_user.id,
+        has_iam_creds,
         _guard: vm_guard,
     };
     register_vm(&state.vms, vm_id.clone(), vm_entry)?;

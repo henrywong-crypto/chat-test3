@@ -35,7 +35,7 @@ use crate::{
     state::{load_config, AppState},
     terminal::handle_ws_upgrade,
     upload::upload_file_handler,
-    vm::save_all_vm_rootfs,
+    vm::{refresh_all_vm_mmds, save_all_vm_rootfs},
 };
 
 #[tokio::main]
@@ -58,10 +58,11 @@ async fn main() -> Result<()> {
     );
     let app_state = AppState::new(app_config, pg_pool);
     let port = app_state.port;
-    cleanup_stale_vms(&app_state.socket_dir);
-    setup_host_networking().await;
+    cleanup_stale_vms(&app_state.socket_dir, &app_state.net_helper_path);
+    setup_host_networking(&app_state.net_helper_path).await;
+    let mmds_refresh_task = spawn_mmds_refresh_task(app_state.clone());
     let router = build_router(app_state.clone(), session_store);
-    serve_router(router, port, app_state, deletion_task.abort_handle()).await?;
+    serve_router(router, port, app_state, deletion_task.abort_handle(), mmds_refresh_task.abort_handle()).await?;
     deletion_task.await??;
     Ok(())
 }
@@ -124,20 +125,32 @@ async fn serve_router(
     port: u16,
     app_state: AppState,
     deletion_task_abort_handle: AbortHandle,
+    mmds_refresh_abort_handle: AbortHandle,
 ) -> Result<()> {
     let tcp_listener = TcpListener::bind(format!("0.0.0.0:{port}"))
         .await
         .with_context(|| format!("failed to bind to port {port}"))?;
     info!("listening on http://0.0.0.0:{port}");
     axum::serve(tcp_listener, router)
-        .with_graceful_shutdown(shutdown_signal(deletion_task_abort_handle))
+        .with_graceful_shutdown(shutdown_signal(deletion_task_abort_handle, mmds_refresh_abort_handle))
         .await
         .context("server error")?;
     save_all_vm_rootfs(&app_state).await;
     Ok(())
 }
 
-async fn shutdown_signal(deletion_task_abort_handle: AbortHandle) {
+fn spawn_mmds_refresh_task(app_state: AppState) -> tokio::task::JoinHandle<()> {
+    tokio::task::spawn(async move {
+        let mut interval = tokio::time::interval(tokio::time::Duration::from_secs(900));
+        interval.tick().await;
+        loop {
+            interval.tick().await;
+            refresh_all_vm_mmds(&app_state).await;
+        }
+    })
+}
+
+async fn shutdown_signal(deletion_task_abort_handle: AbortHandle, mmds_refresh_abort_handle: AbortHandle) {
     let ctrl_c = async {
         if let Err(e) = signal::ctrl_c().await {
             tracing::error!("failed to install Ctrl+C handler: {e}");
@@ -157,4 +170,5 @@ async fn shutdown_signal(deletion_task_abort_handle: AbortHandle) {
     }
     info!("shutdown signal received, saving vm rootfs before exit");
     deletion_task_abort_handle.abort();
+    mmds_refresh_abort_handle.abort();
 }

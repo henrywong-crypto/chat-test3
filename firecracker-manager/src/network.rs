@@ -1,9 +1,10 @@
 use anyhow::{bail, Result};
+use std::path::Path;
 use tokio::process::Command;
 use tracing::warn;
 
-pub(crate) async fn create_tap(tap_name: &str, tap_ip: &str) -> Result<()> {
-    let status = Command::new(resolve_net_helper_path())
+pub(crate) async fn create_tap(net_helper_path: &Path, tap_name: &str, tap_ip: &str) -> Result<()> {
+    let status = Command::new(net_helper_path)
         .args(["tap-create", tap_name, tap_ip])
         .status()
         .await?;
@@ -16,8 +17,8 @@ pub(crate) async fn create_tap(tap_name: &str, tap_ip: &str) -> Result<()> {
     Ok(())
 }
 
-pub(crate) fn delete_tap(tap_name: &str) {
-    let _ = std::process::Command::new(resolve_net_helper_path())
+pub(crate) fn delete_tap(net_helper_path: &Path, tap_name: &str) {
+    let _ = std::process::Command::new(net_helper_path)
         .args(["tap-delete", tap_name])
         .status();
 }
@@ -38,12 +39,12 @@ pub(crate) fn format_guest_mac(idx: u32) -> String {
     format!("06:00:AC:10:{:02X}:02", idx)
 }
 
-pub async fn setup_host_networking() {
+pub async fn setup_host_networking(net_helper_path: &Path) {
     let Some(host_iface) = fetch_host_iface_name().await else {
         warn!("could not determine host interface, skipping NAT setup");
         return;
     };
-    match Command::new(resolve_net_helper_path())
+    match Command::new(net_helper_path)
         .args(["setup-nat", &host_iface])
         .status()
         .await
@@ -55,10 +56,6 @@ pub async fn setup_host_networking() {
         ),
         Err(e) => warn!("failed to run net-helper setup-nat: {e}"),
     }
-}
-
-fn resolve_net_helper_path() -> String {
-    std::env::var("NET_HELPER_PATH").unwrap_or_else(|_| "/usr/local/bin/net-helper".to_string())
 }
 
 async fn fetch_host_iface_name() -> Option<String> {

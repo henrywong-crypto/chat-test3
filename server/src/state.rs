@@ -23,6 +23,8 @@ pub(crate) struct AppConfig {
     pub(crate) rootfs_path: PathBuf,
     #[serde(default = "default_socket_dir")]
     pub(crate) socket_dir: PathBuf,
+    #[serde(default = "default_net_helper_path")]
+    pub(crate) net_helper_path: PathBuf,
     #[serde(default = "default_ssh_key_path")]
     pub(crate) ssh_key_path: PathBuf,
     #[serde(default = "default_ssh_user")]
@@ -61,6 +63,9 @@ fn default_rootfs_path() -> PathBuf {
 }
 fn default_socket_dir() -> PathBuf {
     PathBuf::from("/tmp")
+}
+fn default_net_helper_path() -> PathBuf {
+    PathBuf::from("/usr/local/bin/net-helper")
 }
 fn default_ssh_key_path() -> PathBuf {
     PathBuf::from("/var/lib/fc/id_rsa")
@@ -130,6 +135,7 @@ pub(crate) struct VmEntry {
     pub(crate) pid: u32,
     pub(crate) created_at: u64,
     pub(crate) user_id: Uuid,
+    pub(crate) has_iam_creds: bool,
     pub(crate) _guard: VmGuard,
 }
 

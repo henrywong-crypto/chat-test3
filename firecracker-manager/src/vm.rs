@@ -24,6 +24,7 @@ pub struct VmConfig {
     pub socket_dir: PathBuf,
     pub kernel_path: PathBuf,
     pub rootfs_path: PathBuf,
+    pub net_helper_path: PathBuf,
     pub vcpu_count: u8,
     pub mem_size_mib: u32,
     pub boot_args: String,
@@ -35,12 +36,17 @@ pub struct VmGuard {
     pub id: String,
     pub guest_ip: String,
     pub pid: u32,
+    net_helper_path: PathBuf,
     tap_name: String,
     rootfs_copy: PathBuf,
     socket_path: PathBuf,
 }
 
 impl VmGuard {
+    pub fn socket_path(&self) -> &Path {
+        &self.socket_path
+    }
+
     pub fn delete(self) {
     }
 
@@ -57,7 +63,7 @@ impl VmGuard {
 impl Drop for VmGuard {
     fn drop(&mut self) {
         let _ = kill(Pid::from_raw(self.pid as i32), Signal::SIGTERM);
-        delete_tap(&self.tap_name);
+        delete_tap(&self.net_helper_path, &self.tap_name);
         let _ = std::fs::remove_file(&self.rootfs_copy);
         let _ = std::fs::remove_file(&self.socket_path);
     }
@@ -72,7 +78,7 @@ pub async fn create_vm(vm_config: &VmConfig) -> Result<VmGuard> {
     let (socket_path, rootfs_copy) = build_vm_file_paths(&vm_config.socket_dir, &vm_config.id);
     let boot_args = build_vm_boot_args(&vm_config.boot_args, &guest_ip, net_idx);
 
-    create_tap(&tap_name, &tap_ip).await?;
+    create_tap(&vm_config.net_helper_path, &tap_name, &tap_ip).await?;
     info!(src = %vm_config.rootfs_path.display(), dst = %rootfs_copy.display(), "copying rootfs");
     copy_rootfs(&vm_config.rootfs_path, &rootfs_copy).await?;
     let mut child = spawn_firecracker(&socket_path)?;
@@ -96,6 +102,7 @@ pub async fn create_vm(vm_config: &VmConfig) -> Result<VmGuard> {
         id: vm_config.id.clone(),
         guest_ip,
         pid,
+        net_helper_path: vm_config.net_helper_path.clone(),
         tap_name,
         rootfs_copy,
         socket_path,

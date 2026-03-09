@@ -2,7 +2,7 @@ use anyhow::Result;
 use aws_config::default_provider::credentials::DefaultCredentialsChain;
 use aws_credential_types::{provider::ProvideCredentials, Credentials};
 use chrono::{DateTime, Utc};
-use firecracker_manager::{build_mmds_with_iam, ImdsCredential, VmConfig};
+use firecracker_manager::{build_mmds_with_iam, put_mmds, ImdsCredential, VmConfig};
 use std::{
     path::{Path, PathBuf},
     time::SystemTime,
@@ -37,6 +37,7 @@ pub(crate) fn build_vm_config(
         rootfs_path: user_rootfs
             .map(|p| p.to_path_buf())
             .unwrap_or_else(|| state.rootfs_path.clone()),
+        net_helper_path: state.net_helper_path.clone(),
         vcpu_count: 2,
         mem_size_mib: 4096,
         boot_args: "reboot=k panic=1 quiet loglevel=3 selinux=0".to_string(),
@@ -92,7 +93,35 @@ fn build_imds_credential(credentials: &Credentials, expiration: String) -> ImdsC
     )
 }
 
-pub(crate) async fn save_all_vm_rootfs(app_state: &AppState) {
+pub(crate) async fn refresh_all_vm_mmds(app_state: &AppState) {
+    let Some((role_name, cred)) = fetch_host_iam_credentials().await else {
+        return;
+    };
+    let vm_targets: Vec<(String, PathBuf)> = {
+        let Ok(registry) = app_state.vms.lock() else {
+            return;
+        };
+        registry
+            .iter()
+            .filter(|(_, e)| e.has_iam_creds)
+            .map(|(vm_id, e)| (vm_id.clone(), e._guard.socket_path().to_path_buf()))
+            .collect()
+    };
+    for (vm_id, socket_path) in vm_targets {
+        let metadata = match build_mmds_with_iam(&vm_id, &role_name, &cred) {
+            Ok(metadata) => metadata,
+            Err(e) => {
+                warn!(vm_id = %vm_id, "failed to build mmds metadata for refresh: {e}");
+                continue;
+            }
+        };
+        if let Err(e) = put_mmds(&socket_path, &metadata).await {
+            warn!(vm_id = %vm_id, "failed to refresh mmds: {e}");
+        }
+    }
+}
+
+
     let vm_entries: Vec<(String, VmEntry)> = {
         let Ok(mut registry) = app_state.vms.lock() else {
             return;
