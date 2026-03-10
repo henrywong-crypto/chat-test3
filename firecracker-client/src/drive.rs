@@ -14,6 +14,5 @@ pub struct Drive {
 
 pub async fn set_drive(socket_path: &Path, drive: &Drive) -> Result<()> {
     let path = format!("/drives/{}", drive.drive_id);
-    let body = serde_json::to_vec(drive)?;
-    send_put(socket_path, &path, body).await
+    send_put(socket_path, &path, drive).await
 }

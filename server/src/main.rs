@@ -63,7 +63,8 @@ async fn main() -> Result<()> {
     cleanup_stale_vms(
         &app_state.net_helper_path,
         &app_state.jailer_chroot_base,
-    );
+    )
+    .await;
     setup_host_networking(&app_state.net_helper_path).await;
     let mmds_refresh_task = spawn_mmds_refresh_task(app_state.clone());
     let router = build_router(app_state.clone(), session_store);

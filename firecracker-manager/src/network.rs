@@ -17,10 +17,11 @@ pub(crate) async fn create_tap(net_helper_path: &Path, tap_name: &str, tap_ip: &
     Ok(())
 }
 
-pub(crate) fn delete_tap(net_helper_path: &Path, tap_name: &str) {
-    let _ = std::process::Command::new(net_helper_path)
+pub(crate) async fn delete_tap(net_helper_path: &Path, tap_name: &str) {
+    let _ = Command::new(net_helper_path)
         .args(["tap-delete", tap_name])
-        .status();
+        .status()
+        .await;
 }
 
 pub(crate) fn format_tap_name(idx: u32) -> String {

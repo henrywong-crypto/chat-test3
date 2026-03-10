@@ -2,14 +2,16 @@ use anyhow::{bail, Context, Result};
 use http_body_util::{BodyExt, Full};
 use hyper::{body::Bytes, client::conn::http1, Method, Request};
 use hyper_util::rt::TokioIo;
+use serde::Serialize;
 use std::path::Path;
 use tokio::net::UnixStream;
 
-pub(crate) async fn send_put(socket_path: &Path, uri: &str, body: Vec<u8>) -> Result<()> {
+pub(crate) async fn send_put(socket_path: &Path, uri: &str, body: &impl Serialize) -> Result<()> {
     send_request(socket_path, Method::PUT, uri, body).await
 }
 
-async fn send_request(socket_path: &Path, method: Method, uri: &str, body: Vec<u8>) -> Result<()> {
+async fn send_request(socket_path: &Path, method: Method, uri: &str, body: &impl Serialize) -> Result<()> {
+    let bytes = serde_json::to_vec(body)?;
     let stream = UnixStream::connect(socket_path).await.with_context(|| {
         format!(
             "failed to connect to firecracker socket {}",
@@ -25,7 +27,7 @@ async fn send_request(socket_path: &Path, method: Method, uri: &str, body: Vec<u
         .header("Host", "localhost")
         .header("Content-Type", "application/json")
         .header("Accept", "application/json")
-        .body(Full::new(Bytes::from(body)))?;
+        .body(Full::new(Bytes::from(bytes)))?;
 
     let response = sender.send_request(request).await?;
 

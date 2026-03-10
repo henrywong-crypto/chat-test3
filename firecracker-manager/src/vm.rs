@@ -1,5 +1,5 @@
 use anyhow::{Context, Result};
-use firecracker_client::start_instance;
+use firecracker_client::{start_instance, stop_instance};
 use nix::{
     sys::signal::{kill, Signal},
     unistd::Pid,
@@ -7,11 +7,12 @@ use nix::{
 use std::{
     path::{Path, PathBuf},
     sync::atomic::{AtomicU32, Ordering},
+    time::Duration,
 };
 use tracing::info;
 
 use crate::configure::configure_vm;
-use crate::network::{create_tap, delete_tap, format_guest_ip, format_guest_mac, format_tap_ip, format_tap_name};
+use crate::network::{create_tap, format_guest_ip, format_guest_mac, format_tap_ip, format_tap_name};
 use crate::process::{
     build_chroot_dir, build_vm_boot_args, copy_rootfs,
     prepare_jail_resources, spawn_firecracker_jailed, wait_for_socket,
@@ -57,6 +58,7 @@ impl VmGuard {
     }
 
     pub async fn save_rootfs_to(&self, dest: &Path) -> Result<()> {
+        stop_vm(&self.socket_path, self.pid).await;
         if tokio::fs::rename(&self.rootfs_copy, dest).await.is_err() {
             tokio::fs::copy(&self.rootfs_copy, dest)
                 .await
@@ -69,9 +71,23 @@ impl VmGuard {
 impl Drop for VmGuard {
     fn drop(&mut self) {
         let _ = kill(Pid::from_raw(self.pid as i32), Signal::SIGTERM);
-        delete_tap(&self.net_helper_path, &self.tap_name);
+        let _ = std::process::Command::new(&self.net_helper_path)
+            .args(["tap-delete", &self.tap_name])
+            .status();
         let _ = std::fs::remove_dir_all(&self.chroot_dir);
     }
+}
+
+async fn stop_vm(socket_path: &Path, pid: u32) {
+    let _ = stop_instance(socket_path).await;
+    let deadline = tokio::time::Instant::now() + Duration::from_secs(10);
+    while tokio::time::Instant::now() < deadline {
+        if !std::path::Path::new(&format!("/proc/{pid}")).exists() {
+            return;
+        }
+        tokio::time::sleep(Duration::from_millis(100)).await;
+    }
+    let _ = kill(Pid::from_raw(pid as i32), Signal::SIGKILL);
 }
 
 pub async fn create_vm(vm_config: &VmConfig) -> Result<VmGuard> {

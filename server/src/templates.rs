@@ -1,7 +1,7 @@
 use leptos::prelude::*;
 
 pub(crate) fn render_login_page() -> String {
-    leptos::ssr::render_to_string(|| view! { <LoginPage /> }).to_string()
+    render_to_string(|| view! { <LoginPage /> }).to_string()
 }
 
 pub(crate) fn render_terminal_page(
@@ -13,7 +13,7 @@ pub(crate) fn render_terminal_page(
     let vm_id = vm_id.to_owned();
     let csrf_token = csrf_token.to_owned();
     let upload_dir = upload_dir.to_owned();
-    leptos::ssr::render_to_string(move || {
+    render_to_string(move || {
         view! {
             <TerminalPage
                 vm_id=vm_id
@@ -61,7 +61,7 @@ fn TerminalPage(
         <html lang="en">
             <head>
                 <meta charset="utf-8"/>
-                <title>"WebCode — " {short_id}</title>
+                <title>"WebCode — " {short_id.clone()}</title>
                 <link rel="stylesheet" href="/static/styles.css"/>
             </head>
             <body class="terminal-page">

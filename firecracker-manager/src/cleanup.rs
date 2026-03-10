@@ -1,23 +1,23 @@
 use std::path::Path;
+use tokio::{fs, process::Command};
 
 use crate::network::delete_tap;
 
-pub fn cleanup_stale_vms(net_helper_path: &Path, jailer_chroot_base: &Path) {
-    kill_stale_firecracker_processes();
-    delete_stale_tap_interfaces(net_helper_path);
-    delete_stale_chroot_dirs(jailer_chroot_base);
+pub async fn cleanup_stale_vms(net_helper_path: &Path, jailer_chroot_base: &Path) {
+    kill_stale_firecracker_processes().await;
+    delete_stale_tap_interfaces(net_helper_path).await;
+    delete_stale_chroot_dirs(jailer_chroot_base).await;
 }
 
-fn kill_stale_firecracker_processes() {
-    let _ = std::process::Command::new("pkill")
-        .args(["-f", "firecracker"])
-        .status();
+async fn kill_stale_firecracker_processes() {
+    let _ = Command::new("pkill").args(["-f", "firecracker"]).status().await;
 }
 
-fn delete_stale_tap_interfaces(net_helper_path: &Path) {
-    let Ok(output) = std::process::Command::new("ip")
+async fn delete_stale_tap_interfaces(net_helper_path: &Path) {
+    let Ok(output) = Command::new("ip")
         .args(["link", "show", "type", "tun"])
         .output()
+        .await
     else {
         return;
     };
@@ -26,7 +26,7 @@ fn delete_stale_tap_interfaces(net_helper_path: &Path) {
         let Some(name) = parse_tap_interface_name(line) else {
             continue;
         };
-        delete_tap(net_helper_path, name);
+        delete_tap(net_helper_path, name).await;
     }
 }
 
@@ -36,12 +36,12 @@ fn parse_tap_interface_name(line: &str) -> Option<&str> {
     name.starts_with("tap").then_some(name)
 }
 
-fn delete_stale_chroot_dirs(chroot_base: &Path) {
+async fn delete_stale_chroot_dirs(chroot_base: &Path) {
     let firecracker_dir = chroot_base.join("firecracker");
-    let Ok(entries) = std::fs::read_dir(&firecracker_dir) else {
+    let Ok(mut entries) = fs::read_dir(&firecracker_dir).await else {
         return;
     };
-    for entry in entries.flatten() {
-        let _ = std::fs::remove_dir_all(entry.path());
+    while let Ok(Some(entry)) = entries.next_entry().await {
+        let _ = fs::remove_dir_all(entry.path()).await;
     }
 }

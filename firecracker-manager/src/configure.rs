@@ -87,7 +87,6 @@ async fn configure_mmds(
         &MmdsConfig {
             version: vm_config.mmds_imds_compat.then(|| "V2".to_string()),
             network_interfaces: vec!["net1".to_string()],
-            ipv4_address: None,
             imds_compat: vm_config.mmds_imds_compat.then_some(true),
         },
     )
