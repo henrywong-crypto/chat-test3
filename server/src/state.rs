@@ -4,7 +4,7 @@ use axum::{
     response::{IntoResponse, Response},
 };
 use config::{Config, Environment, File};
-use firecracker_manager::VmGuard;
+use firecracker_manager::Vm;
 use serde::Deserialize;
 use std::{
     collections::HashMap,
@@ -148,12 +148,11 @@ pub(crate) type VmRegistry = Arc<Mutex<HashMap<String, VmEntry>>>;
 pub(crate) type RootfsLocks = Arc<Mutex<HashMap<Uuid, Arc<AsyncMutex<()>>>>>;
 
 pub(crate) struct VmEntry {
-    pub(crate) guest_ip: String,
     pub(crate) user_id: Uuid,
     pub(crate) has_iam_creds: bool,
     pub(crate) created_at: Instant,
     pub(crate) ws_connected: Arc<AtomicBool>,
-    pub(crate) _guard: VmGuard,
+    pub(crate) vm: Vm,
 }
 
 pub(crate) struct AppError(pub(crate) anyhow::Error);
@@ -190,7 +189,7 @@ pub(crate) fn find_vm_guest_ip_for_user(
 ) -> Option<String> {
     let registry = vms.lock().ok()?;
     let vm_entry = registry.get(vm_id)?;
-    (vm_entry.user_id == user_id).then(|| vm_entry.guest_ip.clone())
+    (vm_entry.user_id == user_id).then(|| vm_entry.vm.guest_ip.clone())
 }
 
 pub(crate) fn get_rootfs_lock(locks: &RootfsLocks, user_id: Uuid) -> Arc<AsyncMutex<()>> {

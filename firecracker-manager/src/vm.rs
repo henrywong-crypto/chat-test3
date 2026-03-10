@@ -53,24 +53,20 @@ pub struct VmConfig {
     pub jailer: JailerConfig,
 }
 
-pub struct VmGuard {
+pub struct Vm {
     pub id: String,
     pub guest_ip: String,
     pub pid: u32,
+    pub socket_path: PathBuf,
     net_idx: u32,
     net_helper_path: PathBuf,
     tap_name: String,
     rootfs_copy: PathBuf,
-    socket_path: PathBuf,
     chroot_dir: PathBuf,
 }
 
-impl VmGuard {
-    pub fn socket_path(&self) -> &Path {
-        &self.socket_path
-    }
-
-    pub async fn save_rootfs_to(&self, dest: &Path) -> Result<()> {
+impl Vm {
+    pub async fn save_rootfs(&self, dest: &Path) -> Result<()> {
         stop_vm(&self.socket_path, self.pid).await;
         if tokio::fs::rename(&self.rootfs_copy, dest).await.is_err() {
             tokio::fs::copy(&self.rootfs_copy, dest)
@@ -81,7 +77,7 @@ impl VmGuard {
     }
 }
 
-impl Drop for VmGuard {
+impl Drop for Vm {
     fn drop(&mut self) {
         let _ = kill(Pid::from_raw(self.pid as i32), Signal::SIGTERM);
         let _ = std::process::Command::new(&self.net_helper_path)
@@ -111,7 +107,7 @@ async fn wait_for_process_exit(pid: u32) {
     }
 }
 
-pub async fn create_vm(vm_config: &VmConfig) -> Result<VmGuard> {
+pub async fn create_vm(vm_config: &VmConfig) -> Result<Vm> {
     let net_idx = acquire_net_idx().context("no free network indices (254 VMs already running)")?;
     let tap_name = format_tap_name(net_idx);
     let chroot_dir = build_chroot_dir(&vm_config.jailer.chroot_base, &vm_config.id);
@@ -129,7 +125,7 @@ async fn launch_vm(
     net_idx: u32,
     tap_name: &str,
     chroot_dir: &Path,
-) -> Result<VmGuard> {
+) -> Result<Vm> {
     create_tap(&vm_config.net_helper_path, tap_name, &format_tap_ip(net_idx)).await?;
     let mac = format_guest_mac(net_idx);
     let guest_ip = format_guest_ip(net_idx);
@@ -159,7 +155,7 @@ async fn launch_vm(
     .await?;
     start_instance(&socket_path).await?;
 
-    Ok(VmGuard {
+    Ok(Vm {
         id: vm_config.id.clone(),
         guest_ip,
         pid,

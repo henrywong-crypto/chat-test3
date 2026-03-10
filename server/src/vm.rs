@@ -7,7 +7,7 @@ use std::{
 use aws_config::default_provider::credentials::DefaultCredentialsChain;
 use aws_credential_types::{provider::ProvideCredentials, Credentials};
 use time::{format_description::well_known::Rfc3339, OffsetDateTime};
-use firecracker_manager::{build_mmds_with_iam, put_mmds, ImdsCredential, JailerConfig, VmConfig};
+use firecracker_manager::{build_mmds_with_iam, put_mmds, ImdsCredential, JailerConfig, Vm, VmConfig};
 use tracing::{error, info, warn};
 use uuid::Uuid;
 
@@ -116,7 +116,7 @@ pub(crate) async fn refresh_all_vm_mmds(app_state: &AppState) {
         registry
             .iter()
             .filter(|(_, e)| e.has_iam_creds)
-            .map(|(vm_id, e)| (vm_id.clone(), e._guard.socket_path().to_path_buf()))
+            .map(|(vm_id, e)| (vm_id.clone(), e.vm.socket_path.clone()))
             .collect()
     };
     for (vm_id, socket_path) in vm_targets {
@@ -198,7 +198,7 @@ async fn save_vm_entry_rootfs(
     let lock = get_rootfs_lock(rootfs_locks, vm_entry.user_id);
     let _guard = lock.lock().await;
     info!(user_id = %vm_entry.user_id, vm_id = %vm_id, dest = %rootfs_path.display(), "saving rootfs on shutdown");
-    if let Err(e) = vm_entry._guard.save_rootfs_to(&rootfs_path).await {
+    if let Err(e) = vm_entry.vm.save_rootfs(&rootfs_path).await {
         error!(user_id = %vm_entry.user_id, vm_id = %vm_id, "failed to save rootfs on shutdown: {e}");
     }
 }

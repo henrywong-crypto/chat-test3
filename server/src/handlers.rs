@@ -87,16 +87,15 @@ pub(crate) async fn get_or_create_terminal(
     .await?;
     info!(user_id = %db_user.id, rootfs = %user_rootfs.display(), "using rootfs");
     let vm_config = build_vm_config(&state, iam_creds, Some(&user_rootfs))?;
-    let vm_guard = create_vm(&vm_config).await?;
-    info!(user_id = %db_user.id, vm_id = %vm_guard.id, guest_ip = %vm_guard.guest_ip, pid = vm_guard.pid, "vm started");
-    let vm_id = vm_guard.id.clone();
+    let vm = create_vm(&vm_config).await?;
+    info!(user_id = %db_user.id, vm_id = %vm.id, guest_ip = %vm.guest_ip, pid = vm.pid, "vm started");
+    let vm_id = vm.id.clone();
     let vm_entry = VmEntry {
-        guest_ip: vm_guard.guest_ip.clone(),
         user_id: db_user.id,
         has_iam_creds,
         created_at: Instant::now(),
         ws_connected: Arc::new(AtomicBool::new(false)),
-        _guard: vm_guard,
+        vm,
     };
     register_vm(&state.vms, vm_id.clone(), vm_entry)?;
 

@@ -67,7 +67,7 @@ async fn save_and_drop_vm(state: &AppState, vm_id: &str, user_id: Uuid) {
     let lock = get_rootfs_lock(&state.rootfs_locks, user_id);
     let _guard = lock.lock().await;
     info!(vm_id = %vm_id, user_id = %user_id, dest = %user_rootfs.display(), "saving rootfs on disconnect");
-    if let Err(e) = vm_entry._guard.save_rootfs_to(&user_rootfs).await {
+    if let Err(e) = vm_entry.vm.save_rootfs(&user_rootfs).await {
         error!(vm_id = %vm_id, "failed to save rootfs on disconnect: {e}");
     }
 }
