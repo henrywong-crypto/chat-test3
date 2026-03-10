@@ -137,11 +137,16 @@ async fn build_directory_zip(
             .context("failed to read remote directory")?;
         for entry in read_dir {
             let name = entry.file_name();
+            if name == "." || name == ".." {
+                continue;
+            }
             let child_path = format!("{}/{}", dir.trim_end_matches('/'), name);
             let file_type = entry.file_type();
             if file_type.is_symlink() {
                 continue;
             }
+            // child_path is already canonical: dir_path was canonicalized by the caller,
+            // name is a bare filename from read_dir (no path separators), and symlinks are skipped.
             validate_within_dir(&child_path, upload_dir)?;
             if file_type.is_dir() {
                 if depth + 1 < MAX_ZIP_DEPTH {

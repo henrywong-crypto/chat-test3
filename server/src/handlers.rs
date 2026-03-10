@@ -89,7 +89,7 @@ pub(crate) async fn get_or_create_terminal(
     info!(user_id = %db_user.id, rootfs = %user_rootfs.display(), "using rootfs");
     let vm_config = build_vm_config(&state, iam_creds, Some(&user_rootfs))?;
     let vm = create_vm(&vm_config).await?;
-    info!(user_id = %db_user.id, vm_id = %vm.id, guest_ip = %vm.guest_ip, pid = vm.pid, "vm started");
+    info!(user_id = %db_user.id, vm_id = %vm.id, guest_ip = %vm.guest_ip(), pid = vm.pid, "vm started");
     let vm_id = vm.id.clone();
     let vm_entry = VmEntry {
         user_id: db_user.id,

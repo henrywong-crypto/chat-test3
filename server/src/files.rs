@@ -78,6 +78,9 @@ async fn collect_file_entries(
     let mut files: Vec<FileEntry> = Vec::new();
     for entry in raw_entries {
         let name = entry.file_name();
+        if name == "." || name == ".." {
+            continue;
+        }
         let metadata = entry.metadata();
         let is_dir = if metadata.permissions.is_some() {
             metadata.file_type().is_dir()

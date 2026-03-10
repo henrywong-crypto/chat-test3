@@ -55,7 +55,6 @@ pub struct VmConfig {
 
 pub struct Vm {
     pub id: String,
-    pub guest_ip: String,
     pub pid: u32,
     net_idx: u32,
     net_helper_path: PathBuf,
@@ -63,6 +62,10 @@ pub struct Vm {
 }
 
 impl Vm {
+    pub fn guest_ip(&self) -> String {
+        format_guest_ip(self.net_idx)
+    }
+
     pub fn socket_path(&self) -> PathBuf {
         self.chroot_dir.join("run/firecracker.socket")
     }
@@ -135,8 +138,7 @@ async fn launch_vm(
 ) -> Result<Vm> {
     create_tap(&vm_config.net_helper_path, tap_name, &format_tap_ip(net_idx)).await?;
     let mac = format_guest_mac(net_idx);
-    let guest_ip = format_guest_ip(net_idx);
-    let boot_args = build_vm_boot_args(&vm_config.boot_args, &guest_ip, net_idx);
+    let boot_args = build_vm_boot_args(&vm_config.boot_args, &format_guest_ip(net_idx), net_idx);
     let kernel_path_in_jail = PathBuf::from("/vmlinux");
     let rootfs_path_in_jail = PathBuf::from("/rootfs.ext4");
     let rootfs_copy = chroot_dir.join("rootfs.ext4");
@@ -164,7 +166,6 @@ async fn launch_vm(
 
     Ok(Vm {
         id: vm_config.id.clone(),
-        guest_ip,
         pid,
         net_idx,
         net_helper_path: vm_config.net_helper_path.clone(),

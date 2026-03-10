@@ -6,7 +6,6 @@ fn main() {
     let src_dir = frontend_dir.join("src");
     let dist_dir = frontend_dir.join("dist");
 
-    println!("cargo:rerun-if-changed={}", src_dir.join("app.js").display());
     println!("cargo:rerun-if-changed={}", src_dir.join("styles.css").display());
     println!("cargo:rerun-if-changed={}", frontend_dir.join("package.json").display());
 

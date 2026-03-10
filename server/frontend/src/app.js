@@ -45,8 +45,9 @@ document.getElementById('files-close-btn').addEventListener('click', toggleFiles
 
 function toggleFiles() {
   const panel = document.getElementById('files-panel');
-  panel.classList.toggle('open');
-  if (panel.classList.contains('open') && !fmOpened) {
+  const isOpen = panel.classList.toggle('flex');
+  panel.classList.toggle('hidden', !isOpen);
+  if (isOpen && !fmOpened) {
     fmOpened = true;
     loadDir(fmCurrentPath);
   }
@@ -54,17 +55,9 @@ function toggleFiles() {
 
 function loadDir(path) {
   fetch('/sessions/' + vmId + '/ls?path=' + encodeURIComponent(path))
-    .then(function(res) {
-      if (!res.ok) return res.text().then(function(msg) { throw new Error(msg); });
-      return res.json();
-    })
-    .then(function(data) {
-      fmCurrentPath = path;
-      renderEntries(path, data.entries);
-    })
-    .catch(function(err) {
-      document.getElementById('files-list').textContent = err.message || 'Error loading directory.';
-    });
+    .then(res => res.ok ? res.json() : res.text().then(msg => { throw new Error(msg); }))
+    .then(data => { fmCurrentPath = path; renderEntries(path, data.entries); })
+    .catch(err => { document.getElementById('files-list').textContent = err.message || 'Error.'; });
 }
 
 function renderEntries(path, entries) {
@@ -72,46 +65,49 @@ function renderEntries(path, entries) {
   const list = document.getElementById('files-list');
   list.innerHTML = '';
   if (path !== fmUploadDir) {
-    const upRow = document.createElement('div');
-    upRow.className = 'file-entry';
-    upRow.innerHTML = '<span>\u{1F4C1}</span><span class="file-entry-name">..</span>';
-    upRow.onclick = function() { loadDir(parentPath(path)); };
-    list.appendChild(upRow);
+    list.appendChild(buildEntryRow('📁', '..', () => loadDir(parentPath(path))));
   }
-  entries.forEach(function(entry) {
-    const row = document.createElement('div');
-    row.className = 'file-entry';
+  for (const entry of entries) {
     const entryPath = path.replace(/\/$/, '') + '/' + entry.name;
     if (entry.is_dir) {
-      row.innerHTML =
-        '<span>\u{1F4C1}</span>' +
-        '<span class="file-entry-name">' + escHtml(entry.name) + '</span>' +
-        '<span class="file-entry-dl" title="Download as zip">\u2193</span>';
-      row.onclick = function() { loadDir(entryPath); };
-      row.querySelector('.file-entry-dl').onclick = function(e) {
-        e.stopPropagation();
-        window.open('/sessions/' + vmId + '/download?path=' + encodeURIComponent(entryPath), '_blank');
-      };
+      const row = buildEntryRow('📁', entry.name, () => loadDir(entryPath));
+      const dl = document.createElement('span');
+      dl.className = 'text-xs opacity-0 group-hover:opacity-100 px-1 cursor-pointer';
+      dl.title = 'Download as zip';
+      dl.textContent = '↓';
+      dl.onclick = e => { e.stopPropagation(); window.open('/sessions/' + vmId + '/download?path=' + encodeURIComponent(entryPath), '_blank'); };
+      row.appendChild(dl);
+      list.appendChild(row);
     } else {
-      row.innerHTML =
-        '<span>\u{1F4C4}</span>' +
-        '<span class="file-entry-name">' + escHtml(entry.name) + '</span>' +
-        '<span class="file-entry-size">' + escHtml(formatSize(entry.size)) + '</span>';
-      row.onclick = function() {
-        window.location.href = '/sessions/' + vmId + '/download?path=' + encodeURIComponent(entryPath);
-      };
+      const row = buildEntryRow('📄', entry.name, () => { window.location.href = '/sessions/' + vmId + '/download?path=' + encodeURIComponent(entryPath); });
+      const size = document.createElement('span');
+      size.className = 'text-xs opacity-50 whitespace-nowrap';
+      size.textContent = formatSize(entry.size);
+      row.appendChild(size);
+      list.appendChild(row);
     }
-    list.appendChild(row);
-  });
+  }
+}
+
+function buildEntryRow(icon, name, onclick) {
+  const row = document.createElement('div');
+  row.className = 'group flex items-center gap-2 px-3 py-1.5 cursor-pointer border-b border-base-300 text-xs hover:bg-base-300';
+  row.onclick = onclick;
+  const iconEl = document.createElement('span');
+  iconEl.textContent = icon;
+  const nameEl = document.createElement('span');
+  nameEl.className = 'flex-1 truncate';
+  nameEl.textContent = name;
+  row.appendChild(iconEl);
+  row.appendChild(nameEl);
+  return row;
 }
 
 function parentPath(path) {
   const stripped = path.replace(/\/$/, '');
   const idx = stripped.lastIndexOf('/');
-  if (idx <= 0) return '/';
-  const parent = stripped.substring(0, idx);
-  if (parent.length < fmUploadDir.length) return fmUploadDir;
-  return parent;
+  const parent = idx <= 0 ? '/' : stripped.substring(0, idx);
+  return parent.length < fmUploadDir.length ? fmUploadDir : parent;
 }
 
 function formatSize(n) {
@@ -120,33 +116,23 @@ function formatSize(n) {
   return n + ' B';
 }
 
-function escHtml(s) {
-  return s.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
-}
-
 document.getElementById('fm-file-input').addEventListener('change', function() {
   if (!this.files[0]) return;
   const file = this.files[0];
-  const remotePath = fmCurrentPath.replace(/\/$/, '') + '/' + file.name;
   const status = document.getElementById('files-upload-status');
-  status.className = '';
-  status.textContent = 'Uploading\u2026';
+  status.className = 'text-xs';
+  status.textContent = 'Uploading…';
   const formData = new FormData();
   formData.append('csrf_token', fmCsrfToken);
-  formData.append('path', remotePath);
+  formData.append('path', fmCurrentPath.replace(/\/$/, '') + '/' + file.name);
   formData.append('file', file);
   fetch(fmUploadAction, { method: 'POST', body: formData })
-    .then(function(res) {
-      status.className = res.ok ? 'ok' : 'err';
+    .then(res => {
+      status.className = 'text-xs ' + (res.ok ? 'text-success' : 'text-error');
       status.textContent = res.ok ? 'Uploaded.' : 'Upload failed.';
       if (res.ok) loadDir(fmCurrentPath);
     })
-    .catch(function() {
-      status.className = 'err';
-      status.textContent = 'Network error.';
-    })
-    .finally(function() {
-      setTimeout(function() { status.textContent = ''; status.className = ''; }, 3000);
-    });
+    .catch(() => { status.className = 'text-xs text-error'; status.textContent = 'Network error.'; })
+    .finally(() => setTimeout(() => { status.textContent = ''; status.className = 'text-xs'; }, 3000));
   this.value = '';
 });

@@ -189,7 +189,7 @@ pub(crate) fn find_vm_guest_ip_for_user(
 ) -> Option<String> {
     let registry = vms.lock().ok()?;
     let vm_entry = registry.get(vm_id)?;
-    (vm_entry.user_id == user_id).then(|| vm_entry.vm.guest_ip.clone())
+    (vm_entry.user_id == user_id).then(|| vm_entry.vm.guest_ip())
 }
 
 pub(crate) fn get_rootfs_lock(locks: &RootfsLocks, user_id: Uuid) -> Arc<AsyncMutex<()>> {
