@@ -5,7 +5,7 @@ use axum::{
     response::IntoResponse,
     Json,
 };
-use russh_sftp::client::fs::ReadDir;
+use russh_sftp::client::{fs::DirEntry, SftpSession};
 use serde::{Deserialize, Serialize};
 use store::upsert_user;
 use uuid::Uuid;
@@ -65,17 +65,30 @@ pub(crate) async fn list_files_handler(
         .read_dir(&real_path)
         .await
         .context("failed to read remote directory")?;
-    let entries = collect_entries(read_dir);
+    let entries = collect_file_entries(&sftp, &real_path, read_dir.collect()).await;
     Ok(Json(ListResponse { entries }).into_response())
 }
 
-fn collect_entries(read_dir: ReadDir) -> Vec<FileEntry> {
+async fn collect_file_entries(
+    sftp: &SftpSession,
+    dir_path: &str,
+    raw_entries: Vec<DirEntry>,
+) -> Vec<FileEntry> {
     let mut dirs: Vec<FileEntry> = Vec::new();
     let mut files: Vec<FileEntry> = Vec::new();
-    for entry in read_dir {
+    for entry in raw_entries {
         let name = entry.file_name();
-        let is_dir = entry.file_type().is_dir();
-        let size = entry.metadata().size.unwrap_or(0);
+        let metadata = entry.metadata();
+        let is_dir = if metadata.permissions.is_some() {
+            metadata.file_type().is_dir()
+        } else {
+            let child_path = format!("{}/{}", dir_path.trim_end_matches('/'), name);
+            sftp.symlink_metadata(&child_path)
+                .await
+                .map(|m| m.file_type().is_dir())
+                .unwrap_or(false)
+        };
+        let size = metadata.size.unwrap_or(0);
         let file_entry = FileEntry { name, is_dir, size };
         if is_dir {
             dirs.push(file_entry);

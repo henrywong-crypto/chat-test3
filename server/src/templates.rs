@@ -206,13 +206,16 @@ function toggleFiles() {{
 
 function loadDir(path) {{
   fetch('/sessions/' + vmId + '/ls?path=' + encodeURIComponent(path))
-    .then(function(res) {{ return res.json(); }})
+    .then(function(res) {{
+      if (!res.ok) return res.text().then(function(msg) {{ throw new Error(msg); }});
+      return res.json();
+    }})
     .then(function(data) {{
       fmCurrentPath = path;
       renderEntries(path, data.entries);
     }})
-    .catch(function() {{
-      document.getElementById('files-list').textContent = 'Error loading directory.';
+    .catch(function(err) {{
+      document.getElementById('files-list').textContent = err.message || 'Error loading directory.';
     }});
 }}
 
@@ -237,7 +240,7 @@ function renderEntries(path, entries) {{
       row.onclick = function() {{ loadDir(path.replace(/\/$/, '') + '/' + entry.name); }};
     }} else {{
       row.onclick = function() {{
-        window.location = '/sessions/' + vmId + '/download?path=' + encodeURIComponent(path.replace(/\/$/, '') + '/' + entry.name);
+        window.open('/sessions/' + vmId + '/download?path=' + encodeURIComponent(path.replace(/\/$/, '') + '/' + entry.name), '_blank');
       }};
     }}
     list.appendChild(row);
