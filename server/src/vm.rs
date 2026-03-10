@@ -6,7 +6,7 @@ use std::{
 };
 use aws_config::default_provider::credentials::DefaultCredentialsChain;
 use aws_credential_types::{provider::ProvideCredentials, Credentials};
-use chrono::{DateTime, Utc};
+use time::{format_description::well_known::Rfc3339, OffsetDateTime};
 use firecracker_manager::{build_mmds_with_iam, put_mmds, ImdsCredential, JailerConfig, VmConfig};
 use tracing::{error, info, warn};
 use uuid::Uuid;
@@ -14,8 +14,10 @@ use uuid::Uuid;
 use crate::state::{get_rootfs_lock, AppConfig, AppState, RootfsLocks, VmEntry};
 
 fn system_time_to_iso8601(t: SystemTime) -> String {
-    let dt: DateTime<Utc> = t.into();
-    dt.format("%Y-%m-%dT%H:%M:%SZ").to_string()
+    OffsetDateTime::try_from(t)
+        .ok()
+        .and_then(|dt| dt.format(&Rfc3339).ok())
+        .unwrap_or_else(|| "2099-01-01T00:00:00Z".to_string())
 }
 
 pub(crate) fn build_vm_config(

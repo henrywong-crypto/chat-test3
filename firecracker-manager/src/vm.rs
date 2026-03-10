@@ -114,23 +114,14 @@ async fn wait_for_process_exit(pid: u32) {
 pub async fn create_vm(vm_config: &VmConfig) -> Result<VmGuard> {
     let net_idx = acquire_net_idx().context("no free network indices (254 VMs already running)")?;
     let tap_name = format_tap_name(net_idx);
-    create_tap(&vm_config.net_helper_path, &tap_name, &format_tap_ip(net_idx))
-        .await
-        .inspect_err(|_| release_net_idx(net_idx))?;
-    setup_vm(vm_config, net_idx, &tap_name).await
-}
-
-async fn setup_vm(vm_config: &VmConfig, net_idx: u32, tap_name: &str) -> Result<VmGuard> {
     let chroot_dir = build_chroot_dir(&vm_config.jailer.chroot_base, &vm_config.id);
-    match launch_vm(vm_config, net_idx, tap_name, &chroot_dir).await {
-        Ok(vm_guard) => Ok(vm_guard),
-        Err(e) => {
-            delete_tap(&vm_config.net_helper_path, tap_name).await;
-            release_net_idx(net_idx);
-            let _ = tokio::fs::remove_dir_all(&chroot_dir).await;
-            Err(e)
-        }
+    let result = launch_vm(vm_config, net_idx, &tap_name, &chroot_dir).await;
+    if result.is_err() {
+        delete_tap(&vm_config.net_helper_path, &tap_name).await;
+        release_net_idx(net_idx);
+        let _ = tokio::fs::remove_dir_all(&chroot_dir).await;
     }
+    result
 }
 
 async fn launch_vm(
@@ -139,6 +130,7 @@ async fn launch_vm(
     tap_name: &str,
     chroot_dir: &Path,
 ) -> Result<VmGuard> {
+    create_tap(&vm_config.net_helper_path, tap_name, &format_tap_ip(net_idx)).await?;
     let mac = format_guest_mac(net_idx);
     let guest_ip = format_guest_ip(net_idx);
     let boot_args = build_vm_boot_args(&vm_config.boot_args, &guest_ip, net_idx);

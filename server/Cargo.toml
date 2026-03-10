@@ -14,7 +14,6 @@ axum = { version = "0.8.8", features = ["multipart", "ws"] }
 aws-config = "1.8.15"
 aws-credential-types = "1.2.14"
 bytes = "1.11.1"
-chrono = "0.4.44"
 config = "0.15.19"
 firecracker-manager = { path = "../firecracker-manager" }
 futures = "0.3.32"
@@ -25,7 +24,7 @@ russh-sftp = "2.1.1"
 serde = { version = "1.0.228", features = ["derive"] }
 serde_json = "1.0.149"
 store = { path = "../store" }
-time = "0.3.47"
+time = { version = "0.3.47", features = ["formatting"] }
 tokio = { version = "1.50.0", features = ["full"] }
 tokio-util = { version = "0.7", features = ["io"] }
 tracing = "0.1.44"

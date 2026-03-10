@@ -4463,7 +4463,6 @@ dependencies = [
  "aws-credential-types",
  "axum",
  "bytes",
- "chrono",
  "config",
  "firecracker-manager",
  "futures",
