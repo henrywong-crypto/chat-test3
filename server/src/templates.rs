@@ -1,7 +1,7 @@
 use leptos::prelude::*;
 
 pub(crate) fn render_login_page() -> String {
-    render_to_string(|| view! { <LoginPage /> }).to_string()
+    Owner::new().with(|| view! { <LoginPage /> }.to_html())
 }
 
 pub(crate) fn render_terminal_page(
@@ -13,7 +13,7 @@ pub(crate) fn render_terminal_page(
     let vm_id = vm_id.to_owned();
     let csrf_token = csrf_token.to_owned();
     let upload_dir = upload_dir.to_owned();
-    render_to_string(move || {
+    Owner::new().with(move || {
         view! {
             <TerminalPage
                 vm_id=vm_id
@@ -22,8 +22,8 @@ pub(crate) fn render_terminal_page(
                 has_user_rootfs=has_user_rootfs
             />
         }
+        .to_html()
     })
-    .to_string()
 }
 
 #[component]

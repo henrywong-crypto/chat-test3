@@ -9,7 +9,11 @@ use serde::Deserialize;
 use std::{
     collections::HashMap,
     path::PathBuf,
-    sync::{Arc, Mutex},
+    sync::{
+        atomic::{AtomicBool, Ordering},
+        Arc, Mutex,
+    },
+    time::Instant,
 };
 use store::PgPool;
 use tokio::sync::Mutex as AsyncMutex;
@@ -147,6 +151,8 @@ pub(crate) struct VmEntry {
     pub(crate) guest_ip: String,
     pub(crate) user_id: Uuid,
     pub(crate) has_iam_creds: bool,
+    pub(crate) created_at: Instant,
+    pub(crate) ws_connected: Arc<AtomicBool>,
     pub(crate) _guard: VmGuard,
 }
 
@@ -166,6 +172,14 @@ impl IntoResponse for AppError {
 impl<E: Into<anyhow::Error>> From<E> for AppError {
     fn from(app_error: E) -> Self {
         AppError(app_error.into())
+    }
+}
+
+pub(crate) fn mark_vm_ws_connected(vms: &VmRegistry, vm_id: &str) {
+    if let Ok(registry) = vms.lock() {
+        if let Some(entry) = registry.get(vm_id) {
+            entry.ws_connected.store(true, Ordering::Relaxed);
+        }
     }
 }
 

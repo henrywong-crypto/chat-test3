@@ -21,7 +21,6 @@ Each WebSocket connection:
 ## Prerequisites
 
 - Rust toolchain
-- `firecracker` binary on `$PATH`
 - `ip` and `iptables` on `$PATH`
 - User in the `kvm` group (`sudo usermod -aG kvm $USER`)
 - A kernel image and a per-user root filesystem (see [Building the root filesystem](#building-the-root-filesystem))
@@ -54,30 +53,60 @@ sudo chmod u+s /usr/local/bin/jailer
 
 The jailer binary must be setuid root so it can chroot and drop privileges without the server running as root.
 
-## Jailer setup (optional)
+## Jailer setup
 
-The jailer chroots each Firecracker process into its own directory and drops it to a dedicated uid/gid, providing process isolation. To enable it:
+The jailer chroots each Firecracker process into a per-VM directory tree and drops it to a dedicated uid/gid, providing process isolation.
 
-1. Create a dedicated system user for Firecracker:
+### Chroot directory layout
 
-```bash
-sudo useradd -r -s /sbin/nologin firecracker
+With the default `jailer_chroot_base = /srv/jailer`, each VM gets the following tree on the host:
+
+```
+/srv/jailer/
+└── firecracker/
+    └── {vm-uuid}/
+        └── root/                      ← chroot root (owned by jailer_uid:jailer_gid, mode 0700)
+            ├── vmlinux                ← hard-link of the kernel image
+            ├── rootfs.ext4            ← per-user rootfs copy
+            └── run/
+                └── firecracker.socket ← Firecracker API socket
 ```
 
-2. Create and grant access to the chroot base directory:
+Inside the jail, the API socket appears at `/run/firecracker.socket`. From the host, the full path is `/srv/jailer/firecracker/{vm-uuid}/root/run/firecracker.socket`.
+
+The server creates the `root/` subtree before spawning the jailer. The jailer then `chown`s `root/` to `jailer_uid:jailer_gid` (mode `0700`) and `chroot`s into it. After the VM exits, the server deletes the entire `{vm-uuid}/` directory.
+
+### User and permissions
+
+The jailer `chown`s the chroot directory to `jailer_uid:jailer_gid`. For the server to be able to delete the chroot tree after the VM exits, **`jailer_uid` and `jailer_gid` must match the uid/gid of the user running the server**.
+
+1. Create a dedicated system user for the server and its VMs:
+
+```bash
+sudo useradd -r -m -d /var/lib/webcode -s /sbin/nologin webcode
+sudo usermod -aG kvm webcode
+```
+
+2. Create the chroot base directory, owned by that user:
 
 ```bash
 sudo mkdir -p /srv/jailer
-sudo chown ubuntu:ubuntu /srv/jailer
+sudo chown webcode:webcode /srv/jailer
 ```
 
-3. Enable in `config.toml`:
+3. Set `jailer_uid` and `jailer_gid` to the new user's IDs:
+
+```bash
+id webcode
+# uid=999(webcode) gid=999(webcode) ...
+```
 
 ```toml
-use_jailer         = true
-jailer_uid         = 1001  # id -u firecracker
-jailer_gid         = 1001  # id -g firecracker
+jailer_uid = 999  # id -u webcode
+jailer_gid = 999  # id -g webcode
 ```
+
+4. Run the server as `webcode` (e.g. via systemd `User=webcode`).
 
 ## Building the root filesystem
 
@@ -146,25 +175,26 @@ sudo mv ubuntu-24.04.id_rsa /var/lib/fc/ubuntu-24.04.id_rsa
 
 ## Run
 
-Configure via environment variables:
+Configuration is loaded from `config.toml` (optional) and environment variables. A minimal `config.toml`:
 
-```bash
-KERNEL_PATH=~/vmlinux-6.1.155 \
-ROOTFS_PATH=~/ubuntu-24.04.ext4 \
-SSH_KEY_PATH=~/ubuntu-24.04.id_rsa \
-SSH_USER=ubuntu \
-./target/release/server
+```toml
+kernel_path   = "/var/lib/fc/vmlinux"
+rootfs_path   = "/var/lib/fc/ubuntu-24.04.ext4"
+ssh_key_path  = "/var/lib/fc/ubuntu-24.04.id_rsa"
+ssh_user      = "ubuntu"
+jailer_uid    = 999  # id -u webcode
+jailer_gid    = 999  # id -g webcode
+
+cognito_client_id     = "..."
+cognito_client_secret = "..."
+cognito_region        = "us-east-1"
+cognito_user_pool_id  = "us-east-1_xxxxxxxx"
+cognito_domain        = "your-domain.auth.us-east-1.amazoncognito.com"
+cognito_redirect_uri  = "https://yourhost/callback"
 ```
 
-For Cognito login, also set:
-
 ```bash
-COGNITO_CLIENT_ID=your_client_id \
-COGNITO_CLIENT_SECRET=your_client_secret \
-COGNITO_REGION=us-east-1 \
-COGNITO_USER_POOL_ID=us-east-1_xxxxxxxx \
-COGNITO_DOMAIN=your-domain.auth.us-east-1.amazoncognito.com \
-COGNITO_REDIRECT_URI=http://localhost:3000/callback \
+./target/release/server
 ```
 
 ## User system
@@ -192,15 +222,13 @@ Open http://localhost:3000 — each page load boots a fresh VM and opens an SSH 
 | `ROOTFS_PATH` | `/var/lib/fc/rootfs.ext4` | Root filesystem image |
 | `SSH_KEY_PATH` | `/var/lib/fc/id_rsa` | SSH private key matching the public key baked into the rootfs |
 | `SSH_USER` | `root` | SSH login user inside the VM |
-| `SOCKET_DIR` | `/tmp` | Directory for Firecracker API sockets |
+| `VM_HOST_KEY_PATH` | `/var/lib/fc/vm_host_key.pub` | Known-host public key for the VM's sshd (prevents MITM on the internal TAP network) |
 | `PORT` | `3000` | HTTP listen port |
 | `NET_HELPER_PATH` | `/usr/local/bin/net-helper` | Path to the net-helper binary |
-| `AWS_ROLE_NAME` | `vm-role` | IAM role name forwarded to the VM via MMDS |
-| `USE_JAILER` | `false` | Enable jailer process isolation |
 | `JAILER_PATH` | `/usr/local/bin/jailer` | Path to the jailer binary |
 | `FIRECRACKER_PATH` | `/usr/local/bin/firecracker` | Path to the firecracker binary |
-| `JAILER_UID` | `0` | uid to drop privileges to inside the jail |
-| `JAILER_GID` | `0` | gid to drop privileges to inside the jail |
+| `JAILER_UID` | `0` | uid the jailer drops Firecracker to; must match the server process uid |
+| `JAILER_GID` | `0` | gid the jailer drops Firecracker to; must match the server process gid |
 | `JAILER_CHROOT_BASE` | `/srv/jailer` | Base directory for per-VM chroot trees |
 | `COGNITO_CLIENT_ID` | — | Cognito app client ID |
 | `COGNITO_CLIENT_SECRET` | — | Cognito app client secret |

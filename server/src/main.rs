@@ -37,7 +37,7 @@ use crate::{
     static_files::{serve_file_manager_js, serve_styles_css, serve_terminal_js},
     terminal::handle_ws_upgrade,
     upload::upload_file_handler,
-    vm::{refresh_all_vm_mmds, save_all_vm_rootfs},
+    vm::{refresh_all_vm_mmds, save_all_vm_rootfs, sweep_idle_vms},
 };
 
 #[tokio::main]
@@ -60,13 +60,10 @@ async fn main() -> Result<()> {
     );
     let app_state = AppState::new(app_config, pg_pool);
     let port = app_state.port;
-    cleanup_stale_vms(
-        &app_state.net_helper_path,
-        &app_state.jailer_chroot_base,
-    )
-    .await;
+    cleanup_stale_vms(&app_state.net_helper_path, &app_state.jailer_chroot_base).await;
     setup_host_networking(&app_state.net_helper_path).await;
     let mmds_refresh_task = spawn_mmds_refresh_task(app_state.clone());
+    let idle_vm_sweep_task = spawn_idle_vm_sweep_task(app_state.clone());
     let router = build_router(app_state.clone(), session_store);
     serve_router(
         router,
@@ -74,6 +71,7 @@ async fn main() -> Result<()> {
         app_state,
         deletion_task.abort_handle(),
         mmds_refresh_task.abort_handle(),
+        idle_vm_sweep_task.abort_handle(),
     )
     .await?;
     deletion_task.await??;
@@ -141,6 +139,7 @@ async fn serve_router(
     app_state: AppState,
     deletion_task_abort_handle: AbortHandle,
     mmds_refresh_abort_handle: AbortHandle,
+    idle_vm_sweep_abort_handle: AbortHandle,
 ) -> Result<()> {
     let tcp_listener = TcpListener::bind(format!("0.0.0.0:{port}"))
         .await
@@ -150,11 +149,23 @@ async fn serve_router(
         .with_graceful_shutdown(shutdown_signal(
             deletion_task_abort_handle,
             mmds_refresh_abort_handle,
+            idle_vm_sweep_abort_handle,
         ))
         .await
         .context("server error")?;
     save_all_vm_rootfs(&app_state).await;
     Ok(())
+}
+
+fn spawn_idle_vm_sweep_task(app_state: AppState) -> tokio::task::JoinHandle<()> {
+    tokio::task::spawn(async move {
+        let mut interval = tokio::time::interval(tokio::time::Duration::from_secs(30));
+        interval.tick().await;
+        loop {
+            interval.tick().await;
+            sweep_idle_vms(&app_state).await;
+        }
+    })
 }
 
 fn spawn_mmds_refresh_task(app_state: AppState) -> tokio::task::JoinHandle<()> {
@@ -171,6 +182,7 @@ fn spawn_mmds_refresh_task(app_state: AppState) -> tokio::task::JoinHandle<()> {
 async fn shutdown_signal(
     deletion_task_abort_handle: AbortHandle,
     mmds_refresh_abort_handle: AbortHandle,
+    idle_vm_sweep_abort_handle: AbortHandle,
 ) {
     let ctrl_c = async {
         if let Err(e) = signal::ctrl_c().await {
@@ -192,4 +204,5 @@ async fn shutdown_signal(
     info!("shutdown signal received, saving vm rootfs before exit");
     deletion_task_abort_handle.abort();
     mmds_refresh_abort_handle.abort();
+    idle_vm_sweep_abort_handle.abort();
 }

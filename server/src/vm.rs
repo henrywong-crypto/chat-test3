@@ -1,7 +1,8 @@
 use anyhow::Result;
 use std::{
     path::{Path, PathBuf},
-    time::SystemTime,
+    sync::atomic::Ordering,
+    time::{Duration, SystemTime},
 };
 use aws_config::default_provider::credentials::DefaultCredentialsChain;
 use aws_credential_types::{provider::ProvideCredentials, Credentials};
@@ -128,6 +129,32 @@ pub(crate) async fn refresh_all_vm_mmds(app_state: &AppState) {
             warn!(vm_id = %vm_id, "failed to refresh mmds: {e}");
         }
     }
+}
+
+const CONNECT_TIMEOUT: Duration = Duration::from_secs(60);
+
+pub(crate) async fn sweep_idle_vms(app_state: &AppState) {
+    let stale_entries: Vec<(String, VmEntry)> = collect_stale_vm_entries(app_state);
+    for (vm_id, _) in stale_entries {
+        info!(vm_id = %vm_id, "dropping idle vm (no websocket connected within timeout)");
+    }
+}
+
+fn collect_stale_vm_entries(app_state: &AppState) -> Vec<(String, VmEntry)> {
+    let Ok(mut registry) = app_state.vms.lock() else {
+        return Vec::new();
+    };
+    let stale_ids: Vec<String> = registry
+        .iter()
+        .filter(|(_, e)| {
+            !e.ws_connected.load(Ordering::Relaxed) && e.created_at.elapsed() > CONNECT_TIMEOUT
+        })
+        .map(|(id, _)| id.clone())
+        .collect();
+    stale_ids
+        .into_iter()
+        .filter_map(|id| registry.remove(&id).map(|e| (id, e)))
+        .collect()
 }
 
 pub(crate) async fn save_all_vm_rootfs(app_state: &AppState) {

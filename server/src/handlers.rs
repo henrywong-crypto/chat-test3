@@ -1,3 +1,7 @@
+use std::{
+    sync::{atomic::AtomicBool, Arc},
+    time::Instant,
+};
 use anyhow::anyhow;
 use axum::{
     extract::{Form, Path, State},
@@ -90,6 +94,8 @@ pub(crate) async fn get_or_create_terminal(
         guest_ip: vm_guard.guest_ip.clone(),
         user_id: db_user.id,
         has_iam_creds,
+        created_at: Instant::now(),
+        ws_connected: Arc::new(AtomicBool::new(false)),
         _guard: vm_guard,
     };
     register_vm(&state.vms, vm_id.clone(), vm_entry)?;

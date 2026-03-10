@@ -1,12 +1,13 @@
-use anyhow::{Context, Result};
+use anyhow::{bail, Context, Result};
 use firecracker_client::{start_instance, stop_instance};
 use nix::{
     sys::signal::{kill, Signal},
     unistd::Pid,
 };
 use std::{
+    collections::BTreeSet,
     path::{Path, PathBuf},
-    sync::atomic::{AtomicU32, Ordering},
+    sync::Mutex,
     time::Duration,
 };
 use tracing::info;
@@ -18,7 +19,18 @@ use crate::process::{
     prepare_jail_resources, spawn_firecracker_jailed, wait_for_socket,
 };
 
-pub(crate) static VM_NET_COUNTER: AtomicU32 = AtomicU32::new(0);
+static VM_NET_INDICES: Mutex<BTreeSet<u32>> = Mutex::new(BTreeSet::new());
+
+fn acquire_net_idx() -> Option<u32> {
+    let mut used = VM_NET_INDICES.lock().unwrap();
+    let idx = (0..254u32).find(|i| !used.contains(i))?;
+    used.insert(idx);
+    Some(idx)
+}
+
+fn release_net_idx(idx: u32) {
+    VM_NET_INDICES.lock().unwrap().remove(&idx);
+}
 
 pub struct JailerConfig {
     pub jailer_path: PathBuf,
@@ -45,6 +57,7 @@ pub struct VmGuard {
     pub id: String,
     pub guest_ip: String,
     pub pid: u32,
+    net_idx: u32,
     net_helper_path: PathBuf,
     tap_name: String,
     rootfs_copy: PathBuf,
@@ -75,6 +88,7 @@ impl Drop for VmGuard {
             .args(["tap-delete", &self.tap_name])
             .status();
         let _ = std::fs::remove_dir_all(&self.chroot_dir);
+        release_net_idx(self.net_idx);
     }
 }
 
@@ -91,14 +105,17 @@ async fn stop_vm(socket_path: &Path, pid: u32) {
 }
 
 pub async fn create_vm(vm_config: &VmConfig) -> Result<VmGuard> {
-    let net_idx = VM_NET_COUNTER.fetch_add(1, Ordering::Relaxed) % 254;
+    let net_idx = acquire_net_idx().context("no free network indices (254 VMs already running)")?;
     let tap_name = format_tap_name(net_idx);
     let tap_ip = format_tap_ip(net_idx);
     let mac = format_guest_mac(net_idx);
     let guest_ip = format_guest_ip(net_idx);
     let boot_args = build_vm_boot_args(&vm_config.boot_args, &guest_ip, net_idx);
 
-    create_tap(&vm_config.net_helper_path, &tap_name, &tap_ip).await?;
+    if let Err(e) = create_tap(&vm_config.net_helper_path, &tap_name, &tap_ip).await {
+        release_net_idx(net_idx);
+        bail!("failed to create tap {tap_name}: {e}");
+    }
 
     let chroot_dir = build_chroot_dir(&vm_config.jailer.chroot_base, &vm_config.id);
     let rootfs_copy = chroot_dir.join("rootfs.ext4");
@@ -130,6 +147,7 @@ pub async fn create_vm(vm_config: &VmConfig) -> Result<VmGuard> {
         id: vm_config.id.clone(),
         guest_ip,
         pid,
+        net_idx,
         net_helper_path: vm_config.net_helper_path.clone(),
         tap_name,
         rootfs_copy,

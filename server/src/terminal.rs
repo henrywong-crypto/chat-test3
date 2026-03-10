@@ -17,7 +17,7 @@ use uuid::Uuid;
 use crate::{
     auth::User,
     ssh::{connect_ssh, open_terminal_channel},
-    state::{find_vm_guest_ip_for_user, get_rootfs_lock, AppState},
+    state::{find_vm_guest_ip_for_user, get_rootfs_lock, mark_vm_ws_connected, AppState},
     vm::user_rootfs_path,
 };
 
@@ -42,6 +42,7 @@ async fn run_terminal_session(ws: WebSocket, state: AppState, vm_id: String, use
         Some(guest_ip) => guest_ip,
         None => return,
     };
+    mark_vm_ws_connected(&state.vms, &vm_id);
     if let Err(e) = run_ssh_relay(&guest_ip, &state, ws).await {
         error!("terminal session error: {e}");
     }
