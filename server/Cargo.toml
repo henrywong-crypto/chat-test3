@@ -18,7 +18,7 @@ chrono = "0.4.44"
 config = "0.15.19"
 firecracker-manager = { path = "../firecracker-manager" }
 futures = "0.3.32"
-maud = "0.27.0"
+leptos = { version = "0.7.0", features = ["ssr"] }
 handlers = { git = "https://github.com/llm-proxy-rs/cognito.git", version = "0.1.0" }
 russh = "0.57.1"
 russh-sftp = "2.1.1"

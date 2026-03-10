@@ -125,8 +125,7 @@ async fn build_directory_zip(
 ) -> Result<Vec<u8>> {
     let mut cursor = std::io::Cursor::new(Vec::new());
     let mut zip = zip::ZipWriter::new(&mut cursor);
-    let options =
-        SimpleFileOptions::default().compression_method(zip::CompressionMethod::Deflated);
+    let options = SimpleFileOptions::default().compression_method(zip::CompressionMethod::Deflated);
     let mut total_bytes: usize = 0;
     let mut dirs_to_visit = vec![dir_path.to_string()];
     while let Some(dir) = dirs_to_visit.pop() {
@@ -167,7 +166,10 @@ async fn build_directory_zip(
 
 async fn read_file_buffered(sftp: &SftpSession, path: &str) -> Result<Vec<u8>> {
     use tokio::io::AsyncReadExt;
-    let mut file = sftp.open(path).await.context("failed to open remote file")?;
+    let mut file = sftp
+        .open(path)
+        .await
+        .context("failed to open remote file")?;
     let mut buf = Vec::new();
     file.read_to_end(&mut buf)
         .await
@@ -178,8 +180,7 @@ async fn read_file_buffered(sftp: &SftpSession, path: &str) -> Result<Vec<u8>> {
 pub(crate) fn validate_within_dir(real_path: &str, allowed_dir: &str) -> Result<()> {
     let allowed_dir = allowed_dir.trim_end_matches('/');
     if !real_path.starts_with(allowed_dir)
-        || (real_path.len() > allowed_dir.len()
-            && !real_path[allowed_dir.len()..].starts_with('/'))
+        || (real_path.len() > allowed_dir.len() && !real_path[allowed_dir.len()..].starts_with('/'))
     {
         bail!("path is outside the allowed directory");
     }

@@ -38,7 +38,7 @@ fn build_cognito_state(state: &AppState) -> CognitoState {
 }
 
 pub(crate) async fn get_login_handler() -> Html<String> {
-    Html(render_login_page().into_string())
+    Html(render_login_page())
 }
 
 pub(crate) async fn get_cognito_login_handler(

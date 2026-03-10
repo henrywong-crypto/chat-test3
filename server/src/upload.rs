@@ -96,13 +96,24 @@ async fn write_file_via_sftp(
 ) -> Result<()> {
     let sftp = open_sftp_session(ssh_handle).await?;
     let resolved_path = resolve_upload_path(&sftp, remote_path, upload_dir).await?;
-    let mut file = sftp.create(&resolved_path).await.context("failed to create remote file")?;
-    file.write_all(data).await.context("failed to write file data")?;
-    file.shutdown().await.context("failed to close remote file")?;
+    let mut file = sftp
+        .create(&resolved_path)
+        .await
+        .context("failed to create remote file")?;
+    file.write_all(data)
+        .await
+        .context("failed to write file data")?;
+    file.shutdown()
+        .await
+        .context("failed to close remote file")?;
     Ok(())
 }
 
-async fn resolve_upload_path(sftp: &SftpSession, remote_path: &str, upload_dir: &str) -> Result<String> {
+async fn resolve_upload_path(
+    sftp: &SftpSession,
+    remote_path: &str,
+    upload_dir: &str,
+) -> Result<String> {
     let path = std::path::Path::new(remote_path);
     let parent = path.parent().and_then(|p| p.to_str()).unwrap_or(".");
     let filename = path
@@ -124,8 +135,7 @@ async fn resolve_upload_path(sftp: &SftpSession, remote_path: &str, upload_dir: 
 fn validate_within_dir(real_path: &str, allowed_dir: &str) -> Result<()> {
     let allowed_dir = allowed_dir.trim_end_matches('/');
     if !real_path.starts_with(allowed_dir)
-        || (real_path.len() > allowed_dir.len()
-            && !real_path[allowed_dir.len()..].starts_with('/'))
+        || (real_path.len() > allowed_dir.len() && !real_path[allowed_dir.len()..].starts_with('/'))
     {
         bail!("path is outside the allowed directory");
     }

@@ -150,11 +150,22 @@ pub(crate) async fn save_all_vm_rootfs(app_state: &AppState) {
         return;
     }
     for (vm_id, vm_entry) in vm_entries {
-        save_vm_entry_rootfs(&app_state.user_rootfs_dir, &vm_id, vm_entry, &app_state.rootfs_locks).await;
+        save_vm_entry_rootfs(
+            &app_state.user_rootfs_dir,
+            &vm_id,
+            vm_entry,
+            &app_state.rootfs_locks,
+        )
+        .await;
     }
 }
 
-async fn save_vm_entry_rootfs(user_rootfs_dir: &Path, vm_id: &str, vm_entry: VmEntry, rootfs_locks: &RootfsLocks) {
+async fn save_vm_entry_rootfs(
+    user_rootfs_dir: &Path,
+    vm_id: &str,
+    vm_entry: VmEntry,
+    rootfs_locks: &RootfsLocks,
+) {
     let rootfs_path = user_rootfs_path(user_rootfs_dir, vm_entry.user_id);
     let lock = get_rootfs_lock(rootfs_locks, vm_entry.user_id);
     let _guard = lock.lock().await;

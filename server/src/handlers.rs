@@ -15,7 +15,10 @@ use crate::{
     auth::User,
     state::{AppError, AppState, VmEntry, VmRegistry},
     templates::render_terminal_page,
-    vm::{build_vm_config, ensure_user_rootfs, fetch_host_iam_credentials, find_user_rootfs, user_rootfs_path},
+    vm::{
+        build_vm_config, ensure_user_rootfs, fetch_host_iam_credentials, find_user_rootfs,
+        user_rootfs_path,
+    },
 };
 
 #[derive(Deserialize)]
@@ -71,7 +74,13 @@ pub(crate) async fn get_or_create_terminal(
 
     let iam_creds = fetch_host_iam_credentials().await;
     let has_iam_creds = iam_creds.is_some();
-    let user_rootfs = ensure_user_rootfs(&state.user_rootfs_dir, &state.rootfs_path, db_user.id, &state.rootfs_locks).await?;
+    let user_rootfs = ensure_user_rootfs(
+        &state.user_rootfs_dir,
+        &state.rootfs_path,
+        db_user.id,
+        &state.rootfs_locks,
+    )
+    .await?;
     info!(user_id = %db_user.id, rootfs = %user_rootfs.display(), "using rootfs");
     let vm_config = build_vm_config(&state, iam_creds, Some(&user_rootfs))?;
     let vm_guard = create_vm(&vm_config).await?;
@@ -87,7 +96,13 @@ pub(crate) async fn get_or_create_terminal(
 
     let csrf_token = get_csrf_token(&session).await;
     let has_user_rootfs = find_user_rootfs(&state.user_rootfs_dir, db_user.id).is_some();
-    Ok(Html(render_terminal_page(&vm_id, &csrf_token, &state.upload_dir, has_user_rootfs).into_string()).into_response())
+    Ok(Html(render_terminal_page(
+        &vm_id,
+        &csrf_token,
+        &state.upload_dir,
+        has_user_rootfs,
+    ))
+    .into_response())
 }
 
 pub(crate) async fn delete_user_rootfs_handler(
@@ -134,5 +149,11 @@ pub(crate) async fn get_terminal_page(
     }
     let csrf_token = get_csrf_token(&session).await;
     let has_user_rootfs = find_user_rootfs(&state.user_rootfs_dir, db_user.id).is_some();
-    Html(render_terminal_page(&vm_id, &csrf_token, &state.upload_dir, has_user_rootfs).into_string()).into_response()
+    Html(render_terminal_page(
+        &vm_id,
+        &csrf_token,
+        &state.upload_dir,
+        has_user_rootfs,
+    ))
+    .into_response()
 }
