@@ -115,9 +115,18 @@ function renderBreadcrumb(path) {
     breadcrumb.textContent = normalized;
     return;
   }
-  const rootSpan = document.createElement('span');
-  rootSpan.textContent = '~';
-  breadcrumb.appendChild(rootSpan);
+  const isAtRoot = normalized === root;
+  if (isAtRoot) {
+    const rootSpan = document.createElement('span');
+    rootSpan.textContent = 'Home';
+    breadcrumb.appendChild(rootSpan);
+  } else {
+    const rootBtn = document.createElement('button');
+    rootBtn.className = 'hover:underline cursor-pointer';
+    rootBtn.textContent = 'Home';
+    rootBtn.onclick = () => loadDir(root);
+    breadcrumb.appendChild(rootBtn);
+  }
   const suffix = normalized.slice(root.length);
   const subParts = suffix.split('/').filter(Boolean);
   subParts.forEach((part, i) => {
