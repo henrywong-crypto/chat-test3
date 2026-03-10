@@ -9,6 +9,7 @@ use axum::{
 use bytes::Bytes;
 use futures::{SinkExt, StreamExt};
 use russh::{client::Msg, Channel, ChannelMsg};
+use std::time::Duration;
 use store::upsert_user;
 use tracing::{error, info};
 use uuid::Uuid;
@@ -80,6 +81,8 @@ async fn run_ssh_relay(guest_ip: &str, state: &AppState, ws: WebSocket) -> anyho
     .await?;
     let mut ssh_channel = open_terminal_channel(&mut ssh_handle).await?;
     let (mut ws_sender, mut ws_receiver) = ws.split();
+    let mut keepalive = tokio::time::interval(Duration::from_secs(30));
+    keepalive.tick().await; // skip the immediate first tick
     loop {
         tokio::select! {
             msg = ssh_channel.wait() => {
@@ -103,7 +106,16 @@ async fn run_ssh_relay(guest_ip: &str, state: &AppState, ws: WebSocket) -> anyho
                     Some(Ok(Message::Text(text))) => {
                         handle_resize_message(&mut ssh_channel, &text).await;
                     }
+                    Some(Ok(Message::Ping(data))) => {
+                        let _ = ws_sender.send(Message::Pong(data)).await;
+                    }
+                    Some(Ok(Message::Pong(_))) => {}
                     _ => break,
+                }
+            }
+            _ = keepalive.tick() => {
+                if ws_sender.send(Message::Ping(Bytes::new())).await.is_err() {
+                    break;
                 }
             }
         }
