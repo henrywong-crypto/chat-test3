@@ -4,3 +4,7 @@
 @plugin "daisyui" {
   themes: dark;
 }
+
+.xterm {
+  height: 100%;
+}

@@ -87,7 +87,7 @@ fn TerminalPage(
                 />
                 <TerminalTopbar csrf_token=csrf_token has_user_rootfs=has_user_rootfs/>
                 <div class="flex flex-1 min-h-0">
-                    <div id="term-container" class="flex-1 min-h-0 overflow-hidden bg-black"/>
+                    <div id="term-container" class="flex-1 min-h-0 bg-black"/>
                     <FilesPanel/>
                 </div>
                 <script src=app_js_src defer/>

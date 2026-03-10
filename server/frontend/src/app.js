@@ -15,7 +15,7 @@ term.loadAddon(fitAddon);
 
 const container = document.getElementById('term-container');
 term.open(container);
-requestAnimationFrame(() => requestAnimationFrame(() => fitAddon.fit()));
+fitAddon.fit();
 term.focus();
 
 const ws = new WebSocket(
@@ -50,14 +50,12 @@ function closePanel() {
   const panel = document.getElementById('files-panel');
   panel.classList.remove('flex');
   panel.classList.add('hidden');
-  fitAddon.fit();
 }
 
 function toggleFiles() {
   const panel = document.getElementById('files-panel');
   const isOpen = panel.classList.toggle('flex');
   panel.classList.toggle('hidden', !isOpen);
-  fitAddon.fit();
   if (isOpen && !fmOpened) {
     fmOpened = true;
     loadDir(fmCurrentPath);
