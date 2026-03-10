@@ -125,6 +125,8 @@ pub(crate) fn render_terminal_page(vm_id: &str, csrf_token: &str, upload_dir: &s
                     .file-entry:hover { background: var(--surface2); }
                     .file-entry-name { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; flex: 1; }
                     .file-entry-size { color: var(--text-muted); font-size: 11px; white-space: nowrap; }
+                    .file-entry-dl { color: var(--text-muted); font-size: 11px; white-space: nowrap; opacity: 0; padding: 0 2px; }
+                    .file-entry:hover .file-entry-dl { opacity: 1; }
                     #files-footer {
                         padding: 8px 12px; border-top: 1px solid var(--border);
                         display: flex; gap: 8px; align-items: center; flex-shrink: 0;
@@ -233,14 +235,18 @@ function renderEntries(path, entries) {{
   entries.forEach(function(entry) {{
     const row = document.createElement('div');
     row.className = 'file-entry';
-    const icon = entry.is_dir ? '📁' : '📄';
-    const sizeHtml = entry.is_dir ? '' : '<span class="file-entry-size">' + escHtml(formatSize(entry.size)) + '</span>';
-    row.innerHTML = '<span>' + icon + '</span><span class="file-entry-name">' + escHtml(entry.name) + '</span>' + sizeHtml;
+    const entryPath = path.replace(/\/$/, '') + '/' + entry.name;
     if (entry.is_dir) {{
-      row.onclick = function() {{ loadDir(path.replace(/\/$/, '') + '/' + entry.name); }};
+      row.innerHTML = '<span>📁</span><span class="file-entry-name">' + escHtml(entry.name) + '</span><span class="file-entry-dl" title="Download as zip">↓</span>';
+      row.onclick = function() {{ loadDir(entryPath); }};
+      row.querySelector('.file-entry-dl').onclick = function(e) {{
+        e.stopPropagation();
+        window.open('/sessions/' + vmId + '/download?path=' + encodeURIComponent(entryPath), '_blank');
+      }};
     }} else {{
+      row.innerHTML = '<span>📄</span><span class="file-entry-name">' + escHtml(entry.name) + '</span><span class="file-entry-size">' + escHtml(formatSize(entry.size)) + '</span>';
       row.onclick = function() {{
-        window.open('/sessions/' + vmId + '/download?path=' + encodeURIComponent(path.replace(/\/$/, '') + '/' + entry.name), '_blank');
+        window.open('/sessions/' + vmId + '/download?path=' + encodeURIComponent(entryPath), '_blank');
       }};
     }}
     list.appendChild(row);
