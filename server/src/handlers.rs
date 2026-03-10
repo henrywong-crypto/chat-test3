@@ -18,6 +18,7 @@ use uuid::Uuid;
 use crate::{
     auth::User,
     state::{AppError, AppState, VmEntry, VmRegistry},
+    static_files::{app_js_version, styles_css_version},
     templates::render_terminal_page,
     vm::{
         build_vm_config, ensure_user_rootfs, fetch_host_iam_credentials, find_user_rootfs,
@@ -106,6 +107,8 @@ pub(crate) async fn get_or_create_terminal(
         &csrf_token,
         &state.upload_dir,
         has_user_rootfs,
+        app_js_version(),
+        styles_css_version(),
     ))
     .into_response())
 }
@@ -159,6 +162,8 @@ pub(crate) async fn get_terminal_page(
         &csrf_token,
         &state.upload_dir,
         has_user_rootfs,
+        app_js_version(),
+        styles_css_version(),
     ))
     .into_response()
 }

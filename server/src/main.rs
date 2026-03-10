@@ -34,7 +34,7 @@ use crate::{
     files::list_files_handler,
     handlers::{delete_user_rootfs_handler, get_or_create_terminal, get_terminal_page},
     state::{load_config, AppState},
-    static_files::{serve_file_manager_js, serve_styles_css, serve_terminal_js},
+    static_files::{serve_app_js, serve_styles_css},
     terminal::handle_ws_upgrade,
     upload::upload_file_handler,
     vm::{refresh_all_vm_mmds, save_all_vm_rootfs, sweep_idle_vms},
@@ -92,8 +92,7 @@ fn build_router(app_state: AppState, session_store: PostgresStore) -> Router {
         .route("/login/cognito", get(get_cognito_login_handler))
         .route("/logout", get(get_logout_handler))
         .route("/callback", get(get_callback_handler))
-        .route("/static/terminal.js", get(serve_terminal_js))
-        .route("/static/file-manager.js", get(serve_file_manager_js))
+        .route("/static/app.js", get(serve_app_js))
         .route("/static/styles.css", get(serve_styles_css))
         .with_state(app_state)
         .layer(session_layer)

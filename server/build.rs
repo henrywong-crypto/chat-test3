@@ -6,8 +6,7 @@ fn main() {
     let src_dir = frontend_dir.join("src");
     let dist_dir = frontend_dir.join("dist");
 
-    println!("cargo:rerun-if-changed={}", src_dir.join("terminal.js").display());
-    println!("cargo:rerun-if-changed={}", src_dir.join("file_manager.js").display());
+    println!("cargo:rerun-if-changed={}", src_dir.join("app.js").display());
     println!("cargo:rerun-if-changed={}", src_dir.join("styles.css").display());
     println!("cargo:rerun-if-changed={}", frontend_dir.join("package.json").display());
 
@@ -22,7 +21,7 @@ fn main() {
         run_command(Command::new("npm").arg("install").current_dir(&frontend_dir));
     }
 
-    run_command(Command::new("node").arg("build.mjs").current_dir(&frontend_dir));
+    run_command(Command::new("npm").args(["run", "build"]).current_dir(&frontend_dir));
 }
 
 fn node_available() -> bool {

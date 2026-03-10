@@ -1,8 +1,8 @@
 {
   "private": true,
   "scripts": {
-    "build": "esbuild src/terminal.js src/file_manager.js --bundle --minify --outdir=dist && esbuild src/styles.css --bundle --minify --outdir=dist",
-    "watch": "esbuild src/terminal.js src/file_manager.js --bundle --minify --outdir=dist --watch & esbuild src/styles.css --bundle --minify --outdir=dist --watch"
+    "build": "esbuild src/app.js --bundle --minify --outdir=dist && esbuild src/styles.css --bundle --minify --outdir=dist",
+    "watch": "esbuild src/app.js --bundle --minify --outdir=dist --watch & esbuild src/styles.css --bundle --minify --outdir=dist --watch"
   },
   "devDependencies": {
     "@xterm/addon-fit": "^0.10.0",

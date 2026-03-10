@@ -9,10 +9,14 @@ pub(crate) fn render_terminal_page(
     csrf_token: &str,
     upload_dir: &str,
     has_user_rootfs: bool,
+    app_js_version: &str,
+    styles_css_version: &str,
 ) -> String {
     let vm_id = vm_id.to_owned();
     let csrf_token = csrf_token.to_owned();
     let upload_dir = upload_dir.to_owned();
+    let app_js_version = app_js_version.to_owned();
+    let styles_css_version = styles_css_version.to_owned();
     Owner::new().with(move || {
         view! {
             <TerminalPage
@@ -20,6 +24,8 @@ pub(crate) fn render_terminal_page(
                 csrf_token=csrf_token
                 upload_dir=upload_dir
                 has_user_rootfs=has_user_rootfs
+                app_js_version=app_js_version
+                styles_css_version=styles_css_version
             />
         }
         .to_html()
@@ -53,16 +59,20 @@ fn TerminalPage(
     csrf_token: String,
     upload_dir: String,
     has_user_rootfs: bool,
+    app_js_version: String,
+    styles_css_version: String,
 ) -> impl IntoView {
     let short_id = format!("{}…", vm_id.get(..8).unwrap_or(&vm_id));
     let upload_action = format!("/sessions/{vm_id}/upload");
+    let app_js_src = format!("/static/app.js?v={app_js_version}");
+    let styles_css_href = format!("/static/styles.css?v={styles_css_version}");
     view! {
         <!DOCTYPE html>
         <html lang="en">
             <head>
                 <meta charset="utf-8"/>
                 <title>"WebCode — " {short_id.clone()}</title>
-                <link rel="stylesheet" href="/static/styles.css"/>
+                <link rel="stylesheet" href=styles_css_href/>
             </head>
             <body class="terminal-page">
                 <div
@@ -78,8 +88,7 @@ fn TerminalPage(
                     <div id="term-container"/>
                     <FilesPanel/>
                 </div>
-                <script src="/static/terminal.js" defer/>
-                <script src="/static/file-manager.js" defer/>
+                <script src=app_js_src defer/>
             </body>
         </html>
     }
