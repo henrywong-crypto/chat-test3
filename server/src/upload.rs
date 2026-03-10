@@ -1,22 +1,17 @@
-use anyhow::{anyhow, bail, Context, Result};
+use anyhow::{anyhow, Context, Result};
 use axum::{
     extract::{Multipart, Path, State},
     http::StatusCode,
     response::{IntoResponse, Response},
 };
 use bytes::Bytes;
-use russh::client::Handle;
-use russh_sftp::client::SftpSession;
-use std::path::Path as StdPath;
 use store::upsert_user;
-use tokio::io::AsyncWriteExt;
 use tower_sessions::Session;
 use uuid::Uuid;
 
 use crate::{
     auth::User,
-    download::validate_within_dir,
-    ssh::{connect_ssh, open_sftp_session, SshClient},
+    ssh::{connect_ssh, open_sftp_session},
     state::{find_vm_guest_ip_for_user, AppError, AppState},
 };
 
@@ -46,7 +41,8 @@ pub(crate) async fn upload_file_handler(
         &state.vm_host_key_path,
     )
     .await?;
-    write_file_via_sftp(&mut ssh_handle, &remote_path, &state.upload_dir, &data).await?;
+    let sftp = open_sftp_session(&mut ssh_handle).await?;
+    upload::write_file_via_sftp(sftp, &remote_path, &state.upload_dir, &data).await?;
     Ok((StatusCode::OK, "").into_response())
 }
 
@@ -89,48 +85,3 @@ async fn extract_upload_fields(mut multipart: Multipart) -> Result<(String, Stri
     let file_data = file_data.ok_or_else(|| anyhow!("missing 'file' field"))?;
     Ok((csrf_token, remote_path, file_data))
 }
-
-async fn write_file_via_sftp(
-    ssh_handle: &mut Handle<SshClient>,
-    remote_path: &str,
-    upload_dir: &str,
-    data: &[u8],
-) -> Result<()> {
-    let sftp = open_sftp_session(ssh_handle).await?;
-    let resolved_path = resolve_upload_path(&sftp, remote_path, upload_dir).await?;
-    let mut file = sftp
-        .create(&resolved_path)
-        .await
-        .context("failed to create remote file")?;
-    file.write_all(data)
-        .await
-        .context("failed to write file data")?;
-    file.shutdown()
-        .await
-        .context("failed to close remote file")?;
-    Ok(())
-}
-
-async fn resolve_upload_path(
-    sftp: &SftpSession,
-    remote_path: &str,
-    upload_dir: &str,
-) -> Result<String> {
-    let path = StdPath::new(remote_path);
-    let parent = path.parent().and_then(|p| p.to_str()).unwrap_or(".");
-    let filename = path
-        .file_name()
-        .and_then(|f| f.to_str())
-        .ok_or_else(|| anyhow!("upload path has no filename"))?;
-    if filename == ".." {
-        bail!("upload path has no filename");
-    }
-    let canonical_parent = sftp
-        .canonicalize(parent)
-        .await
-        .context("failed to resolve upload directory")?;
-    let resolved = format!("{}/{}", canonical_parent.trim_end_matches('/'), filename);
-    validate_within_dir(&resolved, upload_dir)?;
-    Ok(resolved)
-}
-

@@ -1,9 +1,11 @@
 [workspace]
 members = [
+    "download",
     "firecracker-client",
     "firecracker-manager",
     "net-helper",
     "server",
     "store",
+    "upload",
 ]
 resolver = "2"
