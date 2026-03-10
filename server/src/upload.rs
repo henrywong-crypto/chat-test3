@@ -33,8 +33,10 @@ pub(crate) async fn upload_file_handler(
     if !validate_csrf(&session, &csrf_token).await {
         return Ok((StatusCode::FORBIDDEN, "Forbidden").into_response());
     }
-    let guest_ip = find_vm_guest_ip_for_user(&state.vms, &vm_id, db_user.id)
-        .ok_or_else(|| anyhow!("Session {vm_id} not found"))?;
+    let guest_ip = match find_vm_guest_ip_for_user(&state.vms, &vm_id, db_user.id) {
+        Some(ip) => ip,
+        None => return Ok((StatusCode::NOT_FOUND, "Session not found or expired").into_response()),
+    };
     let mut ssh_handle = connect_ssh(
         &guest_ip,
         &state.ssh_key_path,

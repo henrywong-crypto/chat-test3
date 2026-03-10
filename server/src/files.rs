@@ -1,4 +1,4 @@
-use anyhow::{anyhow, Context, Result};
+use anyhow::{Context, Result};
 use axum::{
     extract::{Path, Query, State},
     http::StatusCode,
@@ -44,8 +44,10 @@ pub(crate) async fn list_files_handler(
         return Ok((StatusCode::NOT_FOUND, "Not found").into_response());
     }
     let db_user = upsert_user(&state.db, &user.email).await?;
-    let guest_ip = find_vm_guest_ip_for_user(&state.vms, &vm_id, db_user.id)
-        .ok_or_else(|| anyhow!("Session {vm_id} not found"))?;
+    let guest_ip = match find_vm_guest_ip_for_user(&state.vms, &vm_id, db_user.id) {
+        Some(ip) => ip,
+        None => return Ok((StatusCode::NOT_FOUND, "Session not found or expired").into_response()),
+    };
     let mut ssh_handle = connect_ssh(
         &guest_ip,
         &state.ssh_key_path,
