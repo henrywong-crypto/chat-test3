@@ -13,12 +13,24 @@ fn main() {
 
     fs::create_dir_all(&dist_dir).expect("failed to create frontend/dist");
 
+    if !node_available() {
+        return;
+    }
+
     let node_modules = frontend_dir.join("node_modules");
     if !node_modules.exists() {
         run_command(Command::new("npm").arg("install").current_dir(&frontend_dir));
     }
 
     run_command(Command::new("node").arg("build.mjs").current_dir(&frontend_dir));
+}
+
+fn node_available() -> bool {
+    Command::new("node")
+        .arg("--version")
+        .output()
+        .map(|o| o.status.success())
+        .unwrap_or(false)
 }
 
 fn run_command(command: &mut Command) {
