@@ -17,7 +17,7 @@ use uuid::Uuid;
 
 use crate::{
     auth::User,
-    state::{AppError, AppState, VmEntry, VmRegistry},
+    state::{get_rootfs_lock, AppError, AppState, VmEntry, VmRegistry},
     static_files::{app_js_version, styles_css_version},
     templates::render_terminal_page,
     vm::{
@@ -143,7 +143,10 @@ pub(crate) async fn delete_user_rootfs_handler(
     let db_user = upsert_user(&state.db, &user.email).await?;
     let rootfs_path = user_rootfs_path(&state.user_rootfs_dir, db_user.id);
     info!(user_id = %db_user.id, path = %rootfs_path.display(), "deleting saved rootfs");
+    let lock = get_rootfs_lock(&state.rootfs_locks, db_user.id);
+    let _guard = lock.lock().await;
     let _ = tokio::fs::remove_file(&rootfs_path).await;
+    drop(_guard);
     remove_user_vm(&state.vms, db_user.id);
     Ok(Redirect::to("/").into_response())
 }
