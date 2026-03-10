@@ -57,19 +57,25 @@ pub struct Vm {
     pub id: String,
     pub guest_ip: String,
     pub pid: u32,
-    pub socket_path: PathBuf,
     net_idx: u32,
     net_helper_path: PathBuf,
-    tap_name: String,
-    rootfs_copy: PathBuf,
     chroot_dir: PathBuf,
 }
 
 impl Vm {
+    pub fn socket_path(&self) -> PathBuf {
+        self.chroot_dir.join("run/firecracker.socket")
+    }
+
+    fn rootfs_copy(&self) -> PathBuf {
+        self.chroot_dir.join("rootfs.ext4")
+    }
+
     pub async fn save_rootfs(&self, dest: &Path) -> Result<()> {
-        stop_vm(&self.socket_path, self.pid).await;
-        if tokio::fs::rename(&self.rootfs_copy, dest).await.is_err() {
-            tokio::fs::copy(&self.rootfs_copy, dest)
+        stop_vm(&self.socket_path(), self.pid).await;
+        let rootfs_copy = self.rootfs_copy();
+        if tokio::fs::rename(&rootfs_copy, dest).await.is_err() {
+            tokio::fs::copy(&rootfs_copy, dest)
                 .await
                 .with_context(|| format!("failed to copy rootfs to {}", dest.display()))?;
         }
@@ -80,8 +86,9 @@ impl Vm {
 impl Drop for Vm {
     fn drop(&mut self) {
         let _ = kill(Pid::from_raw(self.pid as i32), Signal::SIGTERM);
+        let tap_name = format_tap_name(self.net_idx);
         let _ = std::process::Command::new(&self.net_helper_path)
-            .args(["tap-delete", &self.tap_name])
+            .args(["tap-delete", &tap_name])
             .status();
         let _ = std::fs::remove_dir_all(&self.chroot_dir);
         release_net_idx(self.net_idx);
@@ -130,10 +137,10 @@ async fn launch_vm(
     let mac = format_guest_mac(net_idx);
     let guest_ip = format_guest_ip(net_idx);
     let boot_args = build_vm_boot_args(&vm_config.boot_args, &guest_ip, net_idx);
-    let rootfs_copy = chroot_dir.join("rootfs.ext4");
-    let socket_path = chroot_dir.join("run/firecracker.socket");
     let kernel_path_in_jail = PathBuf::from("/vmlinux");
     let rootfs_path_in_jail = PathBuf::from("/rootfs.ext4");
+    let rootfs_copy = chroot_dir.join("rootfs.ext4");
+    let socket_path = chroot_dir.join("run/firecracker.socket");
 
     prepare_jail_resources(chroot_dir, &vm_config.kernel_path).await?;
     info!(src = %vm_config.rootfs_path.display(), dst = %rootfs_copy.display(), "copying rootfs");
@@ -161,9 +168,6 @@ async fn launch_vm(
         pid,
         net_idx,
         net_helper_path: vm_config.net_helper_path.clone(),
-        tap_name: tap_name.to_string(),
-        rootfs_copy,
-        socket_path,
         chroot_dir: chroot_dir.to_path_buf(),
     })
 }

@@ -116,7 +116,7 @@ pub(crate) async fn refresh_all_vm_mmds(app_state: &AppState) {
         registry
             .iter()
             .filter(|(_, e)| e.has_iam_creds)
-            .map(|(vm_id, e)| (vm_id.clone(), e.vm.socket_path.clone()))
+            .map(|(vm_id, e)| (vm_id.clone(), e.vm.socket_path()))
             .collect()
     };
     for (vm_id, socket_path) in vm_targets {
