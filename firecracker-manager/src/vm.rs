@@ -1,4 +1,4 @@
-use anyhow::{bail, Context, Result};
+use anyhow::{Context, Result};
 use firecracker_client::{start_instance, stop_instance};
 use nix::{
     sys::signal::{kill, Signal},
@@ -13,7 +13,7 @@ use std::{
 use tracing::info;
 
 use crate::configure::configure_vm;
-use crate::network::{create_tap, format_guest_ip, format_guest_mac, format_tap_ip, format_tap_name};
+use crate::network::{create_tap, delete_tap, format_guest_ip, format_guest_mac, format_tap_ip, format_tap_name};
 use crate::process::{
     build_chroot_dir, build_vm_boot_args, copy_rootfs,
     prepare_jail_resources, spawn_firecracker_jailed, wait_for_socket,
@@ -94,36 +94,60 @@ impl Drop for VmGuard {
 
 async fn stop_vm(socket_path: &Path, pid: u32) {
     let _ = stop_instance(socket_path).await;
-    let deadline = tokio::time::Instant::now() + Duration::from_secs(10);
-    while tokio::time::Instant::now() < deadline {
-        if !std::path::Path::new(&format!("/proc/{pid}")).exists() {
+    if tokio::time::timeout(Duration::from_secs(10), wait_for_process_exit(pid))
+        .await
+        .is_err()
+    {
+        let _ = kill(Pid::from_raw(pid as i32), Signal::SIGKILL);
+    }
+}
+
+async fn wait_for_process_exit(pid: u32) {
+    loop {
+        if !Path::new(&format!("/proc/{pid}")).exists() {
             return;
         }
         tokio::time::sleep(Duration::from_millis(100)).await;
     }
-    let _ = kill(Pid::from_raw(pid as i32), Signal::SIGKILL);
 }
 
 pub async fn create_vm(vm_config: &VmConfig) -> Result<VmGuard> {
     let net_idx = acquire_net_idx().context("no free network indices (254 VMs already running)")?;
     let tap_name = format_tap_name(net_idx);
-    let tap_ip = format_tap_ip(net_idx);
+    create_tap(&vm_config.net_helper_path, &tap_name, &format_tap_ip(net_idx))
+        .await
+        .inspect_err(|_| release_net_idx(net_idx))?;
+    setup_vm(vm_config, net_idx, &tap_name).await
+}
+
+async fn setup_vm(vm_config: &VmConfig, net_idx: u32, tap_name: &str) -> Result<VmGuard> {
+    let chroot_dir = build_chroot_dir(&vm_config.jailer.chroot_base, &vm_config.id);
+    match launch_vm(vm_config, net_idx, tap_name, &chroot_dir).await {
+        Ok(vm_guard) => Ok(vm_guard),
+        Err(e) => {
+            delete_tap(&vm_config.net_helper_path, tap_name).await;
+            release_net_idx(net_idx);
+            let _ = tokio::fs::remove_dir_all(&chroot_dir).await;
+            Err(e)
+        }
+    }
+}
+
+async fn launch_vm(
+    vm_config: &VmConfig,
+    net_idx: u32,
+    tap_name: &str,
+    chroot_dir: &Path,
+) -> Result<VmGuard> {
     let mac = format_guest_mac(net_idx);
     let guest_ip = format_guest_ip(net_idx);
     let boot_args = build_vm_boot_args(&vm_config.boot_args, &guest_ip, net_idx);
-
-    if let Err(e) = create_tap(&vm_config.net_helper_path, &tap_name, &tap_ip).await {
-        release_net_idx(net_idx);
-        bail!("failed to create tap {tap_name}: {e}");
-    }
-
-    let chroot_dir = build_chroot_dir(&vm_config.jailer.chroot_base, &vm_config.id);
     let rootfs_copy = chroot_dir.join("rootfs.ext4");
     let socket_path = chroot_dir.join("run/firecracker.socket");
     let kernel_path_in_jail = PathBuf::from("/vmlinux");
     let rootfs_path_in_jail = PathBuf::from("/rootfs.ext4");
 
-    prepare_jail_resources(&chroot_dir, &vm_config.kernel_path).await?;
+    prepare_jail_resources(chroot_dir, &vm_config.kernel_path).await?;
     info!(src = %vm_config.rootfs_path.display(), dst = %rootfs_copy.display(), "copying rootfs");
     copy_rootfs(&vm_config.rootfs_path, &rootfs_copy).await?;
     let child = spawn_firecracker_jailed(&vm_config.id, &vm_config.jailer)?;
@@ -136,7 +160,7 @@ pub async fn create_vm(vm_config: &VmConfig) -> Result<VmGuard> {
         &rootfs_path_in_jail,
         &kernel_path_in_jail,
         vm_config,
-        &tap_name,
+        tap_name,
         &mac,
         &boot_args,
     )
@@ -149,9 +173,9 @@ pub async fn create_vm(vm_config: &VmConfig) -> Result<VmGuard> {
         pid,
         net_idx,
         net_helper_path: vm_config.net_helper_path.clone(),
-        tap_name,
+        tap_name: tap_name.to_string(),
         rootfs_copy,
         socket_path,
-        chroot_dir,
+        chroot_dir: chroot_dir.to_path_buf(),
     })
 }
