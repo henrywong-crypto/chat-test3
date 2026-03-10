@@ -6,7 +6,7 @@ use axum::{
     response::IntoResponse,
 };
 use bytes::Bytes;
-use futures::{channel::mpsc, Stream};
+use futures::{channel::mpsc, SinkExt, Stream};
 use russh::client::Handle;
 use russh_sftp::client::{fs::File as SftpFile, SftpSession};
 use serde::Deserialize;
@@ -223,17 +223,22 @@ fn write_zip_to_channel(
     let options =
         SimpleFileOptions::default().compression_method(zip::CompressionMethod::Deflated);
     let mut writer = SeekableChannelWriter::new(zip_tx);
-    let mut zip = zip::ZipWriter::new(&mut writer);
-    while let Some((name, data)) = file_rx.blocking_recv() {
-        if zip.start_file(&name, options).is_err() {
-            return;
+    let zip_ok = {
+        let mut zip = zip::ZipWriter::new(&mut writer);
+        let mut ok = true;
+        while let Some((name, data)) = file_rx.blocking_recv() {
+            if zip.start_file(&name, options).is_err()
+                || io::Write::write_all(&mut zip, &data).is_err()
+            {
+                ok = false;
+                break;
+            }
         }
-        if io::Write::write_all(&mut zip, &data).is_err() {
-            return;
-        }
-    }
-    if let Ok(inner) = zip.finish() {
-        let _ = inner.flush_remaining();
+        ok && zip.finish().is_ok()
+        // zip is dropped here, releasing the &mut writer borrow
+    };
+    if zip_ok {
+        let _ = writer.flush_remaining();
     }
 }
 
@@ -278,7 +283,7 @@ impl SeekableChannelWriter {
     }
 
     /// Flush all remaining buffered bytes after `zip.finish()`.
-    fn flush_remaining(mut self) -> io::Result<()> {
+    fn flush_remaining(&mut self) -> io::Result<()> {
         if self.buf.is_empty() {
             return Ok(());
         }
