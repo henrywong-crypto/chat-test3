@@ -37,10 +37,6 @@ new ResizeObserver(() => fitAddon.fit()).observe(container);
 
 // ── File manager ──────────────────────────────────────────────────────────────
 
-const ICON_DIR  = '▸';
-const ICON_FILE = '·';
-const ICON_UP   = '‹';
-
 let fmCurrentPath = fmUploadDir;
 let fmOpened = false;
 
@@ -80,12 +76,12 @@ function renderEntries(path, entries) {
   const list = document.getElementById('files-list');
   list.innerHTML = '';
   if (path !== fmUploadDir) {
-    list.appendChild(buildEntryRow(ICON_UP, 'text-info', '..', () => loadDir(parentPath(path))));
+    list.appendChild(buildEntryRow('..', 'opacity-50 flex-1 truncate', () => loadDir(parentPath(path))));
   }
   for (const entry of entries) {
     const entryPath = path.replace(/\/$/, '') + '/' + entry.name;
     if (entry.is_dir) {
-      const row = buildEntryRow(ICON_DIR, 'text-info', entry.name, () => loadDir(entryPath));
+      const row = buildEntryRow(entry.name, 'text-info flex-1 truncate', () => loadDir(entryPath));
       const dl = document.createElement('span');
       dl.className = 'text-xs opacity-40 hover:opacity-100 px-1 cursor-pointer';
       dl.title = 'Download as zip';
@@ -94,7 +90,7 @@ function renderEntries(path, entries) {
       row.appendChild(dl);
       list.appendChild(row);
     } else {
-      const row = buildEntryRow(ICON_FILE, 'opacity-40', entry.name, () => { window.location.href = '/sessions/' + vmId + '/download?path=' + encodeURIComponent(entryPath); });
+      const row = buildEntryRow(entry.name, 'flex-1 truncate', () => { window.location.href = '/sessions/' + vmId + '/download?path=' + encodeURIComponent(entryPath); });
       const size = document.createElement('span');
       size.className = 'text-xs opacity-50 whitespace-nowrap';
       size.textContent = formatSize(entry.size);
@@ -146,17 +142,13 @@ function renderBreadcrumb(path) {
   });
 }
 
-function buildEntryRow(icon, iconClass, name, onclick) {
+function buildEntryRow(name, nameClass, onclick) {
   const row = document.createElement('div');
   row.className = 'group flex items-center gap-2 px-3 py-1.5 cursor-pointer border-b border-base-300 text-xs hover:bg-base-300';
   row.onclick = onclick;
-  const iconEl = document.createElement('span');
-  iconEl.className = iconClass;
-  iconEl.textContent = icon;
   const nameEl = document.createElement('span');
-  nameEl.className = 'flex-1 truncate';
+  nameEl.className = nameClass;
   nameEl.textContent = name;
-  row.appendChild(iconEl);
   row.appendChild(nameEl);
   return row;
 }

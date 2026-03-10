@@ -111,7 +111,7 @@ fn TerminalTopbar(short_id: String, csrf_token: String, has_user_rootfs: bool) -
                         <button type="submit" class="btn btn-xs btn-ghost text-error">"Reset"</button>
                     </form>
                 })}
-                <button id="files-toggle-btn" class="btn btn-xs btn-ghost">"📁 Files"</button>
+                <button id="files-toggle-btn" class="btn btn-xs btn-ghost">"Files"</button>
                 <a href="/logout" class="btn btn-xs btn-ghost">"Logout"</a>
             </div>
         </div>
