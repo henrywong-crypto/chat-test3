@@ -6,8 +6,10 @@ fn main() {
     let src_dir = frontend_dir.join("src");
     let dist_dir = frontend_dir.join("dist");
 
+    println!("cargo:rerun-if-changed={}", src_dir.join("app.js").display());
     println!("cargo:rerun-if-changed={}", src_dir.join("styles.css").display());
     println!("cargo:rerun-if-changed={}", frontend_dir.join("package.json").display());
+    println!("cargo:rerun-if-changed={}", frontend_dir.join("package-lock.json").display());
 
     fs::create_dir_all(&dist_dir).expect("failed to create frontend/dist");
 
@@ -15,11 +17,7 @@ fn main() {
         return;
     }
 
-    let node_modules = frontend_dir.join("node_modules");
-    if !node_modules.exists() {
-        run_command(Command::new("npm").arg("install").current_dir(&frontend_dir));
-    }
-
+    run_command(Command::new("npm").arg("install").current_dir(&frontend_dir));
     run_command(Command::new("npm").args(["run", "build"]).current_dir(&frontend_dir));
 }
 
