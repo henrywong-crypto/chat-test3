@@ -9,10 +9,7 @@ use serde::Deserialize;
 use std::{
     collections::HashMap,
     path::PathBuf,
-    sync::{
-        atomic::{AtomicBool, Ordering},
-        Arc, Mutex,
-    },
+    sync::{Arc, Mutex},
     time::Instant,
 };
 use store::PgPool;
@@ -138,7 +135,7 @@ pub(crate) struct AppState {
     pub(crate) config: AppConfig,
     pub(crate) db: PgPool,
     pub(crate) vms: VmRegistry,
-    pub(crate) rootfs_locks: RootfsLocks,
+    pub(crate) rootfs_lock: Arc<AsyncMutex<()>>,
 }
 
 impl AppState {
@@ -147,7 +144,7 @@ impl AppState {
             config,
             db: pg_pool,
             vms: Arc::new(Mutex::new(HashMap::new())),
-            rootfs_locks: Arc::new(Mutex::new(HashMap::new())),
+            rootfs_lock: Arc::new(AsyncMutex::new(())),
         }
     }
 }
@@ -160,13 +157,12 @@ impl std::ops::Deref for AppState {
 }
 
 pub(crate) type VmRegistry = Arc<Mutex<HashMap<String, VmEntry>>>;
-pub(crate) type RootfsLocks = Arc<Mutex<HashMap<Uuid, Arc<AsyncMutex<()>>>>>;
 
 pub(crate) struct VmEntry {
     pub(crate) user_id: Uuid,
     pub(crate) has_iam_creds: bool,
     pub(crate) created_at: Instant,
-    pub(crate) ws_connected: Arc<AtomicBool>,
+    pub(crate) ws_connected: bool,
     pub(crate) vm: Vm,
 }
 
@@ -190,9 +186,9 @@ impl<E: Into<anyhow::Error>> From<E> for AppError {
 }
 
 pub(crate) fn mark_vm_ws_connected(vms: &VmRegistry, vm_id: &str) {
-    if let Ok(registry) = vms.lock() {
-        if let Some(entry) = registry.get(vm_id) {
-            entry.ws_connected.store(true, Ordering::Relaxed);
+    if let Ok(mut registry) = vms.lock() {
+        if let Some(entry) = registry.get_mut(vm_id) {
+            entry.ws_connected = true;
         }
     }
 }
@@ -205,13 +201,4 @@ pub(crate) fn find_vm_guest_ip_for_user(
     let registry = vms.lock().ok()?;
     let vm_entry = registry.get(vm_id)?;
     (vm_entry.user_id == user_id).then(|| vm_entry.vm.guest_ip())
-}
-
-pub(crate) fn get_rootfs_lock(locks: &RootfsLocks, user_id: Uuid) -> Arc<AsyncMutex<()>> {
-    locks
-        .lock()
-        .unwrap_or_else(|e| e.into_inner())
-        .entry(user_id)
-        .or_insert_with(|| Arc::new(AsyncMutex::new(())))
-        .clone()
 }

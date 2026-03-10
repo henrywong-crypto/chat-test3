@@ -1,7 +1,4 @@
-use std::{
-    sync::{atomic::AtomicBool, Arc},
-    time::Instant,
-};
+use std::{sync::Arc, time::Instant};
 use anyhow::anyhow;
 use axum::{
     extract::{Form, Path, State},
@@ -17,7 +14,7 @@ use uuid::Uuid;
 
 use crate::{
     auth::User,
-    state::{get_rootfs_lock, AppError, AppState, VmEntry, VmRegistry},
+    state::{AppError, AppState, VmEntry, VmRegistry},
     static_files::{app_js_version, styles_css_version},
     templates::render_terminal_page,
     vm::{
@@ -101,7 +98,7 @@ pub(crate) async fn get_or_create_terminal(
         &state.user_rootfs_dir,
         &state.rootfs_path,
         db_user.id,
-        &state.rootfs_locks,
+        &state.rootfs_lock,
     )
     .await?;
     info!(user_id = %db_user.id, rootfs = %user_rootfs.display(), "using rootfs");
@@ -113,7 +110,7 @@ pub(crate) async fn get_or_create_terminal(
         user_id: db_user.id,
         has_iam_creds,
         created_at: Instant::now(),
-        ws_connected: Arc::new(AtomicBool::new(false)),
+        ws_connected: false,
         vm,
     };
     register_vm(&state.vms, vm_id.clone(), vm_entry)?;
@@ -143,8 +140,7 @@ pub(crate) async fn delete_user_rootfs_handler(
     let db_user = upsert_user(&state.db, &user.email).await?;
     let rootfs_path = user_rootfs_path(&state.user_rootfs_dir, db_user.id);
     info!(user_id = %db_user.id, path = %rootfs_path.display(), "deleting saved rootfs");
-    let lock = get_rootfs_lock(&state.rootfs_locks, db_user.id);
-    let _guard = lock.lock().await;
+    let _guard = state.rootfs_lock.lock().await;
     let _ = tokio::fs::remove_file(&rootfs_path).await;
     drop(_guard);
     remove_user_vm(&state.vms, db_user.id);

@@ -1,17 +1,17 @@
 use anyhow::Result;
 use std::{
     path::{Path, PathBuf},
-    sync::atomic::Ordering,
     time::{Duration, SystemTime},
 };
 use aws_config::default_provider::credentials::DefaultCredentialsChain;
 use aws_credential_types::{provider::ProvideCredentials, Credentials};
 use time::{format_description::well_known::Rfc3339, OffsetDateTime};
 use firecracker_manager::{build_mmds_with_iam, put_mmds, ImdsCredential, JailerConfig, VmConfig};
+use tokio::sync::Mutex as AsyncMutex;
 use tracing::{error, info, warn};
 use uuid::Uuid;
 
-use crate::state::{get_rootfs_lock, AppConfig, AppState, RootfsLocks, VmEntry};
+use crate::state::{AppConfig, AppState, VmEntry};
 
 fn system_time_to_iso8601(t: SystemTime) -> String {
     OffsetDateTime::try_from(t)
@@ -68,11 +68,10 @@ pub(crate) async fn ensure_user_rootfs(
     user_rootfs_dir: &Path,
     base_rootfs_path: &Path,
     user_id: Uuid,
-    rootfs_locks: &RootfsLocks,
+    rootfs_lock: &AsyncMutex<()>,
 ) -> Result<PathBuf> {
     let rootfs_path = user_rootfs_path(user_rootfs_dir, user_id);
-    let lock = get_rootfs_lock(rootfs_locks, user_id);
-    let _guard = lock.lock().await;
+    let _guard = rootfs_lock.lock().await;
     if rootfs_path.exists() {
         return Ok(rootfs_path);
     }
@@ -136,27 +135,23 @@ pub(crate) async fn refresh_all_vm_mmds(app_state: &AppState) {
 const CONNECT_TIMEOUT: Duration = Duration::from_secs(60);
 
 pub(crate) async fn sweep_idle_vms(app_state: &AppState) {
-    let stale_entries: Vec<(String, VmEntry)> = collect_stale_vm_entries(app_state);
+    let stale_entries: Vec<(String, VmEntry)> = {
+        let Ok(mut registry) = app_state.vms.lock() else {
+            return;
+        };
+        let stale_ids: Vec<String> = registry
+            .iter()
+            .filter(|(_, e)| !e.ws_connected && e.created_at.elapsed() > CONNECT_TIMEOUT)
+            .map(|(id, _)| id.clone())
+            .collect();
+        stale_ids
+            .into_iter()
+            .filter_map(|id| registry.remove(&id).map(|e| (id, e)))
+            .collect()
+    };
     for (vm_id, _) in stale_entries {
         info!(vm_id = %vm_id, "dropping idle vm (no websocket connected within timeout)");
     }
-}
-
-fn collect_stale_vm_entries(app_state: &AppState) -> Vec<(String, VmEntry)> {
-    let Ok(mut registry) = app_state.vms.lock() else {
-        return Vec::new();
-    };
-    let stale_ids: Vec<String> = registry
-        .iter()
-        .filter(|(_, e)| {
-            !e.ws_connected.load(Ordering::Relaxed) && e.created_at.elapsed() > CONNECT_TIMEOUT
-        })
-        .map(|(id, _)| id.clone())
-        .collect();
-    stale_ids
-        .into_iter()
-        .filter_map(|id| registry.remove(&id).map(|e| (id, e)))
-        .collect()
 }
 
 pub(crate) async fn save_all_vm_rootfs(app_state: &AppState) {
@@ -177,28 +172,12 @@ pub(crate) async fn save_all_vm_rootfs(app_state: &AppState) {
         error!("failed to create user rootfs dir on shutdown: {e}");
         return;
     }
+    let _guard = app_state.rootfs_lock.lock().await;
     for (vm_id, vm_entry) in vm_entries {
-        save_vm_entry_rootfs(
-            &app_state.user_rootfs_dir,
-            &vm_id,
-            vm_entry,
-            &app_state.rootfs_locks,
-        )
-        .await;
-    }
-}
-
-async fn save_vm_entry_rootfs(
-    user_rootfs_dir: &Path,
-    vm_id: &str,
-    vm_entry: VmEntry,
-    rootfs_locks: &RootfsLocks,
-) {
-    let rootfs_path = user_rootfs_path(user_rootfs_dir, vm_entry.user_id);
-    let lock = get_rootfs_lock(rootfs_locks, vm_entry.user_id);
-    let _guard = lock.lock().await;
-    info!(user_id = %vm_entry.user_id, vm_id = %vm_id, dest = %rootfs_path.display(), "saving rootfs on shutdown");
-    if let Err(e) = vm_entry.vm.save_rootfs(&rootfs_path).await {
-        error!(user_id = %vm_entry.user_id, vm_id = %vm_id, "failed to save rootfs on shutdown: {e}");
+        let rootfs_path = user_rootfs_path(&app_state.user_rootfs_dir, vm_entry.user_id);
+        info!(user_id = %vm_entry.user_id, vm_id = %vm_id, dest = %rootfs_path.display(), "saving rootfs on shutdown");
+        if let Err(e) = vm_entry.vm.save_rootfs(&rootfs_path).await {
+            error!(user_id = %vm_entry.user_id, vm_id = %vm_id, "failed to save rootfs on shutdown: {e}");
+        }
     }
 }
