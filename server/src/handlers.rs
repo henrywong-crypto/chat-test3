@@ -66,6 +66,12 @@ fn find_user_vm_id(vms: &VmRegistry, user_id: Uuid) -> Option<String> {
         .map(|(id, _)| id.clone())
 }
 
+fn remove_user_vm(vms: &VmRegistry, user_id: Uuid) {
+    if let Ok(mut registry) = vms.lock() {
+        registry.retain(|_, e| e.user_id != user_id);
+    }
+}
+
 pub(crate) async fn get_or_create_terminal(
     user: User,
     session: Session,
@@ -131,11 +137,8 @@ pub(crate) async fn delete_user_rootfs_handler(
     let rootfs_path = user_rootfs_path(&state.user_rootfs_dir, db_user.id);
     info!(user_id = %db_user.id, path = %rootfs_path.display(), "deleting saved rootfs");
     let _ = tokio::fs::remove_file(&rootfs_path).await;
-    let redirect_to = match find_user_vm_id(&state.vms, db_user.id) {
-        Some(vm_id) => format!("/terminal/{vm_id}"),
-        None => "/".to_string(),
-    };
-    Ok(Redirect::to(&redirect_to).into_response())
+    remove_user_vm(&state.vms, db_user.id);
+    Ok(Redirect::to("/").into_response())
 }
 
 pub(crate) async fn get_terminal_page(

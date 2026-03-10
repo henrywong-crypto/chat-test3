@@ -35,8 +35,8 @@ ws.onmessage = e => term.write(new Uint8Array(e.data));
 ws.onclose = () => term.write('\r\n\x1b[2mconnection closed\x1b[0m\r\n');
 new ResizeObserver(() => fitAddon.fit()).observe(container);
 
-document.getElementById('reset-form')?.addEventListener('submit', e => {
-  if (!confirm('Reset your environment? This cannot be undone.')) e.preventDefault();
+document.getElementById('reset-btn')?.addEventListener('click', () => {
+  document.getElementById('reset-dialog').showModal();
 });
 
 let fmCurrentPath = fmUploadDir;
@@ -154,7 +154,7 @@ function renderBreadcrumb(path) {
 
 function buildEntryRow(name, nameClass, onclick) {
   const row = document.createElement('div');
-  row.className = 'group flex items-center gap-2 px-3 py-1.5 cursor-pointer border-b border-base-300 text-xs hover:bg-base-300';
+  row.className = 'flex items-center gap-2 px-3 py-1.5 cursor-pointer border-b border-base-300 text-xs hover:bg-base-300';
   row.onclick = onclick;
   const nameEl = document.createElement('span');
   nameEl.className = nameClass;

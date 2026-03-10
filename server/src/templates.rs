@@ -105,10 +105,25 @@ fn TerminalTopbar(csrf_token: String, has_user_rootfs: bool) -> impl IntoView {
             </div>
             <div class="flex items-center gap-2">
                 {has_user_rootfs.then(|| view! {
-                    <form id="reset-form" method="post" action="/rootfs/delete">
-                        <input type="hidden" name="csrf_token" value=csrf_token/>
-                        <button type="submit" class="btn btn-xs btn-ghost text-error">"Reset"</button>
-                    </form>
+                    <button id="reset-btn" type="button" class="btn btn-xs btn-ghost text-error">"Reset"</button>
+                    <dialog id="reset-dialog" class="modal">
+                        <div class="modal-box">
+                            <p class="font-semibold text-sm mb-3">"Reset to base environment?"</p>
+                            <p class="text-sm opacity-70 mb-4">"Your current session will end and a fresh VM will start from the base image."</p>
+                            <div class="modal-action mt-0">
+                                <form method="dialog">
+                                    <button class="btn btn-sm btn-ghost">"Cancel"</button>
+                                </form>
+                                <form method="post" action="/rootfs/delete">
+                                    <input type="hidden" name="csrf_token" value=csrf_token/>
+                                    <button type="submit" class="btn btn-sm btn-error">"Reset"</button>
+                                </form>
+                            </div>
+                        </div>
+                        <form method="dialog" class="modal-backdrop">
+                            <button>"close"</button>
+                        </form>
+                    </dialog>
                 })}
                 <button id="files-toggle-btn" class="btn btn-xs btn-ghost">"Files"</button>
                 <a href="/logout" class="btn btn-xs btn-ghost">"Logout"</a>
