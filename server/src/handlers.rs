@@ -77,6 +77,11 @@ pub(crate) async fn get_or_create_terminal(
         return Ok(Redirect::to(&format!("/terminal/{vm_id}")).into_response());
     }
 
+    let vm_count = state.vms.lock().map(|r| r.len()).unwrap_or(0);
+    if vm_count >= state.vm_max_count {
+        return Ok((StatusCode::SERVICE_UNAVAILABLE, "VM limit reached").into_response());
+    }
+
     let iam_creds = fetch_host_iam_credentials().await;
     let has_iam_creds = iam_creds.is_some();
     let user_rootfs = ensure_user_rootfs(

@@ -37,11 +37,22 @@ new ResizeObserver(() => fitAddon.fit()).observe(container);
 
 // ── File manager ──────────────────────────────────────────────────────────────
 
+const ICON_DIR  = '▸';
+const ICON_FILE = '·';
+const ICON_UP   = '‹';
+
 let fmCurrentPath = fmUploadDir;
 let fmOpened = false;
 
 document.getElementById('files-toggle-btn').addEventListener('click', toggleFiles);
-document.getElementById('files-close-btn').addEventListener('click', toggleFiles);
+document.getElementById('files-close-btn').addEventListener('click', closePanel);
+document.addEventListener('keydown', e => { if (e.key === 'Escape') closePanel(); });
+
+function closePanel() {
+  const panel = document.getElementById('files-panel');
+  panel.classList.remove('flex');
+  panel.classList.add('hidden');
+}
 
 function toggleFiles() {
   const panel = document.getElementById('files-panel');
@@ -54,32 +65,36 @@ function toggleFiles() {
 }
 
 function loadDir(path) {
+  const list = document.getElementById('files-list');
+  list.innerHTML = '<div class="flex justify-center py-6 opacity-40 text-xs">Loading\u2026</div>';
   fetch('/sessions/' + vmId + '/ls?path=' + encodeURIComponent(path))
     .then(res => res.ok ? res.json() : res.text().then(msg => { throw new Error(msg); }))
     .then(data => { fmCurrentPath = path; renderEntries(path, data.entries); })
-    .catch(err => { document.getElementById('files-list').textContent = err.message || 'Error.'; });
+    .catch(err => {
+      list.innerHTML = '<div class="flex justify-center py-6 text-error text-xs">' + (err.message || 'Error.') + '</div>';
+    });
 }
 
 function renderEntries(path, entries) {
-  document.getElementById('files-breadcrumb').textContent = path;
+  renderBreadcrumb(path);
   const list = document.getElementById('files-list');
   list.innerHTML = '';
   if (path !== fmUploadDir) {
-    list.appendChild(buildEntryRow('📁', '..', () => loadDir(parentPath(path))));
+    list.appendChild(buildEntryRow(ICON_UP, 'text-info', '..', () => loadDir(parentPath(path))));
   }
   for (const entry of entries) {
     const entryPath = path.replace(/\/$/, '') + '/' + entry.name;
     if (entry.is_dir) {
-      const row = buildEntryRow('📁', entry.name, () => loadDir(entryPath));
+      const row = buildEntryRow(ICON_DIR, 'text-info', entry.name, () => loadDir(entryPath));
       const dl = document.createElement('span');
-      dl.className = 'text-xs opacity-0 group-hover:opacity-100 px-1 cursor-pointer';
+      dl.className = 'text-xs opacity-40 hover:opacity-100 px-1 cursor-pointer';
       dl.title = 'Download as zip';
       dl.textContent = '↓';
       dl.onclick = e => { e.stopPropagation(); window.open('/sessions/' + vmId + '/download?path=' + encodeURIComponent(entryPath), '_blank'); };
       row.appendChild(dl);
       list.appendChild(row);
     } else {
-      const row = buildEntryRow('📄', entry.name, () => { window.location.href = '/sessions/' + vmId + '/download?path=' + encodeURIComponent(entryPath); });
+      const row = buildEntryRow(ICON_FILE, 'opacity-40', entry.name, () => { window.location.href = '/sessions/' + vmId + '/download?path=' + encodeURIComponent(entryPath); });
       const size = document.createElement('span');
       size.className = 'text-xs opacity-50 whitespace-nowrap';
       size.textContent = formatSize(entry.size);
@@ -87,13 +102,56 @@ function renderEntries(path, entries) {
       list.appendChild(row);
     }
   }
+  if (entries.length === 0) {
+    const empty = document.createElement('div');
+    empty.className = 'flex justify-center py-6 opacity-40 text-xs';
+    empty.textContent = 'Empty directory';
+    list.appendChild(empty);
+  }
 }
 
-function buildEntryRow(icon, name, onclick) {
+function renderBreadcrumb(path) {
+  const breadcrumb = document.getElementById('files-breadcrumb');
+  breadcrumb.innerHTML = '';
+  const normalized = path.replace(/\/$/, '') || '/';
+  const root = fmUploadDir.replace(/\/$/, '') || '/';
+  if (!normalized.startsWith(root)) {
+    breadcrumb.textContent = normalized;
+    return;
+  }
+  const rootLabel = root.split('/').pop() || root;
+  const rootSpan = document.createElement('span');
+  rootSpan.textContent = rootLabel;
+  breadcrumb.appendChild(rootSpan);
+  const suffix = normalized.slice(root.length);
+  const subParts = suffix.split('/').filter(Boolean);
+  subParts.forEach((part, i) => {
+    const sep = document.createElement('span');
+    sep.className = 'opacity-40';
+    sep.textContent = ' / ';
+    breadcrumb.appendChild(sep);
+    const isCurrent = i === subParts.length - 1;
+    if (isCurrent) {
+      const span = document.createElement('span');
+      span.textContent = part;
+      breadcrumb.appendChild(span);
+    } else {
+      const segPath = root + '/' + subParts.slice(0, i + 1).join('/');
+      const btn = document.createElement('button');
+      btn.className = 'hover:underline cursor-pointer';
+      btn.textContent = part;
+      btn.onclick = () => loadDir(segPath);
+      breadcrumb.appendChild(btn);
+    }
+  });
+}
+
+function buildEntryRow(icon, iconClass, name, onclick) {
   const row = document.createElement('div');
   row.className = 'group flex items-center gap-2 px-3 py-1.5 cursor-pointer border-b border-base-300 text-xs hover:bg-base-300';
   row.onclick = onclick;
   const iconEl = document.createElement('span');
+  iconEl.className = iconClass;
   iconEl.textContent = icon;
   const nameEl = document.createElement('span');
   nameEl.className = 'flex-1 truncate';
@@ -116,12 +174,18 @@ function formatSize(n) {
   return n + ' B';
 }
 
-document.getElementById('fm-file-input').addEventListener('change', function() {
-  if (!this.files[0]) return;
-  const file = this.files[0];
+const filesListEl = document.getElementById('files-list');
+filesListEl.addEventListener('dragover', e => { e.preventDefault(); });
+filesListEl.addEventListener('drop', e => {
+  e.preventDefault();
+  const file = e.dataTransfer.files[0];
+  if (file) uploadFile(file);
+});
+
+function uploadFile(file) {
   const status = document.getElementById('files-upload-status');
   status.className = 'text-xs';
-  status.textContent = 'Uploading…';
+  status.textContent = 'Uploading\u2026';
   const formData = new FormData();
   formData.append('csrf_token', fmCsrfToken);
   formData.append('path', fmCurrentPath.replace(/\/$/, '') + '/' + file.name);
@@ -134,5 +198,10 @@ document.getElementById('fm-file-input').addEventListener('change', function() {
     })
     .catch(() => { status.className = 'text-xs text-error'; status.textContent = 'Network error.'; })
     .finally(() => setTimeout(() => { status.textContent = ''; status.className = 'text-xs'; }, 3000));
+}
+
+document.getElementById('fm-file-input').addEventListener('change', function() {
+  if (!this.files[0]) return;
+  uploadFile(this.files[0]);
   this.value = '';
 });

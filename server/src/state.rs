@@ -64,6 +64,12 @@ pub(crate) struct AppConfig {
     pub(crate) jailer_gid: u32,
     #[serde(default = "default_jailer_chroot_base")]
     pub(crate) jailer_chroot_base: PathBuf,
+    #[serde(default = "default_vm_vcpu_count")]
+    pub(crate) vm_vcpu_count: u8,
+    #[serde(default = "default_vm_mem_size_mib")]
+    pub(crate) vm_mem_size_mib: u32,
+    #[serde(default = "default_vm_max_count")]
+    pub(crate) vm_max_count: usize,
 }
 
 fn default_kernel_path() -> PathBuf {
@@ -107,6 +113,15 @@ fn default_firecracker_path() -> PathBuf {
 }
 fn default_jailer_chroot_base() -> PathBuf {
     PathBuf::from("/srv/jailer")
+}
+fn default_vm_vcpu_count() -> u8 {
+    2
+}
+fn default_vm_mem_size_mib() -> u32 {
+    4096
+}
+fn default_vm_max_count() -> usize {
+    20
 }
 
 pub(crate) fn load_config() -> Result<AppConfig> {

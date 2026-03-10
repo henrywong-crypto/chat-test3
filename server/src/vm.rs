@@ -40,8 +40,8 @@ pub(crate) fn build_vm_config(
             .map(|p| p.to_path_buf())
             .unwrap_or_else(|| state.rootfs_path.clone()),
         net_helper_path: state.net_helper_path.clone(),
-        vcpu_count: 2,
-        mem_size_mib: 4096,
+        vcpu_count: state.vm_vcpu_count,
+        mem_size_mib: state.vm_mem_size_mib,
         boot_args: "reboot=k panic=1 quiet loglevel=3 selinux=0 8250.nr_uarts=0".to_string(),
         mmds_metadata: Some(mmds_metadata),
         mmds_imds_compat,

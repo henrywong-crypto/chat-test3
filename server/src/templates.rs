@@ -102,13 +102,13 @@ fn TerminalTopbar(short_id: String, csrf_token: String, has_user_rootfs: bool) -
         <div class="flex items-center justify-between h-10 px-4 bg-base-200 border-b border-base-300 shrink-0">
             <div class="flex items-center gap-3">
                 <span class="text-sm font-semibold">"WebCode"</span>
-                <span class="text-xs opacity-50">{short_id}</span>
+                <span class="badge badge-neutral font-mono text-xs">{short_id}</span>
             </div>
             <div class="flex items-center gap-2">
                 {has_user_rootfs.then(|| view! {
                     <form method="post" action="/rootfs/delete">
                         <input type="hidden" name="csrf_token" value=csrf_token/>
-                        <button type="submit" class="btn btn-xs btn-ghost">"Reset"</button>
+                        <button type="submit" class="btn btn-xs btn-ghost text-error">"Reset"</button>
                     </form>
                 })}
                 <button id="files-toggle-btn" class="btn btn-xs btn-ghost">"📁 Files"</button>
@@ -122,9 +122,12 @@ fn TerminalTopbar(short_id: String, csrf_token: String, has_user_rootfs: bool) -
 fn FilesPanel() -> impl IntoView {
     view! {
         <div id="files-panel" class="hidden w-64 shrink-0 flex-col bg-base-200 border-l border-base-300 overflow-hidden">
-            <div class="flex items-center justify-between px-3 py-2 border-b border-base-300 shrink-0">
-                <span id="files-breadcrumb" class="text-xs opacity-50 truncate flex-1"/>
-                <button id="files-close-btn" class="btn btn-xs btn-ghost px-1">"✕"</button>
+            <div class="border-b border-base-300 shrink-0">
+                <div class="flex items-center justify-between px-3 py-2">
+                    <span class="font-semibold text-sm">"Files"</span>
+                    <button id="files-close-btn" class="btn btn-xs btn-ghost px-1">"✕"</button>
+                </div>
+                <div id="files-breadcrumb" class="text-xs opacity-50 px-3 pb-2 truncate"/>
             </div>
             <div id="files-list" class="flex-1 overflow-y-auto"/>
             <div class="flex items-center gap-2 px-3 py-2 border-t border-base-300 shrink-0">
