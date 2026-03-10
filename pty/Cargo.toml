@@ -1,6 +1,7 @@
 [package]
 name = "pty"
 version = "0.1.0"
+description = "Async PTY master/slave pair with raw mode and non-blocking I/O for tokio"
 edition = "2021"
 
 [dependencies]

@@ -1,6 +1,7 @@
 [package]
 name = "store"
 version = "0.1.0"
+description = "PostgreSQL persistence layer for user accounts"
 edition = "2021"
 
 [dependencies]

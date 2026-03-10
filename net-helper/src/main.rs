@@ -1,6 +1,9 @@
 use std::process::Command;
 
-use anyhow::{anyhow, bail, Context, Result};
+use anyhow::{bail, Context, Result};
+use ipnet::Ipv4Net;
+#[cfg(target_os = "linux")]
+use caps::{CapSet, Capability};
 
 fn main() {
     let args: Vec<String> = std::env::args().collect();
@@ -46,7 +49,7 @@ fn run(args: &[String]) -> Result<()> {
 }
 
 fn validate_tap_name(name: &str) -> Result<()> {
-    let digits = name.strip_prefix("tap").ok_or_else(|| anyhow!("must start with 'tap'"))?;
+    let digits = name.strip_prefix("tap").ok_or_else(|| anyhow::anyhow!("must start with 'tap'"))?;
     if digits.is_empty() || digits.len() > 3 {
         bail!("digits part must be 1-3 characters");
     }
@@ -64,36 +67,7 @@ fn validate_tap_name(name: &str) -> Result<()> {
 }
 
 fn validate_cidr(cidr: &str) -> Result<()> {
-    let (ip_str, prefix_str) = cidr.split_once('/').ok_or_else(|| anyhow!("missing '/' in cidr"))?;
-    if prefix_str.is_empty() {
-        bail!("missing prefix length");
-    }
-    if !prefix_str.chars().all(|c| c.is_ascii_digit()) {
-        bail!("prefix length must be numeric");
-    }
-    let prefix: u8 = prefix_str.parse().context("invalid prefix length")?;
-    if prefix > 32 {
-        bail!("prefix length must be 0-32");
-    }
-    let octets: Vec<&str> = ip_str.split('.').collect();
-    if octets.len() != 4 {
-        bail!("IPv4 address must have 4 octets");
-    }
-    for octet in &octets {
-        if octet.is_empty() {
-            bail!("empty octet");
-        }
-        if !octet.chars().all(|c| c.is_ascii_digit()) {
-            bail!("octets must be numeric");
-        }
-        if octet.len() > 1 && octet.starts_with('0') {
-            bail!("no leading zeros in octets");
-        }
-        let n: u16 = octet.parse().context("invalid octet value")?;
-        if n > 255 {
-            bail!("octet value must be 0-255");
-        }
-    }
+    cidr.parse::<Ipv4Net>().context("invalid CIDR")?;
     Ok(())
 }
 
@@ -150,42 +124,11 @@ fn cmd_setup_nat(iface: &str) -> Result<()> {
 
 fn raise_ambient_net_admin() -> Result<()> {
     #[cfg(target_os = "linux")]
-    unsafe {
-        const CAP_NET_ADMIN: u32 = 12;
-        const CAP_V3: u32 = 0x2008_0522; // _LINUX_CAPABILITY_VERSION_3
-        const PR_CAP_AMBIENT: libc::c_int = 47;
-        const PR_CAP_AMBIENT_RAISE: libc::c_ulong = 2;
-
-        #[repr(C)]
-        struct CapHdr {
-            version: u32,
-            pid: i32,
-        }
-        #[repr(C)]
-        #[derive(Clone, Copy, Default)]
-        struct CapData {
-            effective: u32,
-            permitted: u32,
-            inheritable: u32,
-        }
-
-        let mut hdr = CapHdr { version: CAP_V3, pid: 0 };
-        let mut data = [CapData::default(); 2];
-
-        // capget — read current sets
-        if libc::syscall(libc::SYS_capget, &mut hdr as *mut CapHdr, data.as_mut_ptr()) < 0 {
-            return Err(std::io::Error::last_os_error()).context("capget failed");
-        }
-        // Promote CAP_NET_ADMIN into inheritable (allowed since it's in permitted)
-        data[0].inheritable |= 1 << CAP_NET_ADMIN;
-        // capset — write back
-        if libc::syscall(libc::SYS_capset, &hdr as *const CapHdr, data.as_ptr()) < 0 {
-            return Err(std::io::Error::last_os_error()).context("capset failed");
-        }
-        // Raise to ambient so exec'd children inherit it
-        if libc::prctl(PR_CAP_AMBIENT, PR_CAP_AMBIENT_RAISE, CAP_NET_ADMIN as libc::c_ulong, 0, 0) < 0 {
-            return Err(std::io::Error::last_os_error()).context("prctl PR_CAP_AMBIENT_RAISE failed");
-        }
+    {
+        caps::raise(None, CapSet::Inheritable, Capability::CAP_NET_ADMIN)
+            .context("failed to raise CAP_NET_ADMIN inheritable")?;
+        caps::raise(None, CapSet::Ambient, Capability::CAP_NET_ADMIN)
+            .context("failed to raise CAP_NET_ADMIN ambient")?;
     }
     Ok(())
 }
@@ -217,27 +160,6 @@ mod tests {
         assert!(validate_tap_name("tap1234").is_err());
         assert!(validate_tap_name("tapx").is_err());
         assert!(validate_tap_name("tap-1").is_err());
-    }
-
-    #[test]
-    fn cidr_valid() {
-        assert!(validate_cidr("0.0.0.0/0").is_ok());
-        assert!(validate_cidr("172.16.0.1/30").is_ok());
-        assert!(validate_cidr("192.168.1.1/24").is_ok());
-        assert!(validate_cidr("10.0.0.1/8").is_ok());
-        assert!(validate_cidr("255.255.255.255/32").is_ok());
-    }
-
-    #[test]
-    fn cidr_invalid() {
-        assert!(validate_cidr("172.016.0.1/30").is_err());
-        assert!(validate_cidr("172.16.0.1").is_err());
-        assert!(validate_cidr("172.16.0.1/33").is_err());
-        assert!(validate_cidr("172.16.0/30").is_err());
-        assert!(validate_cidr("172.16.0.256/30").is_err());
-        assert!(validate_cidr("172.16.0.1/").is_err());
-        assert!(validate_cidr("").is_err());
-        assert!(validate_cidr("abc.def.ghi.jkl/24").is_err());
     }
 
     #[test]

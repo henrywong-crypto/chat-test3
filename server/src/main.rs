@@ -1,5 +1,6 @@
 mod auth;
 mod download;
+mod files;
 mod handlers;
 mod ssh;
 mod state;
@@ -26,10 +27,11 @@ use tracing::info;
 
 use crate::{
     auth::{
-        get_callback_handler, get_cognito_login_handler, get_demo_handler, get_login_handler,
+        get_callback_handler, get_cognito_login_handler, get_login_handler,
         get_logout_handler,
     },
     download::download_file_handler,
+    files::list_files_handler,
     handlers::{
         delete_user_rootfs_handler, get_or_create_terminal, get_terminal_page,
     },
@@ -77,6 +79,7 @@ fn build_router(app_state: AppState, session_store: PostgresStore) -> Router {
     Router::new()
         .route("/", get(get_or_create_terminal))
         .route("/sessions/{id}/download", get(download_file_handler))
+        .route("/sessions/{id}/ls", get(list_files_handler))
         .route("/sessions/{id}/upload", post(upload_file_handler))
         .route("/rootfs/delete", post(delete_user_rootfs_handler))
         .route("/terminal/{id}", get(get_terminal_page))
@@ -84,7 +87,6 @@ fn build_router(app_state: AppState, session_store: PostgresStore) -> Router {
         .route("/login", get(get_login_handler))
         .route("/login/cognito", get(get_cognito_login_handler))
         .route("/logout", get(get_logout_handler))
-        .route("/demo", get(get_demo_handler))
         .route("/callback", get(get_callback_handler))
         .with_state(app_state)
         .layer(session_layer)

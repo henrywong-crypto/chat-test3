@@ -1,18 +1,25 @@
 # store
 
-- PostgreSQL backend (sqlx)
-- `users`: id (UUID), cognito_sub, created_at, updated_at
-- `sessions`: id (UUID), user_id (UUID), vm_socket_path, vm_pid, pty_path, status, created_at, updated_at
+PostgreSQL persistence layer for user accounts.
 
-## Functions
+## Responsibilities
+
+- Connect to PostgreSQL and run migrations on startup
+- Upsert users by email (create on first login, return existing on subsequent logins)
+
+## Schema
+
+### `users`
+
+| Column | Type | Description |
+|---|---|---|
+| `id` | `UUID` | Primary key |
+| `email` | `TEXT` | Unique user email from Cognito |
+
+## API
 
 ```
-create_user(cognito_sub: &str) -> Result<User>
-get_user_by_cognito_sub(cognito_sub: &str) -> Result<Option<User>>
-
-create_session(user_id: Uuid, vm_socket_path: &Path, vm_pid: u32, pty_path: &Path) -> Result<Session>
-get_session(session_id: Uuid) -> Result<Option<Session>>
-list_user_sessions(user_id: Uuid) -> Result<Vec<Session>>
-delete_session(session_id: Uuid) -> Result<()>
-update_session_status(session_id: Uuid, status: &SessionStatus) -> Result<()>
+connect_db(url: &str) -> Result<PgPool>
+run_migrations(pg_pool: &PgPool) -> Result<()>
+upsert_user(pg_pool: &PgPool, email: &str) -> Result<User>
 ```

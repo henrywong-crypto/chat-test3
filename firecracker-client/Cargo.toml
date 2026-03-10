@@ -1,6 +1,7 @@
 [package]
 name = "firecracker-client"
 version = "0.1.0"
+description = "HTTP client for the Firecracker microVM management API over a Unix socket"
 edition = "2021"
 
 [dependencies]

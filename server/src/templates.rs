@@ -69,16 +69,12 @@ pub(crate) fn render_login_page() -> Markup {
                     }
                     .login-card h1 { font-size: 16px; margin-bottom: 24px; color: var(--text); }
                     .login-card .btn { width: 100%; justify-content: center; padding: 8px 12px; font-size: 13px; }
-                    .divider { display: flex; align-items: center; gap: 12px; margin: 16px 0; color: var(--text-muted); font-size: 11px; }
-                    .divider::before, .divider::after { content: ''; flex: 1; height: 1px; background: var(--border); }
                 ")) }
             }
             body {
                 div class="login-card" {
                     h1 { "WebCode" }
                     a href="/login/cognito" class="btn btn-primary" { "Sign in with Cognito" }
-                    div class="divider" { "or" }
-                    a href="/demo" class="btn" { "Try Demo" }
                 }
             }
         }
@@ -89,8 +85,7 @@ pub(crate) fn render_terminal_page(vm_id: &str, csrf_token: &str, upload_dir: &s
     let short_id = format!("{}…", vm_id.get(..8).unwrap_or(vm_id));
     let terminal_script = format_terminal_script(vm_id);
     let upload_action = format!("/sessions/{vm_id}/upload");
-    let download_action = format!("/sessions/{vm_id}/download");
-    let default_path = format!("{upload_dir}/");
+    let file_manager_script = format_file_manager_script(csrf_token, upload_dir, &upload_action);
     html! {
         (DOCTYPE)
         html lang="en" {
@@ -108,43 +103,47 @@ pub(crate) fn render_terminal_page(vm_id: &str, csrf_token: &str, upload_dir: &s
                     #topbar-left  { display: flex; align-items: center; gap: 12px; }
                     #topbar-right { display: flex; align-items: center; gap: 8px; }
                     #vm-id { color: var(--text-muted); font-size: 12px; }
-                    #upload-drawer {
-                        display: none; align-items: center; gap: 10px;
-                        padding: 0 16px; height: 44px; flex-shrink: 0;
-                        background: var(--surface2); border-bottom: 1px solid var(--border);
-                    }
-                    #upload-drawer.open { display: flex; }
-                    #file-label {
-                        display: inline-flex; align-items: center; gap: 6px;
-                        padding: 4px 10px; border-radius: var(--radius);
-                        border: 1px solid var(--border); background: var(--surface);
-                        color: var(--text); font-size: 12px; cursor: pointer; white-space: nowrap;
-                    }
-                    #file-label:hover { border-color: var(--text-muted); }
-                    #file-name { color: var(--text-muted); font-size: 12px; min-width: 120px; }
-                    #upload-path { flex: 1; min-width: 0; }
-                    #upload-status { font-size: 12px; white-space: nowrap; }
-                    #upload-status.ok  { color: var(--success); }
-                    #upload-status.err { color: var(--danger); }
-                    #download-drawer {
-                        display: none; align-items: center; gap: 10px;
-                        padding: 0 16px; height: 44px; flex-shrink: 0;
-                        background: var(--surface2); border-bottom: 1px solid var(--border);
-                    }
-                    #download-drawer.open { display: flex; }
-                    #download-path { flex: 1; min-width: 0; }
+                    #main-area { display: flex; flex: 1; min-height: 0; }
                     #term-container { flex: 1; min-height: 0; background: #000; }
+                    #files-panel {
+                        display: none; width: 260px; flex-shrink: 0;
+                        background: var(--surface); border-left: 1px solid var(--border);
+                        flex-direction: column; overflow: hidden;
+                    }
+                    #files-panel.open { display: flex; }
+                    #files-header {
+                        display: flex; align-items: center; justify-content: space-between;
+                        padding: 8px 12px; border-bottom: 1px solid var(--border); flex-shrink: 0;
+                    }
+                    #files-breadcrumb { font-size: 11px; color: var(--text-muted); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; flex: 1; }
+                    #files-list { flex: 1; overflow-y: auto; }
+                    .file-entry {
+                        display: flex; align-items: center; gap: 8px;
+                        padding: 6px 12px; cursor: pointer;
+                        border-bottom: 1px solid var(--border); font-size: 12px;
+                    }
+                    .file-entry:hover { background: var(--surface2); }
+                    .file-entry-name { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; flex: 1; }
+                    .file-entry-size { color: var(--text-muted); font-size: 11px; white-space: nowrap; }
+                    #files-footer {
+                        padding: 8px 12px; border-top: 1px solid var(--border);
+                        display: flex; gap: 8px; align-items: center; flex-shrink: 0;
+                    }
+                    #files-upload-status { font-size: 11px; }
+                    #files-upload-status.ok  { color: var(--success); }
+                    #files-upload-status.err { color: var(--danger); }
                 ")) }
             }
             body {
                 (render_terminal_topbar(&short_id, csrf_token, has_user_rootfs))
-                (render_terminal_upload_drawer(&upload_action, csrf_token, &default_path))
-                (render_terminal_download_drawer(&download_action, &default_path))
-                div id="term-container" {}
+                div id="main-area" {
+                    div id="term-container" {}
+                    (render_files_panel())
+                }
                 script src="https://cdn.jsdelivr.net/npm/xterm@5/lib/xterm.js" {}
                 script src="https://cdn.jsdelivr.net/npm/xterm-addon-fit@0.8/lib/xterm-addon-fit.js" {}
                 script { (PreEscaped(terminal_script)) }
-                script { (PreEscaped(upload_script())) }
+                script { (PreEscaped(file_manager_script)) }
             }
         }
     }
@@ -164,73 +163,134 @@ fn render_terminal_topbar(short_id: &str, csrf_token: &str, has_user_rootfs: boo
                         button type="submit" class="btn btn-ghost" { "Reset" }
                     }
                 }
-                button id="upload-toggle" class="btn" onclick="toggleUpload()" { "↑ Upload" }
-                button id="download-toggle" class="btn" onclick="toggleDownload()" { "↓ Download" }
+                button class="btn" onclick="toggleFiles()" { "📁 Files" }
                 a href="/logout" class="btn btn-ghost" { "Logout" }
             }
         }
     }
 }
 
-fn render_terminal_upload_drawer(
-    upload_action: &str,
-    csrf_token: &str,
-    default_path: &str,
-) -> Markup {
+fn render_files_panel() -> Markup {
     html! {
-        form id="upload-drawer" method="post" action=(upload_action) enctype="multipart/form-data" {
-            input type="hidden" name="csrf_token" value=(csrf_token);
-            input type="file" id="file-input" name="file" style="display:none";
-            label id="file-label" for="file-input" { "📎 Choose file" }
-            span id="file-name" { "No file chosen" }
-            input id="upload-path" type="text" name="path" value=(default_path);
-            button type="submit" class="btn btn-primary" { "Upload" }
-            span id="upload-status" {}
+        div id="files-panel" {
+            div id="files-header" {
+                span id="files-breadcrumb" {}
+                button class="btn btn-ghost" style="padding:2px 6px" onclick="toggleFiles()" { "✕" }
+            }
+            div id="files-list" {}
+            div id="files-footer" {
+                input type="file" id="fm-file-input" style="display:none";
+                label for="fm-file-input" class="btn" style="flex:1;justify-content:center" { "↑ Upload here" }
+                span id="files-upload-status" {}
+            }
         }
     }
 }
 
-fn render_terminal_download_drawer(download_action: &str, default_path: &str) -> Markup {
-    html! {
-        form id="download-drawer" method="get" action=(download_action) target="_blank" {
-            input id="download-path" type="text" name="path" value=(default_path);
-            button type="submit" class="btn btn-primary" { "Download" }
-        }
-    }
-}
+fn format_file_manager_script(csrf_token: &str, upload_dir: &str, upload_action: &str) -> String {
+    format!(
+        r#"const fmCsrfToken = "{csrf_token}";
+const fmUploadDir = "{upload_dir}";
+const fmUploadAction = "{upload_action}";
+let fmCurrentPath = fmUploadDir;
+let fmOpened = false;
 
-fn upload_script() -> &'static str {
-    r#"function toggleUpload() {
-  document.getElementById('upload-drawer').classList.toggle('open');
-  document.getElementById('download-drawer').classList.remove('open');
-}
-function toggleDownload() {
-  document.getElementById('download-drawer').classList.toggle('open');
-  document.getElementById('upload-drawer').classList.remove('open');
-}
-document.getElementById('file-input').addEventListener('change', function() {
-  const name = this.files[0]?.name || 'No file chosen';
-  document.getElementById('file-name').textContent = name;
-  if (this.files[0]) {
-    const path = document.getElementById('upload-path');
-    path.value = path.value.replace(/[^/]+$/, '') + name;
-  }
-});
-document.getElementById('upload-drawer').addEventListener('submit', async function(e) {
-  e.preventDefault();
-  const status = document.getElementById('upload-status');
+function toggleFiles() {{
+  const panel = document.getElementById('files-panel');
+  panel.classList.toggle('open');
+  if (panel.classList.contains('open') && !fmOpened) {{
+    fmOpened = true;
+    loadDir(fmCurrentPath);
+  }}
+}}
+
+function loadDir(path) {{
+  fetch('/sessions/' + vmId + '/ls?path=' + encodeURIComponent(path))
+    .then(function(res) {{ return res.json(); }})
+    .then(function(data) {{
+      fmCurrentPath = path;
+      renderEntries(path, data.entries);
+    }})
+    .catch(function() {{
+      document.getElementById('files-list').textContent = 'Error loading directory.';
+    }});
+}}
+
+function renderEntries(path, entries) {{
+  document.getElementById('files-breadcrumb').textContent = path;
+  const list = document.getElementById('files-list');
+  list.innerHTML = '';
+  if (path !== fmUploadDir) {{
+    const upRow = document.createElement('div');
+    upRow.className = 'file-entry';
+    upRow.innerHTML = '<span>📁</span><span class="file-entry-name">..</span>';
+    upRow.onclick = function() {{ loadDir(parentPath(path)); }};
+    list.appendChild(upRow);
+  }}
+  entries.forEach(function(entry) {{
+    const row = document.createElement('div');
+    row.className = 'file-entry';
+    const icon = entry.is_dir ? '📁' : '📄';
+    const sizeHtml = entry.is_dir ? '' : '<span class="file-entry-size">' + escHtml(formatSize(entry.size)) + '</span>';
+    row.innerHTML = '<span>' + icon + '</span><span class="file-entry-name">' + escHtml(entry.name) + '</span>' + sizeHtml;
+    if (entry.is_dir) {{
+      row.onclick = function() {{ loadDir(path.replace(/\/$/, '') + '/' + entry.name); }};
+    }} else {{
+      row.onclick = function() {{
+        window.location = '/sessions/' + vmId + '/download?path=' + encodeURIComponent(path.replace(/\/$/, '') + '/' + entry.name);
+      }};
+    }}
+    list.appendChild(row);
+  }});
+}}
+
+function parentPath(path) {{
+  const stripped = path.replace(/\/$/, '');
+  const idx = stripped.lastIndexOf('/');
+  if (idx <= 0) return '/';
+  const parent = stripped.substring(0, idx);
+  if (parent.length < fmUploadDir.length) return fmUploadDir;
+  return parent;
+}}
+
+function formatSize(n) {{
+  if (n >= 1048576) return (n / 1048576).toFixed(1) + ' MB';
+  if (n >= 1024) return (n / 1024).toFixed(1) + ' KB';
+  return n + ' B';
+}}
+
+function escHtml(s) {{
+  return s.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
+}}
+
+document.getElementById('fm-file-input').addEventListener('change', function() {{
+  if (!this.files[0]) return;
+  const file = this.files[0];
+  const remotePath = fmCurrentPath.replace(/\/$/, '') + '/' + file.name;
+  const status = document.getElementById('files-upload-status');
   status.className = '';
   status.textContent = 'Uploading…';
-  try {
-    const res = await fetch(this.action, { method: 'POST', body: new FormData(this) });
-    status.className = res.ok ? 'ok' : 'err';
-    status.textContent = res.ok ? 'Uploaded.' : 'Upload failed.';
-  } catch (_) {
-    status.className = 'err';
-    status.textContent = 'Network error.';
-  }
-  setTimeout(() => { status.textContent = ''; status.className = ''; }, 3000);
-});"#
+  const formData = new FormData();
+  formData.append('csrf_token', fmCsrfToken);
+  formData.append('path', remotePath);
+  formData.append('file', file);
+  fetch(fmUploadAction, {{ method: 'POST', body: formData }})
+    .then(function(res) {{
+      status.className = res.ok ? 'ok' : 'err';
+      status.textContent = res.ok ? 'Uploaded.' : 'Upload failed.';
+      if (res.ok) loadDir(fmCurrentPath);
+    }})
+    .catch(function() {{
+      status.className = 'err';
+      status.textContent = 'Network error.';
+    }})
+    .finally(function() {{
+      setTimeout(function() {{ status.textContent = ''; status.className = ''; }}, 3000);
+    }});
+  this.value = '';
+}});
+"#
+    )
 }
 
 fn format_terminal_script(vm_id: &str) -> String {
@@ -256,4 +316,3 @@ new ResizeObserver(() => fitAddon.fit()).observe(container);
 "#
     )
 }
-

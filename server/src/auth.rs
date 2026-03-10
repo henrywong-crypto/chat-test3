@@ -4,7 +4,6 @@ use axum::{
     response::{Html, IntoResponse, Redirect, Response},
 };
 use handlers::{callback, login, AppState as CognitoState, CallbackQuery};
-use store::upsert_user;
 use tower_sessions::Session;
 
 use crate::{state::AppState, templates::render_login_page};
@@ -53,15 +52,6 @@ pub(crate) async fn get_cognito_login_handler(
             (StatusCode::INTERNAL_SERVER_ERROR, login_error.to_string()).into_response()
         }
     }
-}
-
-pub(crate) async fn get_demo_handler(
-    session: Session,
-    State(state): State<AppState>,
-) -> impl IntoResponse {
-    let _ = upsert_user(&state.db, "demo").await;
-    let _ = session.insert("email", "demo").await;
-    Redirect::to("/sessions")
 }
 
 pub(crate) async fn get_callback_handler(

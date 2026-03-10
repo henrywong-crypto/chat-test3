@@ -1,6 +1,7 @@
 [package]
 name = "firecracker-manager"
 version = "0.1.0"
+description = "Lifecycle management for Firecracker microVMs: spawn, configure, network, MMDS, and cleanup"
 edition = "2021"
 
 [dependencies]
