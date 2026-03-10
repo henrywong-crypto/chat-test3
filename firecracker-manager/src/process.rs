@@ -9,17 +9,6 @@ use tokio::process::{Child, Command};
 
 use crate::vm::JailerConfig;
 
-pub(crate) fn spawn_firecracker(socket_path: &Path) -> Result<Child> {
-    Ok(Command::new("firecracker")
-        .args(["--api-sock", &socket_path.to_string_lossy()])
-        .stdin(Stdio::null())
-        .stdout(Stdio::null())
-        .stderr(Stdio::inherit())
-        .kill_on_drop(false)
-        .process_group(0)
-        .spawn()?)
-}
-
 pub(crate) fn spawn_firecracker_jailed(vm_id: &str, jailer: &JailerConfig) -> Result<Child> {
     Ok(Command::new(&jailer.jailer_path)
         .args([
@@ -75,10 +64,6 @@ pub(crate) async fn wait_for_socket(socket_path: &Path) -> Result<()> {
     })
     .await
     .context("timed out waiting for firecracker socket")
-}
-
-pub(crate) fn build_socket_path(socket_dir: &Path, vm_id: &str) -> PathBuf {
-    socket_dir.join(format!("fc-{vm_id}.socket"))
 }
 
 pub(crate) fn build_vm_boot_args(base_boot_args: &str, guest_ip: &str, net_idx: u32) -> String {

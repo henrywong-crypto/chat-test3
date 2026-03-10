@@ -1,9 +1,9 @@
+use std::path::Path;
 use anyhow::Result;
 use firecracker_client::{
     put_mmds, set_boot_source, set_drive, set_machine_config, set_mmds_config,
     set_network_interface, BootSource, Drive, MachineConfig, MmdsConfig, NetworkInterface,
 };
-use std::path::Path;
 
 use crate::vm::VmConfig;
 
@@ -85,10 +85,10 @@ async fn configure_mmds(
     set_mmds_config(
         socket_path,
         &MmdsConfig {
-            version: if vm_config.mmds_imds_compat { Some("V2".to_string()) } else { None },
+            version: vm_config.mmds_imds_compat.then(|| "V2".to_string()),
             network_interfaces: vec!["net1".to_string()],
             ipv4_address: None,
-            imds_compat: if vm_config.mmds_imds_compat { Some(true) } else { None },
+            imds_compat: vm_config.mmds_imds_compat.then_some(true),
         },
     )
     .await?;

@@ -7,6 +7,7 @@ use axum::{
 use bytes::Bytes;
 use russh::client::Handle;
 use russh_sftp::client::SftpSession;
+use std::path::Path as StdPath;
 use store::upsert_user;
 use tokio::io::AsyncWriteExt;
 use tower_sessions::Session;
@@ -14,6 +15,7 @@ use uuid::Uuid;
 
 use crate::{
     auth::User,
+    download::validate_within_dir,
     ssh::{connect_ssh, open_sftp_session, SshClient},
     state::{find_vm_guest_ip_for_user, AppError, AppState},
 };
@@ -114,7 +116,7 @@ async fn resolve_upload_path(
     remote_path: &str,
     upload_dir: &str,
 ) -> Result<String> {
-    let path = std::path::Path::new(remote_path);
+    let path = StdPath::new(remote_path);
     let parent = path.parent().and_then(|p| p.to_str()).unwrap_or(".");
     let filename = path
         .file_name()
@@ -132,12 +134,3 @@ async fn resolve_upload_path(
     Ok(resolved)
 }
 
-fn validate_within_dir(real_path: &str, allowed_dir: &str) -> Result<()> {
-    let allowed_dir = allowed_dir.trim_end_matches('/');
-    if !real_path.starts_with(allowed_dir)
-        || (real_path.len() > allowed_dir.len() && !real_path[allowed_dir.len()..].starts_with('/'))
-    {
-        bail!("path is outside the allowed directory");
-    }
-    Ok(())
-}

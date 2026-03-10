@@ -22,8 +22,6 @@ pub(crate) struct AppConfig {
     pub(crate) kernel_path: PathBuf,
     #[serde(default = "default_rootfs_path")]
     pub(crate) rootfs_path: PathBuf,
-    #[serde(default = "default_socket_dir")]
-    pub(crate) socket_dir: PathBuf,
     #[serde(default = "default_net_helper_path")]
     pub(crate) net_helper_path: PathBuf,
     #[serde(default = "default_ssh_key_path")]
@@ -52,8 +50,6 @@ pub(crate) struct AppConfig {
     pub(crate) database_url: String,
     #[serde(default = "default_port")]
     pub(crate) port: u16,
-    #[serde(default)]
-    pub(crate) use_jailer: bool,
     #[serde(default = "default_jailer_path")]
     pub(crate) jailer_path: PathBuf,
     #[serde(default = "default_firecracker_path")]
@@ -71,9 +67,6 @@ fn default_kernel_path() -> PathBuf {
 }
 fn default_rootfs_path() -> PathBuf {
     PathBuf::from("/var/lib/fc/rootfs.ext4")
-}
-fn default_socket_dir() -> PathBuf {
-    PathBuf::from("/tmp")
 }
 fn default_net_helper_path() -> PathBuf {
     PathBuf::from("/usr/local/bin/net-helper")

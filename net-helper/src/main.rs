@@ -1,5 +1,4 @@
 use std::process::Command;
-
 use anyhow::{bail, Context, Result};
 use ipnet::Ipv4Net;
 #[cfg(target_os = "linux")]

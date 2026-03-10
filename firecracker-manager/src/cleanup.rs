@@ -2,38 +2,16 @@ use std::path::Path;
 
 use crate::network::delete_tap;
 
-pub fn cleanup_stale_vms(
-    socket_dir: &Path,
-    net_helper_path: &Path,
-    jailer_chroot_base: Option<&Path>,
-) {
+pub fn cleanup_stale_vms(net_helper_path: &Path, jailer_chroot_base: &Path) {
     kill_stale_firecracker_processes();
-    delete_stale_socket_dir_files(socket_dir);
     delete_stale_tap_interfaces(net_helper_path);
-    if let Some(chroot_base) = jailer_chroot_base {
-        delete_stale_chroot_dirs(chroot_base);
-    }
+    delete_stale_chroot_dirs(jailer_chroot_base);
 }
 
 fn kill_stale_firecracker_processes() {
     let _ = std::process::Command::new("pkill")
         .args(["-f", "firecracker"])
         .status();
-}
-
-fn delete_stale_socket_dir_files(socket_dir: &Path) {
-    let Ok(entries) = std::fs::read_dir(socket_dir) else {
-        return;
-    };
-    for entry in entries.flatten() {
-        let path = entry.path();
-        let Some(name) = path.file_name().and_then(|n| n.to_str()) else {
-            continue;
-        };
-        if name.starts_with("fc-") && name.ends_with(".socket") {
-            let _ = std::fs::remove_file(&path);
-        }
-    }
 }
 
 fn delete_stale_tap_interfaces(net_helper_path: &Path) {

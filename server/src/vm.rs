@@ -1,12 +1,12 @@
 use anyhow::Result;
-use aws_config::default_provider::credentials::DefaultCredentialsChain;
-use aws_credential_types::{provider::ProvideCredentials, Credentials};
-use chrono::{DateTime, Utc};
-use firecracker_manager::{build_mmds_with_iam, put_mmds, ImdsCredential, JailerConfig, VmConfig};
 use std::{
     path::{Path, PathBuf},
     time::SystemTime,
 };
+use aws_config::default_provider::credentials::DefaultCredentialsChain;
+use aws_credential_types::{provider::ProvideCredentials, Credentials};
+use chrono::{DateTime, Utc};
+use firecracker_manager::{build_mmds_with_iam, put_mmds, ImdsCredential, JailerConfig, VmConfig};
 use tracing::{error, info, warn};
 use uuid::Uuid;
 
@@ -32,7 +32,6 @@ pub(crate) fn build_vm_config(
     };
     Ok(VmConfig {
         id: vm_id,
-        socket_dir: state.socket_dir.clone(),
         kernel_path: state.kernel_path.clone(),
         rootfs_path: user_rootfs
             .map(|p| p.to_path_buf())
@@ -43,13 +42,13 @@ pub(crate) fn build_vm_config(
         boot_args: "reboot=k panic=1 quiet loglevel=3 selinux=0 8250.nr_uarts=0".to_string(),
         mmds_metadata: Some(mmds_metadata),
         mmds_imds_compat,
-        jailer: state.use_jailer.then(|| JailerConfig {
+        jailer: JailerConfig {
             jailer_path: state.jailer_path.clone(),
             firecracker_path: state.firecracker_path.clone(),
             uid: state.jailer_uid,
             gid: state.jailer_gid,
             chroot_base: state.jailer_chroot_base.clone(),
-        }),
+        },
     })
 }
 

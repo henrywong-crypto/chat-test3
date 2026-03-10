@@ -6,9 +6,6 @@ kernel_path = "/var/lib/fc/vmlinux"
 # Base rootfs image (copied per-user on first login)
 rootfs_path = "/var/lib/fc/rootfs.ext4"
 
-# Directory for Firecracker Unix sockets
-socket_dir = "/tmp"
-
 # SSH private key for connecting to VMs
 ssh_key_path = "/var/lib/fc/id_rsa"
 
@@ -30,13 +27,12 @@ database_url = "postgres://localhost/webcode"
 # Port the server listens on
 port = 3000
 
-# Jailer process isolation (disabled by default)
-# use_jailer = false
-# jailer_path = "/usr/local/bin/jailer"
-# firecracker_path = "/usr/local/bin/firecracker"
-# jailer_uid = 1000   # uid of dedicated firecracker system user — do not use 0
-# jailer_gid = 1000   # gid of dedicated firecracker system group — do not use 0
-# jailer_chroot_base = "/srv/jailer"
+# Jailer process isolation (required)
+jailer_path = "/usr/local/bin/jailer"
+firecracker_path = "/usr/local/bin/firecracker"
+jailer_uid = 1000   # uid of dedicated firecracker system user — do not use 0
+jailer_gid = 1000   # gid of dedicated firecracker system group — do not use 0
+jailer_chroot_base = "/srv/jailer"
 
 # Cognito OAuth (leave empty to use demo login only)
 cognito_client_id = ""
