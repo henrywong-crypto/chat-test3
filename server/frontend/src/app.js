@@ -15,7 +15,7 @@ term.loadAddon(fitAddon);
 
 const container = document.getElementById('term-container');
 term.open(container);
-fitAddon.fit();
+requestAnimationFrame(() => fitAddon.fit());
 term.focus();
 
 const ws = new WebSocket(
@@ -35,7 +35,9 @@ ws.onmessage = e => term.write(new Uint8Array(e.data));
 ws.onclose = () => term.write('\r\n\x1b[2mconnection closed\x1b[0m\r\n');
 new ResizeObserver(() => fitAddon.fit()).observe(container);
 
-// ── File manager ──────────────────────────────────────────────────────────────
+document.getElementById('reset-form')?.addEventListener('submit', e => {
+  if (!confirm('Reset your environment? This cannot be undone.')) e.preventDefault();
+});
 
 let fmCurrentPath = fmUploadDir;
 let fmOpened = false;
@@ -48,12 +50,14 @@ function closePanel() {
   const panel = document.getElementById('files-panel');
   panel.classList.remove('flex');
   panel.classList.add('hidden');
+  fitAddon.fit();
 }
 
 function toggleFiles() {
   const panel = document.getElementById('files-panel');
   const isOpen = panel.classList.toggle('flex');
   panel.classList.toggle('hidden', !isOpen);
+  fitAddon.fit();
   if (isOpen && !fmOpened) {
     fmOpened = true;
     loadDir(fmCurrentPath);

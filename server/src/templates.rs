@@ -105,9 +105,9 @@ fn TerminalTopbar(csrf_token: String, has_user_rootfs: bool) -> impl IntoView {
             </div>
             <div class="flex items-center gap-2">
                 {has_user_rootfs.then(|| view! {
-                    <form method="post" action="/rootfs/delete">
+                    <form id="reset-form" method="post" action="/rootfs/delete">
                         <input type="hidden" name="csrf_token" value=csrf_token/>
-                        <button type="submit" class="btn btn-xs btn-ghost text-error" onclick="return confirm('Reset your environment? This cannot be undone.')">"Reset"</button>
+                        <button type="submit" class="btn btn-xs btn-ghost text-error">"Reset"</button>
                     </form>
                 })}
                 <button id="files-toggle-btn" class="btn btn-xs btn-ghost">"Files"</button>
