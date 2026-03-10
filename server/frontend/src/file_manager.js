@@ -62,7 +62,7 @@ function renderEntries(path, entries) {
         '<span class="file-entry-name">' + escHtml(entry.name) + '</span>' +
         '<span class="file-entry-size">' + escHtml(formatSize(entry.size)) + '</span>';
       row.onclick = function() {
-        window.open('/sessions/' + vmId + '/download?path=' + encodeURIComponent(entryPath), '_blank');
+        window.location.href = '/sessions/' + vmId + '/download?path=' + encodeURIComponent(entryPath);
       };
     }
     list.appendChild(row);
