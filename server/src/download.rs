@@ -1,4 +1,4 @@
-use anyhow::{bail, Context, Result};
+use anyhow::{Context, Result};
 use axum::{
     body::Body,
     extract::{Path, Query, State},
@@ -6,16 +6,18 @@ use axum::{
     response::IntoResponse,
 };
 use bytes::Bytes;
-use futures::Stream;
+use futures::{channel::mpsc, Stream};
 use russh::client::Handle;
 use russh_sftp::client::{fs::File as SftpFile, SftpSession};
 use serde::Deserialize;
 use std::{
     io,
+    path::Path as StdPath,
     pin::Pin,
     task::{Context as TaskContext, Poll},
 };
 use store::upsert_user;
+use tokio::sync::mpsc as tokio_mpsc;
 use tokio_util::io::ReaderStream;
 use uuid::Uuid;
 use zip::write::SimpleFileOptions;
@@ -27,6 +29,7 @@ use crate::{
 };
 
 const MAX_DOWNLOAD_BYTES: usize = 100 * 1024 * 1024; // 100 MB
+const MAX_ZIP_DEPTH: usize = 10;
 
 #[derive(Deserialize)]
 pub(crate) struct DownloadQuery {
@@ -66,13 +69,20 @@ pub(crate) async fn download_file_handler(
         .context("failed to stat remote path")?;
     if metadata.is_dir() {
         let dirname = extract_filename(&real_path).to_string();
-        let zip_data = build_directory_zip(&sftp, &real_path, &state.upload_dir).await?;
-        build_zip_response(zip_data, &format!("{dirname}.zip"))
+        Ok(build_streaming_zip_response(
+            ssh_handle,
+            sftp,
+            real_path,
+            state.upload_dir.clone(),
+            &format!("{dirname}.zip"),
+        ))
     } else {
         let filename = extract_filename(&real_path).to_string();
         build_streaming_file_response(ssh_handle, sftp, &real_path, &filename).await
     }
 }
+
+// ── Single-file streaming ─────────────────────────────────────────────────────
 
 async fn build_streaming_file_response(
     ssh_handle: Handle<SshClient>,
@@ -114,64 +124,217 @@ impl Stream for SftpFileStream {
     }
 }
 
-fn extract_filename(path: &str) -> &str {
-    path.rsplit('/').next().unwrap_or("download")
+// ── Directory zip streaming ───────────────────────────────────────────────────
+//
+// Backpressure chain when the client is slow:
+//   HTTP body stalls → zip_tx channel fills (cap 8) → spawn_blocking blocks on send
+//   → file_tx channel fills (cap 4) → async SFTP reader blocks on send → SFTP reads pause.
+//
+// Memory: O(largest single compressed file) — only the current file's bytes are buffered
+// inside SeekableChannelWriter; they are flushed to zip_tx as soon as zip finalises each
+// file entry (at the forward seek that follows the local-header update).
+
+fn build_streaming_zip_response(
+    ssh_handle: Handle<SshClient>,
+    sftp: SftpSession,
+    dir_path: String,
+    upload_dir: String,
+    filename: &str,
+) -> Response<Body> {
+    // Channel carrying ready zip bytes to the HTTP body (bounded → backpressure).
+    let (zip_tx, zip_rx) = mpsc::channel::<Result<Bytes, io::Error>>(8);
+    // Channel carrying (entry_name, raw_data) from the async SFTP reader to the blocking
+    // zip writer (bounded → limits how far ahead SFTP reads run).
+    let (file_tx, file_rx) = tokio_mpsc::channel::<(String, Vec<u8>)>(4);
+
+    tokio::spawn(collect_zip_files(ssh_handle, sftp, dir_path, upload_dir, file_tx));
+    tokio::task::spawn_blocking(move || write_zip_to_channel(file_rx, zip_tx));
+
+    let content_disposition =
+        HeaderValue::from_str(&format!("attachment; filename=\"{filename}\""))
+            .unwrap_or_else(|_| HeaderValue::from_static("attachment"));
+    Response::builder()
+        .header(header::CONTENT_TYPE, "application/zip")
+        .header(header::CONTENT_DISPOSITION, content_disposition)
+        .body(Body::from_stream(zip_rx))
+        .unwrap_or_else(|_| StatusCode::INTERNAL_SERVER_ERROR.into_response())
 }
 
-const MAX_ZIP_DEPTH: usize = 10;
-
-async fn build_directory_zip(
-    sftp: &SftpSession,
-    dir_path: &str,
-    upload_dir: &str,
-) -> Result<Vec<u8>> {
-    let mut cursor = std::io::Cursor::new(Vec::new());
-    let mut zip = zip::ZipWriter::new(&mut cursor);
-    let options = SimpleFileOptions::default().compression_method(zip::CompressionMethod::Deflated);
+/// Async task: walks the SFTP directory tree and sends `(zip_entry_name, raw_bytes)` pairs.
+async fn collect_zip_files(
+    _ssh_handle: Handle<SshClient>,
+    sftp: SftpSession,
+    dir_path: String,
+    upload_dir: String,
+    file_tx: tokio_mpsc::Sender<(String, Vec<u8>)>,
+) {
     let mut total_bytes: usize = 0;
-    let mut dirs_to_visit: Vec<(String, usize)> = vec![(dir_path.to_string(), 0)];
+    let mut dirs_to_visit: Vec<(String, usize)> = vec![(dir_path.clone(), 0)];
     while let Some((dir, depth)) = dirs_to_visit.pop() {
-        let read_dir = sftp
-            .read_dir(&dir)
-            .await
-            .context("failed to read remote directory")?;
+        let read_dir = match sftp.read_dir(&dir).await {
+            Ok(entries) => entries,
+            Err(_) => return,
+        };
         for entry in read_dir {
             let name = entry.file_name();
             if name == "." || name == ".." {
                 continue;
             }
             let child_path = format!("{}/{}", dir.trim_end_matches('/'), name);
-            let file_type = entry.file_type();
-            if file_type.is_symlink() {
+            if entry.file_type().is_symlink() {
                 continue;
             }
-            // child_path is already canonical: dir_path was canonicalized by the caller,
-            // name is a bare filename from read_dir (no path separators), and symlinks are skipped.
-            validate_within_dir(&child_path, upload_dir)?;
-            if file_type.is_dir() {
+            if validate_within_dir(&child_path, &upload_dir).is_err() {
+                continue;
+            }
+            if entry.file_type().is_dir() {
                 if depth + 1 < MAX_ZIP_DEPTH {
                     dirs_to_visit.push((child_path, depth + 1));
                 }
-            } else {
-                let relative = child_path
-                    .strip_prefix(dir_path)
-                    .unwrap_or(&child_path)
-                    .trim_start_matches('/');
-                let data = read_file_buffered(sftp, &child_path).await?;
-                total_bytes += data.len();
-                if total_bytes > MAX_DOWNLOAD_BYTES {
-                    bail!("directory exceeds maximum download size of 100 MB");
-                }
-                zip.start_file(relative, options)
-                    .context("failed to add file to zip")?;
-                std::io::Write::write_all(&mut zip, &data)
-                    .context("failed to write file data to zip")?;
+                continue;
+            }
+            let data = match read_file_buffered(&sftp, &child_path).await {
+                Ok(data) => data,
+                Err(_) => return,
+            };
+            total_bytes += data.len();
+            if total_bytes > MAX_DOWNLOAD_BYTES {
+                return;
+            }
+            let relative = child_path
+                .strip_prefix(&dir_path)
+                .unwrap_or(&child_path)
+                .trim_start_matches('/')
+                .to_owned();
+            if file_tx.send((relative, data)).await.is_err() {
+                return;
             }
         }
     }
-    zip.finish().context("failed to finalize zip")?;
-    Ok(cursor.into_inner())
 }
+
+/// Blocking task: receives file data from the async reader and builds the zip using a
+/// `SeekableChannelWriter`, which streams each file's compressed bytes to `zip_tx` as
+/// soon as zip finalises the local entry (at the forward-seek after updating its header).
+fn write_zip_to_channel(
+    mut file_rx: tokio_mpsc::Receiver<(String, Vec<u8>)>,
+    zip_tx: mpsc::Sender<Result<Bytes, io::Error>>,
+) {
+    let options =
+        SimpleFileOptions::default().compression_method(zip::CompressionMethod::Deflated);
+    let mut writer = SeekableChannelWriter::new(zip_tx);
+    let mut zip = zip::ZipWriter::new(&mut writer);
+    while let Some((name, data)) = file_rx.blocking_recv() {
+        if zip.start_file(&name, options).is_err() {
+            return;
+        }
+        if io::Write::write_all(&mut zip, &data).is_err() {
+            return;
+        }
+    }
+    if let Ok(inner) = zip.finish() {
+        let _ = inner.flush_remaining();
+    }
+}
+
+// ── SeekableChannelWriter ─────────────────────────────────────────────────────
+//
+// The zip crate requires Write + Seek.  It uses seeks in exactly one pattern per file:
+//   1. Write local header (unknowing CRC/sizes yet)  → pos advances to header_end
+//   2. Write compressed data                         → pos advances to file_end (= high_water)
+//   3. Seek BACK to header_start                     → pos drops below high_water
+//   4. Overwrite header with real CRC/sizes          → pos back at header_end
+//   5. Seek FORWARD to file_end                      → pos == high_water → flush
+//
+// At step 5 pos reaches high_water again: everything in the buffer is finalised for
+// that entry and can be sent to the channel.  The buffer then drains to zero and
+// the cycle repeats for the next file.
+
+struct SeekableChannelWriter {
+    buf: Vec<u8>,       // unflushed bytes; buf[0] corresponds to logical offset `base`
+    base: u64,          // logical offset of buf[0]
+    pos: u64,           // current write/seek position
+    high_water: u64,    // highest position ever written
+    tx: mpsc::Sender<Result<Bytes, io::Error>>,
+}
+
+impl SeekableChannelWriter {
+    fn new(tx: mpsc::Sender<Result<Bytes, io::Error>>) -> Self {
+        Self { buf: Vec::new(), base: 0, pos: 0, high_water: 0, tx }
+    }
+
+    /// Flush `buf[0..high_water-base]` to the channel and remove those bytes from the buffer.
+    fn flush_to_high_water(&mut self) -> io::Result<()> {
+        let flush_len = (self.high_water - self.base) as usize;
+        if flush_len == 0 || flush_len > self.buf.len() {
+            return Ok(());
+        }
+        let chunk = Bytes::copy_from_slice(&self.buf[..flush_len]);
+        futures::executor::block_on(self.tx.send(Ok(chunk)))
+            .map_err(|_| io::Error::new(io::ErrorKind::BrokenPipe, "zip receiver dropped"))?;
+        self.buf.drain(..flush_len);
+        self.base = self.high_water;
+        Ok(())
+    }
+
+    /// Flush all remaining buffered bytes after `zip.finish()`.
+    fn flush_remaining(mut self) -> io::Result<()> {
+        if self.buf.is_empty() {
+            return Ok(());
+        }
+        let chunk = Bytes::copy_from_slice(&self.buf);
+        futures::executor::block_on(self.tx.send(Ok(chunk)))
+            .map_err(|_| io::Error::new(io::ErrorKind::BrokenPipe, "zip receiver dropped"))
+    }
+}
+
+impl io::Write for SeekableChannelWriter {
+    fn write(&mut self, data: &[u8]) -> io::Result<usize> {
+        let start = (self.pos - self.base) as usize;
+        let end = start + data.len();
+        if end > self.buf.len() {
+            self.buf.resize(end, 0);
+        }
+        self.buf[start..end].copy_from_slice(data);
+        self.pos += data.len() as u64;
+        self.high_water = self.high_water.max(self.pos);
+        Ok(data.len())
+    }
+
+    fn flush(&mut self) -> io::Result<()> {
+        Ok(())
+    }
+}
+
+impl io::Seek for SeekableChannelWriter {
+    fn seek(&mut self, from: io::SeekFrom) -> io::Result<u64> {
+        let new_pos: u64 = match from {
+            io::SeekFrom::Start(p) => p,
+            io::SeekFrom::Current(off) => (self.pos as i64 + off) as u64,
+            io::SeekFrom::End(_) => {
+                return Err(io::Error::new(
+                    io::ErrorKind::Unsupported,
+                    "seek from end not supported",
+                ));
+            }
+        };
+        if new_pos < self.base {
+            return Err(io::Error::new(
+                io::ErrorKind::InvalidInput,
+                "cannot seek before already-flushed data",
+            ));
+        }
+        // Step 5 in the per-file pattern: zip seeks forward back to high_water after
+        // overwriting the local header.  Flush all buffered bytes for this entry.
+        if new_pos >= self.high_water {
+            self.flush_to_high_water()?;
+        }
+        self.pos = new_pos;
+        Ok(self.pos)
+    }
+}
+
+// ── Helpers ───────────────────────────────────────────────────────────────────
 
 async fn read_file_buffered(sftp: &SftpSession, path: &str) -> Result<Vec<u8>> {
     use tokio::io::AsyncReadExt;
@@ -186,32 +349,13 @@ async fn read_file_buffered(sftp: &SftpSession, path: &str) -> Result<Vec<u8>> {
     Ok(buf)
 }
 
+fn extract_filename(path: &str) -> &str {
+    path.rsplit('/').next().unwrap_or("download")
+}
+
 pub(crate) fn validate_within_dir(real_path: &str, allowed_dir: &str) -> Result<()> {
-    let allowed_dir = allowed_dir.trim_end_matches('/');
-    if !real_path.starts_with(allowed_dir)
-        || (real_path.len() > allowed_dir.len() && !real_path[allowed_dir.len()..].starts_with('/'))
-    {
-        bail!("path is outside the allowed directory");
+    if !StdPath::new(real_path).starts_with(allowed_dir) {
+        anyhow::bail!("path is outside the allowed directory");
     }
     Ok(())
-}
-
-fn build_zip_response(data: Vec<u8>, filename: &str) -> Result<Response<Body>, AppError> {
-    build_buffered_response(data, "application/zip", filename)
-}
-
-fn build_buffered_response(
-    data: Vec<u8>,
-    content_type: &str,
-    filename: &str,
-) -> Result<Response<Body>, AppError> {
-    let content_disposition =
-        HeaderValue::from_str(&format!("attachment; filename=\"{filename}\""))
-            .unwrap_or_else(|_| HeaderValue::from_static("attachment"));
-    let response = Response::builder()
-        .header(header::CONTENT_TYPE, content_type)
-        .header(header::CONTENT_DISPOSITION, content_disposition)
-        .body(Body::from(data))
-        .context("failed to build response")?;
-    Ok(response)
 }
