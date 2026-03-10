@@ -100,7 +100,7 @@ fn TerminalTopbar(short_id: String, csrf_token: String, has_user_rootfs: bool) -
                         <button type="submit" class="btn btn-ghost">"Reset"</button>
                     </form>
                 })}
-                <button class="btn" onclick="toggleFiles()">"📁 Files"</button>
+                <button id="files-toggle-btn" class="btn">"📁 Files"</button>
                 <a href="/logout" class="btn btn-ghost">"Logout"</a>
             </div>
         </div>
@@ -113,7 +113,7 @@ fn FilesPanel() -> impl IntoView {
         <div id="files-panel">
             <div id="files-header">
                 <span id="files-breadcrumb"/>
-                <button class="btn btn-ghost" style="padding:2px 6px" onclick="toggleFiles()">"✕"</button>
+                <button id="files-close-btn" class="btn btn-ghost" style="padding:2px 6px">"✕"</button>
             </div>
             <div id="files-list"/>
             <div id="files-footer">

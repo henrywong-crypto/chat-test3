@@ -7,7 +7,9 @@ const fmUploadAction = config.uploadAction;
 let fmCurrentPath = fmUploadDir;
 let fmOpened = false;
 
-window.toggleFiles = function toggleFiles() {
+document.getElementById('files-toggle-btn').addEventListener('click', toggleFiles);
+document.getElementById('files-close-btn').addEventListener('click', toggleFiles);
+function toggleFiles() {
   const panel = document.getElementById('files-panel');
   panel.classList.toggle('open');
   if (panel.classList.contains('open') && !fmOpened) {

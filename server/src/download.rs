@@ -118,6 +118,8 @@ fn extract_filename(path: &str) -> &str {
     path.rsplit('/').next().unwrap_or("download")
 }
 
+const MAX_ZIP_DEPTH: usize = 10;
+
 async fn build_directory_zip(
     sftp: &SftpSession,
     dir_path: &str,
@@ -127,8 +129,8 @@ async fn build_directory_zip(
     let mut zip = zip::ZipWriter::new(&mut cursor);
     let options = SimpleFileOptions::default().compression_method(zip::CompressionMethod::Deflated);
     let mut total_bytes: usize = 0;
-    let mut dirs_to_visit = vec![dir_path.to_string()];
-    while let Some(dir) = dirs_to_visit.pop() {
+    let mut dirs_to_visit: Vec<(String, usize)> = vec![(dir_path.to_string(), 0)];
+    while let Some((dir, depth)) = dirs_to_visit.pop() {
         let read_dir = sftp
             .read_dir(&dir)
             .await
@@ -142,7 +144,9 @@ async fn build_directory_zip(
             }
             validate_within_dir(&child_path, upload_dir)?;
             if file_type.is_dir() {
-                dirs_to_visit.push(child_path);
+                if depth + 1 < MAX_ZIP_DEPTH {
+                    dirs_to_visit.push((child_path, depth + 1));
+                }
             } else {
                 let relative = child_path
                     .strip_prefix(dir_path)
