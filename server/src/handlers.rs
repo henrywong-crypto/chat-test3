@@ -67,9 +67,16 @@ fn find_user_vm_id(vms: &VmRegistry, user_id: Uuid) -> Option<String> {
 }
 
 fn remove_user_vm(vms: &VmRegistry, user_id: Uuid) {
-    if let Ok(mut registry) = vms.lock() {
-        registry.retain(|_, e| e.user_id != user_id);
-    }
+    let removed: Vec<VmEntry> = {
+        let Ok(mut registry) = vms.lock() else { return };
+        let vm_ids: Vec<String> = registry
+            .iter()
+            .filter(|(_, e)| e.user_id == user_id)
+            .map(|(id, _)| id.clone())
+            .collect();
+        vm_ids.into_iter().filter_map(|id| registry.remove(&id)).collect()
+    };
+    drop(removed);
 }
 
 pub(crate) async fn get_or_create_terminal(
