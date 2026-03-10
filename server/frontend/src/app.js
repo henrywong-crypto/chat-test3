@@ -115,9 +115,8 @@ function renderBreadcrumb(path) {
     breadcrumb.textContent = normalized;
     return;
   }
-  const rootLabel = root.split('/').pop() || root;
   const rootSpan = document.createElement('span');
-  rootSpan.textContent = rootLabel;
+  rootSpan.textContent = '~';
   breadcrumb.appendChild(rootSpan);
   const suffix = normalized.slice(root.length);
   const subParts = suffix.split('/').filter(Boolean);
