@@ -7,7 +7,7 @@ use std::{
 use aws_config::default_provider::credentials::DefaultCredentialsChain;
 use aws_credential_types::{provider::ProvideCredentials, Credentials};
 use time::{format_description::well_known::Rfc3339, OffsetDateTime};
-use firecracker_manager::{build_mmds_with_iam, put_mmds, ImdsCredential, JailerConfig, Vm, VmConfig};
+use firecracker_manager::{build_mmds_with_iam, put_mmds, ImdsCredential, JailerConfig, VmConfig};
 use tracing::{error, info, warn};
 use uuid::Uuid;
 
