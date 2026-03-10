@@ -15,7 +15,7 @@ term.loadAddon(fitAddon);
 
 const container = document.getElementById('term-container');
 term.open(container);
-requestAnimationFrame(() => fitAddon.fit());
+requestAnimationFrame(() => requestAnimationFrame(() => fitAddon.fit()));
 term.focus();
 
 const ws = new WebSocket(
