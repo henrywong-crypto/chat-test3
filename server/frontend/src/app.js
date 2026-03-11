@@ -73,17 +73,21 @@ function loadDir(path) {
     });
 }
 
+const ICON_DIR  = '\u25b8';
+const ICON_FILE = '\u00b7';
+const ICON_UP   = '\u2039';
+
 function renderEntries(path, entries) {
   renderBreadcrumb(path);
   const list = document.getElementById('files-list');
   list.innerHTML = '';
   if (path !== fmUploadDir) {
-    list.appendChild(buildEntryRow('..', 'opacity-50 flex-1 truncate', () => loadDir(parentPath(path))));
+    list.appendChild(buildEntryRow(ICON_UP, '..', 'opacity-50 flex-1 truncate', () => loadDir(parentPath(path))));
   }
   for (const entry of entries) {
     const entryPath = path.replace(/\/$/, '') + '/' + entry.name;
     if (entry.is_dir) {
-      const row = buildEntryRow(entry.name, 'text-info flex-1 truncate', () => loadDir(entryPath));
+      const row = buildEntryRow(ICON_DIR, entry.name, 'text-info flex-1 truncate', () => loadDir(entryPath));
       const dl = document.createElement('span');
       dl.className = 'text-xs opacity-40 hover:opacity-100 px-1 cursor-pointer';
       dl.title = 'Download as zip';
@@ -92,7 +96,7 @@ function renderEntries(path, entries) {
       row.appendChild(dl);
       list.appendChild(row);
     } else {
-      const row = buildEntryRow(entry.name, 'flex-1 truncate', () => { window.location.href = '/sessions/' + vmId + '/download?path=' + encodeURIComponent(entryPath); });
+      const row = buildEntryRow(ICON_FILE, entry.name, 'flex-1 truncate', () => { window.location.href = '/sessions/' + vmId + '/download?path=' + encodeURIComponent(entryPath); });
       const size = document.createElement('span');
       size.className = 'text-xs opacity-50 whitespace-nowrap';
       size.textContent = formatSize(entry.size);
@@ -152,10 +156,14 @@ function renderBreadcrumb(path) {
   });
 }
 
-function buildEntryRow(name, nameClass, onclick) {
+function buildEntryRow(icon, name, nameClass, onclick) {
   const row = document.createElement('div');
   row.className = 'flex items-center gap-2 px-3 py-1.5 cursor-pointer border-b border-base-300 text-xs hover:bg-base-300';
   row.onclick = onclick;
+  const iconEl = document.createElement('span');
+  iconEl.className = 'opacity-40 shrink-0';
+  iconEl.textContent = icon;
+  row.appendChild(iconEl);
   const nameEl = document.createElement('span');
   nameEl.className = nameClass;
   nameEl.textContent = name;
@@ -207,3 +215,184 @@ document.getElementById('fm-file-input').addEventListener('change', function() {
   uploadFile(this.files[0]);
   this.value = '';
 });
+
+// ── Chat panel ────────────────────────────────────────────────────────────────
+
+const wsBase = (location.protocol === 'https:' ? 'wss:' : 'ws:') + '//' + location.host;
+
+let chatSessionId = null;
+let chatWs = null;
+let chatStreaming = false;
+let currentAssistantEl = null;
+let pendingToolApprovals = 0;
+
+document.getElementById('chat-toggle-btn').addEventListener('click', toggleChat);
+document.getElementById('chat-close-btn').addEventListener('click', closeChatPanel);
+document.getElementById('chat-send-btn').addEventListener('click', () => {
+  const input = document.getElementById('chat-input');
+  const content = input.value.trim();
+  if (!content || chatStreaming) return;
+  input.value = '';
+  sendQuery(content);
+});
+document.getElementById('chat-input').addEventListener('keydown', e => {
+  if (e.key === 'Enter' && !e.shiftKey) {
+    e.preventDefault();
+    document.getElementById('chat-send-btn').click();
+  }
+});
+
+function closeChatPanel() {
+  const panel = document.getElementById('chat-panel');
+  panel.classList.remove('flex');
+  panel.classList.add('hidden');
+}
+
+function toggleChat() {
+  const panel = document.getElementById('chat-panel');
+  const isOpen = panel.classList.toggle('flex');
+  panel.classList.toggle('hidden', !isOpen);
+  if (isOpen && !chatWs) {
+    connectChatWs();
+  }
+}
+
+function connectChatWs() {
+  chatWs = new WebSocket(wsBase + '/sessions/' + vmId + '/chat');
+  chatWs.onmessage = e => {
+    const data = JSON.parse(e.data);
+    if (data.type === 'session-started') {
+      chatSessionId = data.session_id;
+    } else if (data.type === 'text') {
+      appendToAssistantBubble(data.content);
+    } else if (data.type === 'tool-use') {
+      currentAssistantEl = null;
+      appendToolUseRow(data.tool_name, data.input);
+    } else if (data.type === 'tool-result') {
+      appendToolResultRow(data.output, data.is_error);
+      pendingToolApprovals = Math.max(0, pendingToolApprovals - 1);
+      if (pendingToolApprovals === 0) unlockSend();
+    } else if (data.type === 'complete') {
+      chatSessionId = data.session_id;
+      currentAssistantEl = null;
+      chatStreaming = false;
+      unlockSend();
+    } else if (data.type === 'error') {
+      currentAssistantEl = null;
+      appendErrorRow(data.message);
+      chatStreaming = false;
+      unlockSend();
+    }
+  };
+  chatWs.onclose = () => {
+    chatWs = null;
+    chatStreaming = false;
+    unlockSend();
+  };
+}
+
+function sendQuery(content) {
+  appendUserBubble(content);
+  currentAssistantEl = null;
+  chatStreaming = true;
+  lockSend();
+  chatWs.send(JSON.stringify({ type: 'query', content, session_id: chatSessionId }));
+}
+
+function lockSend() {
+  document.getElementById('chat-send-btn').disabled = true;
+  document.getElementById('chat-input').disabled = true;
+}
+
+function unlockSend() {
+  document.getElementById('chat-send-btn').disabled = false;
+  document.getElementById('chat-input').disabled = false;
+}
+
+function appendUserBubble(content) {
+  const messages = document.getElementById('chat-messages');
+  const row = document.createElement('div');
+  row.className = 'chat chat-end';
+  const bubble = document.createElement('div');
+  bubble.className = 'chat-bubble chat-bubble-primary text-sm whitespace-pre-wrap';
+  bubble.textContent = content;
+  row.appendChild(bubble);
+  messages.appendChild(row);
+  messages.scrollTop = messages.scrollHeight;
+}
+
+function appendAssistantBubble() {
+  const messages = document.getElementById('chat-messages');
+  const row = document.createElement('div');
+  row.className = 'chat chat-start';
+  const bubble = document.createElement('div');
+  bubble.className = 'chat-bubble text-sm whitespace-pre-wrap';
+  row.appendChild(bubble);
+  messages.appendChild(row);
+  messages.scrollTop = messages.scrollHeight;
+  return bubble;
+}
+
+function appendToAssistantBubble(text) {
+  if (!currentAssistantEl) {
+    currentAssistantEl = appendAssistantBubble();
+  }
+  currentAssistantEl.textContent += text;
+  document.getElementById('chat-messages').scrollTop = document.getElementById('chat-messages').scrollHeight;
+}
+
+function appendToolUseRow(name, input) {
+  const messages = document.getElementById('chat-messages');
+  const row = document.createElement('div');
+  row.className = 'bg-base-300 rounded text-xs font-mono p-2 flex flex-col gap-1';
+  const header = document.createElement('div');
+  header.className = 'flex items-center gap-2';
+  const label = document.createElement('span');
+  label.className = 'opacity-70';
+  label.textContent = '\u25b8 ' + name + ': ' + JSON.stringify(input);
+  header.appendChild(label);
+  const allowBtn = document.createElement('button');
+  allowBtn.className = 'btn btn-xs btn-success ml-auto';
+  allowBtn.textContent = 'Allow';
+  const denyBtn = document.createElement('button');
+  denyBtn.className = 'btn btn-xs btn-error';
+  denyBtn.textContent = 'Deny';
+  allowBtn.addEventListener('click', () => {
+    allowBtn.remove();
+    denyBtn.remove();
+    chatWs.send(JSON.stringify({ type: 'tool-response', allow: true }));
+  });
+  denyBtn.addEventListener('click', () => {
+    allowBtn.remove();
+    denyBtn.remove();
+    chatWs.send(JSON.stringify({ type: 'tool-response', allow: false }));
+    pendingToolApprovals = Math.max(0, pendingToolApprovals - 1);
+    if (pendingToolApprovals === 0) unlockSend();
+  });
+  header.appendChild(allowBtn);
+  header.appendChild(denyBtn);
+  row.appendChild(header);
+  messages.appendChild(row);
+  messages.scrollTop = messages.scrollHeight;
+  pendingToolApprovals++;
+  lockSend();
+}
+
+function appendToolResultRow(output, isError) {
+  const messages = document.getElementById('chat-messages');
+  const row = document.createElement('div');
+  row.className = 'opacity-60 text-xs font-mono pl-4 whitespace-pre-wrap' + (isError ? ' text-error' : '');
+  row.textContent = output;
+  messages.appendChild(row);
+  messages.scrollTop = messages.scrollHeight;
+}
+
+function appendErrorRow(message) {
+  const messages = document.getElementById('chat-messages');
+  const row = document.createElement('div');
+  row.className = 'text-error text-xs p-2 bg-base-300 rounded';
+  row.textContent = 'Error: ' + message;
+  messages.appendChild(row);
+  messages.scrollTop = messages.scrollHeight;
+}
+

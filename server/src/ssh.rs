@@ -89,6 +89,15 @@ pub(crate) async fn open_terminal_channel(
     Ok(ssh_channel)
 }
 
+pub(crate) async fn open_exec_channel(
+    ssh_handle: &mut Handle<SshClient>,
+    command: &str,
+) -> Result<Channel<client::Msg>> {
+    let ssh_channel = ssh_handle.channel_open_session().await?;
+    ssh_channel.exec(false, command).await?;
+    Ok(ssh_channel)
+}
+
 pub(crate) async fn open_sftp_session(ssh_handle: &mut Handle<SshClient>) -> Result<SftpSession> {
     let ssh_channel = ssh_handle.channel_open_session().await?;
     ssh_channel.request_subsystem(true, "sftp").await?;

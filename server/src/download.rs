@@ -8,8 +8,8 @@ use axum::{
 };
 use download::{
     file::build_streaming_file_response,
-    zip::build_streaming_zip_response,
     validate_within_dir,
+    zip::build_streaming_zip_response,
 };
 use serde::Deserialize;
 use store::upsert_user;

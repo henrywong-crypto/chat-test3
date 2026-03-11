@@ -2,11 +2,9 @@ use anyhow::Context;
 use axum::{
     body::Body,
     http::{header, HeaderValue, Response},
-    response::IntoResponse,
 };
 use bytes::Bytes;
 use futures::Stream;
-use russh::client::{Handle, Handler};
 use russh_sftp::client::{fs::File as SftpFile, SftpSession};
 use std::{
     io,
@@ -15,23 +13,18 @@ use std::{
 };
 use tokio_util::io::ReaderStream;
 
-pub async fn build_streaming_file_response<C>(
-    ssh_handle: Handle<C>,
+pub async fn build_streaming_file_response(
     sftp: SftpSession,
     path: &str,
     filename: &str,
-) -> anyhow::Result<Response<Body>>
-where
-    C: Handler + Send + 'static,
-{
+) -> anyhow::Result<Response<Body>> {
     let file = sftp
         .open(path)
         .await
         .context("failed to open remote file")?;
     let stream = SftpFileStream {
         inner: ReaderStream::new(file),
-        _sftp: sftp,
-        _ssh_handle: ssh_handle,
+        sftp,
     };
     let content_disposition =
         HeaderValue::from_str(&format!("attachment; filename=\"{filename}\""))
@@ -44,13 +37,12 @@ where
     Ok(response)
 }
 
-struct SftpFileStream<C: Handler> {
+struct SftpFileStream {
     inner: ReaderStream<SftpFile>,
-    _sftp: SftpSession,
-    _ssh_handle: Handle<C>,
+    sftp: SftpSession,
 }
 
-impl<C: Handler> Stream for SftpFileStream<C> {
+impl Stream for SftpFileStream {
     type Item = Result<Bytes, io::Error>;
 
     fn poll_next(mut self: Pin<&mut Self>, cx: &mut TaskContext<'_>) -> Poll<Option<Self::Item>> {

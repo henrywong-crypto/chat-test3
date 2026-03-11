@@ -6,7 +6,6 @@ use axum::{
 };
 use bytes::Bytes;
 use futures::{channel::mpsc, SinkExt};
-use russh::client::{Handle, Handler};
 use russh_sftp::client::SftpSession;
 use std::io;
 use tokio::sync::mpsc as tokio_mpsc;
@@ -17,22 +16,18 @@ use crate::validate_within_dir;
 const MAX_DOWNLOAD_BYTES: usize = 100 * 1024 * 1024; // 100 MB
 const MAX_ZIP_DEPTH: usize = 10;
 
-pub fn build_streaming_zip_response<C>(
-    ssh_handle: Handle<C>,
+pub fn build_streaming_zip_response(
     sftp: SftpSession,
     dir_path: String,
     upload_dir: String,
     filename: &str,
-) -> Response<Body>
-where
-    C: Handler + Send + 'static,
-{
+) -> Response<Body> {
     // zip bytes → HTTP body (bounded for backpressure)
     let (zip_tx, zip_rx) = mpsc::channel::<Result<Bytes, io::Error>>(8);
     // file data → zip writer (bounded to limit SFTP read-ahead)
     let (file_tx, file_rx) = tokio_mpsc::channel::<(String, Vec<u8>)>(4);
 
-    tokio::spawn(collect_zip_files(ssh_handle, sftp, dir_path, upload_dir, file_tx));
+    tokio::spawn(collect_zip_files(sftp, dir_path, upload_dir, file_tx));
     tokio::task::spawn_blocking(move || write_zip_to_channel(file_rx, zip_tx));
 
     let content_disposition =
@@ -45,15 +40,12 @@ where
         .unwrap_or_else(|_| StatusCode::INTERNAL_SERVER_ERROR.into_response())
 }
 
-async fn collect_zip_files<C>(
-    _ssh_handle: Handle<C>,
+async fn collect_zip_files(
     sftp: SftpSession,
     dir_path: String,
     upload_dir: String,
     file_tx: tokio_mpsc::Sender<(String, Vec<u8>)>,
-) where
-    C: Handler + Send + 'static,
-{
+) {
     let mut total_bytes: usize = 0;
     let mut dirs_to_visit: Vec<(String, usize)> = vec![(dir_path.clone(), 0)];
     while let Some((dir, depth)) = dirs_to_visit.pop() {

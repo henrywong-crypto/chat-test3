@@ -85,10 +85,11 @@ fn TerminalPage(
                     data-upload-dir=upload_dir
                     data-upload-action=upload_action
                 />
-                <TerminalTopbar csrf_token=csrf_token has_user_rootfs=has_user_rootfs/>
+                <TerminalTopbar csrf_token=csrf_token has_user_rootfs=has_user_rootfs short_id=short_id/>
                 <div class="flex flex-1 min-h-0">
                     <div id="term-container" class="flex-1 min-h-0 bg-black"/>
                     <FilesPanel/>
+                    <ChatPanel/>
                 </div>
                 <script src=app_js_src defer/>
             </body>
@@ -97,11 +98,12 @@ fn TerminalPage(
 }
 
 #[component]
-fn TerminalTopbar(csrf_token: String, has_user_rootfs: bool) -> impl IntoView {
+fn TerminalTopbar(csrf_token: String, has_user_rootfs: bool, short_id: String) -> impl IntoView {
     view! {
         <div class="flex items-center justify-between h-10 px-4 bg-base-200 border-b border-base-300 shrink-0">
             <div class="flex items-center gap-3">
                 <span class="text-sm font-semibold">"WebCode"</span>
+                <span class="badge badge-neutral font-mono text-xs">{short_id}</span>
             </div>
             <div class="flex items-center gap-2">
                 {has_user_rootfs.then(|| view! {
@@ -126,6 +128,7 @@ fn TerminalTopbar(csrf_token: String, has_user_rootfs: bool) -> impl IntoView {
                     </dialog>
                 })}
                 <button id="files-toggle-btn" class="btn btn-xs btn-ghost">"Files"</button>
+                <button id="chat-toggle-btn" class="btn btn-xs btn-ghost">"Chat"</button>
                 <a href="/logout" class="btn btn-xs btn-ghost">"Logout"</a>
             </div>
         </div>
@@ -148,6 +151,28 @@ fn FilesPanel() -> impl IntoView {
                 <input type="file" id="fm-file-input" class="hidden"/>
                 <label for="fm-file-input" class="btn btn-outline btn-xs flex-1">"↑ Upload here"</label>
                 <span id="files-upload-status" class="text-xs"/>
+            </div>
+        </div>
+    }
+}
+
+#[component]
+fn ChatPanel() -> impl IntoView {
+    view! {
+        <div id="chat-panel" class="hidden w-96 shrink-0 flex-col bg-base-200 border-l border-base-300 overflow-hidden">
+            <div class="flex items-center justify-between px-3 py-2 border-b border-base-300 shrink-0">
+                <span class="font-semibold text-sm">"Chat"</span>
+                <button id="chat-close-btn" class="btn btn-xs btn-ghost btn-square">"✕"</button>
+            </div>
+            <div id="chat-messages" class="flex-1 overflow-y-auto p-3 flex flex-col gap-2"/>
+            <div class="flex items-end gap-2 px-3 py-2 border-t border-base-300 shrink-0">
+                <textarea
+                    id="chat-input"
+                    class="textarea textarea-bordered textarea-xs flex-1 resize-none"
+                    rows="2"
+                    placeholder="Ask Claude\u2026"
+                />
+                <button id="chat-send-btn" class="btn btn-xs btn-primary">"Send \u23ce"</button>
             </div>
         </div>
     }

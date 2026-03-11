@@ -1,4 +1,5 @@
 mod auth;
+mod chat;
 mod download;
 mod files;
 mod handlers;
@@ -30,6 +31,7 @@ use crate::{
     auth::{
         get_callback_handler, get_cognito_login_handler, get_login_handler, get_logout_handler,
     },
+    chat::handle_chat_ws_upgrade,
     download::download_file_handler,
     files::list_files_handler,
     handlers::{delete_user_rootfs_handler, get_or_create_terminal, get_terminal_page},
@@ -85,6 +87,7 @@ fn build_router(app_state: AppState, session_store: PostgresStore) -> Router {
         .route("/sessions/{id}/download", get(download_file_handler))
         .route("/sessions/{id}/ls", get(list_files_handler))
         .route("/sessions/{id}/upload", post(upload_file_handler))
+        .route("/sessions/{id}/chat", get(handle_chat_ws_upgrade))
         .route("/rootfs/delete", post(delete_user_rootfs_handler))
         .route("/terminal/{id}", get(get_terminal_page))
         .route("/ws/{id}", get(handle_ws_upgrade))
