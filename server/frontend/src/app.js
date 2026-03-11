@@ -322,6 +322,11 @@ document.getElementById('chat-attach-input').addEventListener('change', function
 });
 
 async function uploadAttachment(file) {
+  const MAX_BYTES = 50 * 1024 * 1024; // 50 MB
+  if (file.size > MAX_BYTES) {
+    appendErrorMessage(`File too large: ${file.name} (${(file.size / 1024 / 1024).toFixed(1)} MB, max 50 MB)`);
+    return;
+  }
   const placeholder = { name: file.name, path: null };
   chatAttachments.push(placeholder);
   renderAttachmentChips();
@@ -455,10 +460,6 @@ function connectChatWs() {
   };
 }
 
-// Refresh history when the tab becomes visible again
-document.addEventListener('visibilitychange', () => {
-  if (!document.hidden) refreshChatHistory();
-});
 
 /// Infer and inject missing `type` (and `delta.type`) into raw Anthropic streaming inner events.
 /// The old agent.py on the VM may not carry these through Pydantic model_dump().
@@ -555,7 +556,6 @@ function handleChatEvent(event) {
     removeThinkingIndicator();
     chatStreaming = false;
     unlockChatInput();
-    refreshChatHistory();
   } else if (event.type === 'error') {
     streamHadText = false;
     removeThinkingIndicator();
@@ -1368,9 +1368,4 @@ function renderTranscriptMessages(messages) {
       sealAssistantMessage();
     }
   }
-}
-
-function refreshChatHistory() {
-  const panel = document.getElementById('chat-sessions-panel');
-  if (!panel.classList.contains('hidden')) loadChatHistory();
 }

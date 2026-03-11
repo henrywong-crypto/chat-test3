@@ -14,7 +14,7 @@ mod vm;
 
 use anyhow::{Context, Result};
 use axum::{
-    extract::Request,
+    extract::{DefaultBodyLimit, Request},
     http::HeaderValue,
     middleware::{self, Next},
     response::Response,
@@ -87,11 +87,11 @@ fn build_router(app_state: AppState, session_store: PostgresStore) -> Router {
         .route("/", get(get_or_create_terminal))
         .route("/sessions/{id}/download", get(download_file_handler))
         .route("/sessions/{id}/ls", get(list_files_handler))
-        .route("/sessions/{id}/upload", post(upload_file_handler))
+        .route("/sessions/{id}/upload", post(upload_file_handler).layer(DefaultBodyLimit::max(50 * 1024 * 1024)))
         .route("/sessions/{id}/chat", get(handle_chat_ws_upgrade))
         .route("/sessions/{id}/chat-history", get(list_chat_sessions_handler))
         .route("/sessions/{id}/chat-transcript", get(get_chat_transcript_handler))
-        .route("/sessions/{id}/chat-upload", post(chat_upload_handler))
+        .route("/sessions/{id}/chat-upload", post(chat_upload_handler).layer(DefaultBodyLimit::max(50 * 1024 * 1024)))
         .route("/rootfs/delete", post(delete_user_rootfs_handler))
         .route("/terminal/{id}", get(get_terminal_page))
         .route("/ws/{id}", get(handle_ws_upgrade))

@@ -177,7 +177,7 @@ fn ChatPanel() -> impl IntoView {
                 <div id="chat-attachments" class="hidden flex-wrap gap-1 pb-2"/>
                 <div class="flex items-end gap-2">
                     <button id="chat-attach-btn" class="btn btn-xs btn-ghost text-gray-400 shrink-0" title="Attach file">"📎"</button>
-                    <input type="file" id="chat-attach-input" class="hidden" accept=".txt,.md,.py,.js,.ts,.rs,.go,.java,.c,.cpp,.h,.json,.yaml,.yml,.toml,.csv,.html,.css,.sh,.bash,.sql,.xml,.log" multiple=true />
+                    <input type="file" id="chat-attach-input" class="hidden" multiple=true />
                     <textarea
                         id="chat-input"
                         class="flex-1 resize-none rounded-xl border border-gray-600 px-3 py-2 text-sm text-gray-100 placeholder-gray-500 focus:outline-none focus:border-blue-500"
