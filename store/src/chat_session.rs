@@ -1,7 +1,8 @@
 use anyhow::Result;
-use chrono::{DateTime, Utc};
+use chrono::{DateTime, TimeZone, Utc};
 use serde::Serialize;
 use sqlx::PgPool;
+use time::OffsetDateTime;
 use uuid::Uuid;
 
 #[derive(Serialize)]
@@ -9,6 +10,13 @@ pub struct ChatSession {
     pub session_id: String,
     pub title: String,
     pub last_active_at: DateTime<Utc>,
+}
+
+#[derive(sqlx::FromRow)]
+struct ChatSessionRow {
+    session_id: String,
+    title: String,
+    last_active_at: OffsetDateTime,
 }
 
 pub async fn upsert_chat_session(
@@ -40,8 +48,8 @@ pub async fn list_chat_sessions(
     user_id: Uuid,
     vm_id: &str,
 ) -> Result<Vec<ChatSession>> {
-    let chat_sessions = sqlx::query_as!(
-        ChatSession,
+    let rows = sqlx::query_as!(
+        ChatSessionRow,
         r#"
         SELECT session_id, title, last_active_at
         FROM chat_sessions
@@ -54,5 +62,13 @@ pub async fn list_chat_sessions(
     )
     .fetch_all(pool)
     .await?;
+    let chat_sessions = rows.into_iter().map(build_chat_session).collect();
     Ok(chat_sessions)
+}
+
+fn build_chat_session(row: ChatSessionRow) -> ChatSession {
+    let last_active_at = Utc
+        .timestamp_opt(row.last_active_at.unix_timestamp(), 0)
+        .unwrap_or_default();
+    ChatSession { session_id: row.session_id, title: row.title, last_active_at }
 }
