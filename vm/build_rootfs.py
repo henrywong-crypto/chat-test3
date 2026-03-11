@@ -53,6 +53,7 @@ curl -LsSf https://astral.sh/uv/install.sh | env UV_INSTALL_DIR=/usr/local/bin s
 UBUNTU_INSTALL_SCRIPT = """\
 set -e
 curl -fsSL https://claude.ai/install.sh | bash
+echo 'export PATH="$HOME/.local/bin:$PATH"' >> ~/.bashrc
 """
 
 

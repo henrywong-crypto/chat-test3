@@ -156,7 +156,7 @@ sudo chroot squashfs-root bash -c "
   apt-get install -y -qq curl &&
   curl -LsSf https://astral.sh/uv/install.sh | env UV_INSTALL_DIR=/usr/local/bin sh
 "
-sudo chroot squashfs-root su - ubuntu -c "curl -fsSL https://claude.ai/install.sh | bash"
+sudo chroot squashfs-root su - ubuntu -c "bash -c 'curl -fsSL https://claude.ai/install.sh | bash && echo '\''export PATH=\"\$HOME/.local/bin:\$PATH\"'\'' >> ~/.bashrc'"
 
 # Place the agent and pre-warm the uv dependency cache as the ubuntu user
 sudo cp vm/agent.py squashfs-root/opt/agent.py
