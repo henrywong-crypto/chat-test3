@@ -179,10 +179,13 @@ def install_agent(rootfs: Path) -> None:
     # Sending an immediate EOF to stdin causes the agent to exit cleanly after
     # downloading and caching the claude-code-sdk dependency.
     # bash -l sources ~/.profile → ~/.bashrc so the claude binary is on PATH.
-    run(
+    # Non-fatal: prewarm is an optimisation; the agent works without it.
+    result = subprocess.run(
         ["chroot", str(rootfs), "su", "-", "ubuntu", "-c",
          "echo | bash -lc '/usr/local/bin/uv run /opt/agent.py'"],
     )
+    if result.returncode != 0:
+        print("warning: uv prewarm failed (agent will cache deps on first run)")
 
 
 def write_claude_settings(rootfs: Path) -> None:
