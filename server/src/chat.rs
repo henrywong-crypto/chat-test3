@@ -81,6 +81,7 @@ async fn run_agent_relay(
                         while let Some(newline_pos) = line_buf.find('\n') {
                             let line = line_buf[..newline_pos].trim_end_matches('\r').to_owned();
                             line_buf.drain(..=newline_pos);
+                            info!("agent line: {line}");
                             persist_session_if_done(&line, state, user_id, &mut pending_title).await;
                             if ws_sender.send(Message::Text(line.into())).await.is_err() {
                                 return Ok(());
