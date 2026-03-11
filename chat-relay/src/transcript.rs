@@ -5,30 +5,30 @@ use serde::Serialize;
 use std::path::PathBuf;
 use tokio::io::{AsyncBufReadExt, AsyncReadExt, BufReader};
 
-use crate::ssh::{connect_ssh, open_sftp_session};
+use ssh_client::{connect_ssh, open_sftp_session};
 
 #[derive(Serialize)]
-pub(crate) struct SessionEntry {
+pub struct SessionEntry {
     pub session_id: String,
     pub title: String,
     pub last_active_at: DateTime<Utc>,
 }
 
 #[derive(Serialize)]
-pub(crate) struct TranscriptResponse {
+pub struct TranscriptResponse {
     pub title: Option<String>,
     pub messages: Vec<TranscriptMessage>,
 }
 
 #[derive(Serialize)]
-pub(crate) struct TranscriptMessage {
+pub struct TranscriptMessage {
     pub role: String,
     pub content: Vec<serde_json::Value>,
 }
 
 const PROJECTS_BASE: &str = "/home/ubuntu/.claude/projects";
 
-pub(crate) async fn list_sessions(
+pub async fn list_sessions(
     guest_ip: &str,
     ssh_key_path: &PathBuf,
     ssh_user: &str,
@@ -153,7 +153,7 @@ fn extract_title_from_jsonl(chunk: &str) -> Option<String> {
     first_user_title
 }
 
-pub(crate) async fn fetch_transcript(
+pub async fn fetch_transcript(
     guest_ip: &str,
     ssh_key_path: &PathBuf,
     ssh_user: &str,
@@ -164,7 +164,7 @@ pub(crate) async fn fetch_transcript(
     let sftp = open_sftp_session(&mut ssh_handle).await?;
     let project_dirs = find_all_project_dirs(&sftp).await;
     let transcript_path = find_session_path(&sftp, &project_dirs, session_id).await
-        .ok_or_else(|| anyhow::anyhow!("session not found: {session_id}"))?;
+        .ok_or_else(|| anyhow!("session not found: {session_id}"))?;
     let mut file = sftp.open(&transcript_path).await?;
     let mut contents = String::new();
     file.read_to_string(&mut contents).await?;

@@ -835,6 +835,24 @@ dependencies = [
 ]
 
 [[package]]
+name = "chat-relay"
+version = "0.1.0"
+dependencies = [
+ "anyhow",
+ "axum",
+ "bytes",
+ "chrono",
+ "futures",
+ "russh",
+ "russh-sftp",
+ "serde",
+ "serde_json",
+ "ssh-client",
+ "tokio",
+ "tracing",
+]
+
+[[package]]
 name = "chrono"
 version = "0.4.44"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -4448,6 +4466,7 @@ dependencies = [
  "aws-credential-types",
  "axum",
  "bytes",
+ "chat-relay",
  "chrono",
  "config",
  "download",
@@ -4459,6 +4478,7 @@ dependencies = [
  "russh-sftp",
  "serde",
  "serde_json",
+ "ssh-client",
  "store",
  "time",
  "tokio",
@@ -4912,6 +4932,16 @@ dependencies = [
  "poly1305",
  "ssh-encoding",
  "subtle",
+]
+
+[[package]]
+name = "ssh-client"
+version = "0.1.0"
+dependencies = [
+ "anyhow",
+ "russh",
+ "russh-sftp",
+ "tokio",
 ]
 
 [[package]]

@@ -9,22 +9,23 @@ use axum::{
 use firecracker_manager::create_vm;
 use russh_sftp::client::SftpSession;
 use serde::Deserialize;
+use ssh_client::{connect_ssh, open_sftp_session};
 use store::upsert_user;
 use tokio::io::AsyncWriteExt;
 use tower_sessions::Session;
 use tracing::{error, info};
 use uuid::Uuid;
 
+use chat_relay::{fetch_transcript, list_sessions};
+
 use crate::{
     auth::User,
-    ssh::{connect_ssh, open_sftp_session},
     state::{find_vm_guest_ip_for_user, AppError, AppState, VmEntry, VmRegistry},
-    transcript::{fetch_transcript, list_sessions},
     static_files::{app_js_version, styles_css_version},
     templates::render_terminal_page,
     vm::{
-        build_vm_config, ensure_user_rootfs, fetch_host_iam_credentials, find_user_rootfs,
-        user_rootfs_path,
+        build_user_rootfs_path, build_vm_config, ensure_user_rootfs, fetch_host_iam_credentials,
+        find_user_rootfs,
     },
 };
 
@@ -143,7 +144,7 @@ pub(crate) async fn delete_user_rootfs_handler(
         return Ok((StatusCode::FORBIDDEN, "Forbidden").into_response());
     }
     let db_user = upsert_user(&state.db, &user.email).await?;
-    let rootfs_path = user_rootfs_path(&state.user_rootfs_dir, db_user.id);
+    let rootfs_path = build_user_rootfs_path(&state.user_rootfs_dir, db_user.id);
     info!("deleting saved rootfs");
     let _guard = state.rootfs_lock.lock().await;
     let _ = tokio::fs::remove_file(&rootfs_path).await;
@@ -251,7 +252,7 @@ pub(crate) async fn get_chat_transcript_handler(
     }
 }
 
-pub(crate) async fn chat_upload_handler(
+pub(crate) async fn handle_chat_upload(
     user: User,
     session: Session,
     Path(vm_id): Path<String>,

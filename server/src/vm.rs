@@ -55,12 +55,12 @@ pub(crate) fn build_vm_config(
     })
 }
 
-pub(crate) fn user_rootfs_path(user_rootfs_dir: &Path, user_id: Uuid) -> PathBuf {
+pub(crate) fn build_user_rootfs_path(user_rootfs_dir: &Path, user_id: Uuid) -> PathBuf {
     user_rootfs_dir.join(format!("{user_id}.ext4"))
 }
 
 pub(crate) fn find_user_rootfs(user_rootfs_dir: &Path, user_id: Uuid) -> Option<PathBuf> {
-    let rootfs_path = user_rootfs_path(user_rootfs_dir, user_id);
+    let rootfs_path = build_user_rootfs_path(user_rootfs_dir, user_id);
     rootfs_path.exists().then_some(rootfs_path)
 }
 
@@ -70,7 +70,7 @@ pub(crate) async fn ensure_user_rootfs(
     user_id: Uuid,
     rootfs_lock: &AsyncMutex<()>,
 ) -> Result<PathBuf> {
-    let rootfs_path = user_rootfs_path(user_rootfs_dir, user_id);
+    let rootfs_path = build_user_rootfs_path(user_rootfs_dir, user_id);
     let _guard = rootfs_lock.lock().await;
     if rootfs_path.exists() {
         return Ok(rootfs_path);
@@ -174,7 +174,7 @@ pub(crate) async fn save_all_vm_rootfs(app_state: &AppState) {
     }
     let _guard = app_state.rootfs_lock.lock().await;
     for (vm_id, vm_entry) in vm_entries {
-        let rootfs_path = user_rootfs_path(&app_state.user_rootfs_dir, vm_entry.user_id);
+        let rootfs_path = build_user_rootfs_path(&app_state.user_rootfs_dir, vm_entry.user_id);
         info!(user_id = %vm_entry.user_id, vm_id = %vm_id, dest = %rootfs_path.display(), "saving rootfs on shutdown");
         if let Err(e) = vm_entry.vm.save_rootfs(&rootfs_path).await {
             error!(user_id = %vm_entry.user_id, vm_id = %vm_id, "failed to save rootfs on shutdown: {e}");

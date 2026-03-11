@@ -1,10 +1,12 @@
 [workspace]
 members = [
+    "chat-relay",
     "download",
     "firecracker-client",
     "firecracker-manager",
     "net-helper",
     "server",
+    "ssh-client",
     "store",
     "upload",
 ]

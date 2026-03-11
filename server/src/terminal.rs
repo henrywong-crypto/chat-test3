@@ -11,14 +11,14 @@ use futures::{SinkExt, StreamExt};
 use russh::{client::Msg, Channel, ChannelMsg};
 use std::time::Duration;
 use store::upsert_user;
+use ssh_client::{connect_ssh, open_terminal_channel};
 use tracing::{error, info};
 use uuid::Uuid;
 
 use crate::{
     auth::User,
-    ssh::{connect_ssh, open_terminal_channel},
     state::{find_vm_guest_ip_for_user, mark_vm_ws_connected, AppState},
-    vm::user_rootfs_path,
+    vm::build_user_rootfs_path,
 };
 
 pub(crate) async fn handle_ws_upgrade(
@@ -63,7 +63,7 @@ async fn save_and_drop_vm(state: &AppState, vm_id: &str, user_id: Uuid) {
         error!(vm_id = %vm_id, "failed to create user rootfs dir on disconnect: {e}");
         return;
     }
-    let user_rootfs = user_rootfs_path(&state.user_rootfs_dir, user_id);
+    let user_rootfs = build_user_rootfs_path(&state.user_rootfs_dir, user_id);
     let _guard = state.rootfs_lock.lock().await;
     info!("saving rootfs on disconnect");
     if let Err(e) = vm_entry.vm.save_rootfs(&user_rootfs).await {

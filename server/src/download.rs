@@ -11,12 +11,12 @@ use download::{
     zip::build_streaming_zip_response,
 };
 use serde::Deserialize;
+use ssh_client::{connect_ssh, open_sftp_session};
 use store::upsert_user;
 use uuid::Uuid;
 
 use crate::{
     auth::User,
-    ssh::{connect_ssh, open_sftp_session},
     state::{find_user_vm_guest_ip, find_vm_guest_ip_for_user, AppError, AppState},
 };
 

@@ -7,7 +7,7 @@ use russh::{
 use russh_sftp::client::SftpSession;
 use std::{path::PathBuf, sync::Arc, time::Duration};
 
-pub(crate) struct SshClient {
+pub struct SshClient {
     vm_host_key: Option<PublicKey>,
 }
 
@@ -26,7 +26,7 @@ impl client::Handler for SshClient {
     }
 }
 
-pub(crate) async fn connect_ssh(
+pub async fn connect_ssh(
     guest_ip: &str,
     ssh_key_path: &PathBuf,
     ssh_user: &str,
@@ -80,7 +80,7 @@ async fn authenticate_ssh_handle(
     Ok(())
 }
 
-pub(crate) async fn open_terminal_channel(
+pub async fn open_terminal_channel(
     ssh_handle: &mut Handle<SshClient>,
 ) -> Result<Channel<client::Msg>> {
     let ssh_channel = ssh_handle.channel_open_session().await?;
@@ -93,7 +93,7 @@ pub(crate) async fn open_terminal_channel(
     Ok(ssh_channel)
 }
 
-pub(crate) async fn open_exec_channel(
+pub async fn open_exec_channel(
     ssh_handle: &mut Handle<SshClient>,
     command: &str,
 ) -> Result<Channel<client::Msg>> {
@@ -102,7 +102,7 @@ pub(crate) async fn open_exec_channel(
     Ok(ssh_channel)
 }
 
-pub(crate) async fn open_sftp_session(ssh_handle: &mut Handle<SshClient>) -> Result<SftpSession> {
+pub async fn open_sftp_session(ssh_handle: &mut Handle<SshClient>) -> Result<SftpSession> {
     let ssh_channel = ssh_handle.channel_open_session().await?;
     ssh_channel.request_subsystem(true, "sftp").await?;
     let sftp_session = SftpSession::new(ssh_channel.into_stream()).await?;
