@@ -170,9 +170,9 @@ fn ChatPanel() -> impl IntoView {
                     id="chat-input"
                     class="textarea textarea-bordered textarea-xs flex-1 resize-none"
                     rows="2"
-                    placeholder="Ask Claude\u2026"
+                    placeholder="Ask Claude\u{2026}"
                 />
-                <button id="chat-send-btn" class="btn btn-xs btn-primary">"Send \u23ce"</button>
+                <button id="chat-send-btn" class="btn btn-xs btn-primary">"Send \u{23ce}"</button>
             </div>
         </div>
     }

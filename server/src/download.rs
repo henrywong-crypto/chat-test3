@@ -1,6 +1,5 @@
 use anyhow::Context;
 use axum::{
-    body::Body,
     extract::{Path, Query, State},
     http::Response,
     http::StatusCode,
