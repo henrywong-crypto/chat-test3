@@ -84,10 +84,13 @@ def fetch_s3_keys(fc_version: str, arch: str, prefix: str) -> list[str]:
 
 def fetch_latest_kernel_key(fc_version: str, arch: str) -> str:
     keys = fetch_s3_keys(fc_version, arch, "vmlinux-")
-    if not keys:
+    # Keep only plain versioned kernels (e.g. vmlinux-6.1.155), not vmlinux-acpi-* etc.
+    versioned = [k for k in keys if Path(k).name.count("-") == 1
+                 and all(p.isdigit() for p in Path(k).name.split("-", 1)[1].split("."))]
+    if not versioned:
         sys.exit(f"error: no kernel images found for Firecracker {fc_version}/{arch}")
-    keys.sort(key=lambda k: tuple(int(x) for x in k.rsplit("-", 1)[-1].split(".")))
-    return keys[-1]  # e.g. "firecracker-ci/v1.14/x86_64/vmlinux-6.1.155"
+    versioned.sort(key=lambda k: tuple(int(x) for x in k.rsplit("-", 1)[-1].split(".")))
+    return versioned[-1]
 
 
 def fetch_latest_ubuntu_key(fc_version: str, arch: str) -> str:
