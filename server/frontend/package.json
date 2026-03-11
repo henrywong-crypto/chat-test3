@@ -11,5 +11,9 @@
     "daisyui": "^5.5.19",
     "esbuild": "^0.25.0",
     "tailwindcss": "^4.2.1"
+  },
+  "dependencies": {
+    "highlight.js": "^11.11.1",
+    "marked": "^17.0.4"
   }
 }

@@ -1,5 +1,66 @@
 import { Terminal } from '@xterm/xterm';
 import { FitAddon } from '@xterm/addon-fit';
+import { marked } from 'marked';
+import hljs from 'highlight.js/lib/core';
+import javascript from 'highlight.js/lib/languages/javascript';
+import typescript from 'highlight.js/lib/languages/typescript';
+import python from 'highlight.js/lib/languages/python';
+import rust from 'highlight.js/lib/languages/rust';
+import bash from 'highlight.js/lib/languages/bash';
+import json from 'highlight.js/lib/languages/json';
+import xml from 'highlight.js/lib/languages/xml';
+import css from 'highlight.js/lib/languages/css';
+import sql from 'highlight.js/lib/languages/sql';
+import go from 'highlight.js/lib/languages/go';
+import java from 'highlight.js/lib/languages/java';
+import cpp from 'highlight.js/lib/languages/cpp';
+import yaml from 'highlight.js/lib/languages/yaml';
+import ruby from 'highlight.js/lib/languages/ruby';
+import markdown from 'highlight.js/lib/languages/markdown';
+import diff from 'highlight.js/lib/languages/diff';
+
+hljs.registerLanguage('javascript', javascript);
+hljs.registerLanguage('js', javascript);
+hljs.registerLanguage('typescript', typescript);
+hljs.registerLanguage('ts', typescript);
+hljs.registerLanguage('python', python);
+hljs.registerLanguage('py', python);
+hljs.registerLanguage('rust', rust);
+hljs.registerLanguage('rs', rust);
+hljs.registerLanguage('bash', bash);
+hljs.registerLanguage('sh', bash);
+hljs.registerLanguage('shell', bash);
+hljs.registerLanguage('json', json);
+hljs.registerLanguage('xml', xml);
+hljs.registerLanguage('html', xml);
+hljs.registerLanguage('css', css);
+hljs.registerLanguage('sql', sql);
+hljs.registerLanguage('go', go);
+hljs.registerLanguage('java', java);
+hljs.registerLanguage('cpp', cpp);
+hljs.registerLanguage('c', cpp);
+hljs.registerLanguage('yaml', yaml);
+hljs.registerLanguage('yml', yaml);
+hljs.registerLanguage('ruby', ruby);
+hljs.registerLanguage('rb', ruby);
+hljs.registerLanguage('markdown', markdown);
+hljs.registerLanguage('diff', diff);
+
+marked.use({
+  gfm: true,
+  breaks: false,
+  renderer: (() => {
+    const r = new marked.Renderer();
+    r.code = ({ text, lang }) => {
+      const language = lang && hljs.getLanguage(lang) ? lang : null;
+      const highlighted = language
+        ? hljs.highlight(text, { language }).value
+        : hljs.highlightAuto(text).value;
+      return `<pre><code class="hljs language-${language ?? 'plaintext'}">${highlighted}</code></pre>`;
+    };
+    return r;
+  })(),
+});
 
 const config = document.getElementById('app-config').dataset;
 const vmId = config.vmId;
@@ -231,6 +292,7 @@ let pendingSessionTitle = null;
 // Current assistant message container (text node inside it)
 let currentAssistantMsgEl = null;
 let currentAssistantTextEl = null;
+let currentAssistantRawText = '';
 
 // Map tool_use_id → { resultEl, detailsEl, resultHeader, resultIcon, resultLabel, resultBody } for filling in tool results
 const pendingToolUses = new Map();
@@ -295,7 +357,9 @@ function connectChatWs() {
   chatWs.onclose = () => {
     chatWs = null;
     chatStreaming = false;
+    streamHadText = false;
     pendingQuery = null;
+    sealAssistantMessage();
     unlockChatInput();
   };
 }
@@ -316,7 +380,7 @@ function handleChatEvent(event) {
     }
   } else if (event.type === 'assistant') {
     removeThinkingIndicator();
-    const blocks = event.message?.content ?? event.content ?? [];
+    const blocks = extractContentBlocks(event);
     for (const block of blocks) {
       if (block.type === 'text' && !streamHadText) {
         appendToAssistantMessage(block.text);
@@ -326,7 +390,7 @@ function handleChatEvent(event) {
       }
     }
   } else if (event.type === 'user') {
-    const blocks = event.message?.content ?? [];
+    const blocks = extractContentBlocks(event);
     for (const block of blocks) {
       if (block.type === 'tool_result') {
         fillToolResult(block.tool_use_id, block.content, block.is_error);
@@ -420,13 +484,16 @@ function ensureAssistantMessage() {
 
 function appendToAssistantMessage(text) {
   ensureAssistantMessage();
-  currentAssistantTextEl.textContent += text;
+  currentAssistantRawText += text;
+  currentAssistantTextEl.className = 'markdown-body text-sm pl-8';
+  currentAssistantTextEl.innerHTML = marked.parse(currentAssistantRawText);
   scrollChatToBottom();
 }
 
 function sealAssistantMessage() {
   currentAssistantMsgEl = null;
   currentAssistantTextEl = null;
+  currentAssistantRawText = '';
 }
 
 function appendToolUseBlock(toolId, toolName, input) {
@@ -554,6 +621,12 @@ function removeThinkingIndicator() {
 
 // ── Helpers ───────────────────────────────────────────────────────────────────
 
+function extractContentBlocks(event) {
+  const content = event.message?.content ?? event.content;
+  if (Array.isArray(content)) return content;
+  return [];
+}
+
 function scrollChatToBottom() {
   const messages = document.getElementById('chat-messages');
   messages.scrollTop = messages.scrollHeight;
@@ -625,12 +698,14 @@ function formatRelativeTime(isoString) {
 
 function startNewSession() {
   chatSessionId = null;
+  pendingToolUses.clear();
   document.getElementById('chat-messages').innerHTML = '';
   document.getElementById('chat-sessions-panel').classList.add('hidden');
 }
 
 function resumeSession(sessionId) {
   chatSessionId = sessionId;
+  pendingToolUses.clear();
   document.getElementById('chat-messages').innerHTML = '';
   document.getElementById('chat-sessions-panel').classList.add('hidden');
   loadAndRenderTranscript(sessionId);
@@ -656,7 +731,8 @@ function renderTranscriptMessages(messages) {
     } else if (message.role === 'assistant') {
       for (const block of message.content) {
         if (block.type === 'text') {
-          appendToAssistantMessage(block.text);
+          ensureAssistantMessage();
+          currentAssistantRawText += block.text;
         } else if (block.type === 'tool_use') {
           appendToolUseBlock(block.id, block.name, block.input);
         }
