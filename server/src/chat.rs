@@ -244,88 +244,118 @@ fn infer_event_type(obj: &serde_json::Map<String, serde_json::Value>) -> Option<
     if matches!(subtype, "init" | "cwd") {
         return Some("system");
     }
-    if matches!(subtype, "success" | "error_during_execution") || obj.contains_key("session_id") {
-        // result events always carry subtype + session_id; guard against plain dicts
-        if obj.contains_key("subtype") {
-            return Some("result");
+    if obj.contains_key("subtype") && matches!(subtype, "success" | "error_during_execution") {
+        return Some("result");
+    }
+    // Wrapped SDK format: message.role
+    match obj.get("message").and_then(|m| m.get("role")).and_then(|r| r.as_str()) {
+        Some("assistant") => return Some("assistant"),
+        Some("user") => return Some("user"),
+        _ => {}
+    }
+    // Unwrapped format: content array at top level (agent.py strips the message wrapper)
+    if let Some(first) = obj.get("content").and_then(|c| c.as_array()).and_then(|a| a.first()) {
+        if first.get("tool_use_id").is_some() {
+            return Some("user");
+        }
+        if first.get("text").is_some() || (first.get("id").is_some() && first.get("name").is_some()) {
+            return Some("assistant");
         }
     }
-    let role = obj.get("message")
-        .and_then(|m| m.get("role"))
-        .and_then(|r| r.as_str())
-        .unwrap_or("");
-    match role {
-        "assistant" => Some("assistant"),
-        "user" => Some("user"),
-        _ => None,
-    }
+    None
 }
 
-/// Log a query message received from the browser WebSocket.
 fn log_query(vm_id: &str, text: &str) {
     let Ok(v) = serde_json::from_str::<serde_json::Value>(text) else { return };
-    let msg_type = v["type"].as_str().unwrap_or("?");
-    if msg_type == "query" {
-        let content_preview: String = v["content"].as_str().unwrap_or("").chars().take(80).collect();
-        let session_id = v["session_id"].as_str().unwrap_or("null");
-        info!(vm_id = %vm_id, "ws→agent  type=query  session_id={session_id}  content={content_preview:?}");
-    } else {
-        info!(vm_id = %vm_id, "ws→agent  type={msg_type}");
+    match v["type"].as_str().unwrap_or("") {
+        "query" => {
+            let preview: String = v["content"].as_str().unwrap_or("").chars().take(80).collect();
+            let session = short_id(v["session_id"].as_str().unwrap_or("new"));
+            info!(vm_id = %vm_id, "query  session={session}  {preview:?}");
+        }
+        other => info!(vm_id = %vm_id, "query  type={other}"),
     }
 }
 
-/// Log a significant event line emitted by the agent before forwarding to the browser.
 fn log_agent_event(vm_id: &str, line: &str) {
     let Ok(v) = serde_json::from_str::<serde_json::Value>(line) else { return };
-    let event_type = v["type"].as_str().unwrap_or("?");
-    match event_type {
-        // stream_event: only log structural ones, skip noisy deltas
-        "stream_event" => {
-            let inner_type = v["event"]["type"].as_str().unwrap_or("?");
-            if !matches!(inner_type, "content_block_delta" | "message_delta") {
-                info!(vm_id = %vm_id, "agent→ws  stream_event  {inner_type}");
-            }
-        }
-        "assistant" => {
-            let blocks: Vec<&str> = v["message"]["content"]
-                .as_array()
-                .map(|arr| arr.iter().filter_map(|b| b["type"].as_str()).collect())
-                .unwrap_or_default();
-            info!(vm_id = %vm_id, "agent→ws  assistant  blocks={blocks:?}");
-        }
-        "user" => {
-            let tool_ids: Vec<&str> = v["message"]["content"]
-                .as_array()
-                .map(|arr| {
-                    arr.iter()
-                        .filter(|b| b["type"].as_str() == Some("tool_result"))
-                        .filter_map(|b| b["tool_use_id"].as_str())
-                        .collect()
-                })
-                .unwrap_or_default();
-            info!(vm_id = %vm_id, "agent→ws  user  tool_result_ids={tool_ids:?}");
+    match v["type"].as_str().unwrap_or("") {
+        "stream_event" => log_stream_event(vm_id, &v),
+        "assistant" => log_assistant_event(vm_id, &v),
+        "user" => log_user_event(vm_id, &v),
+        "system" => {
+            let subtype = v["subtype"].as_str().unwrap_or("?");
+            info!(vm_id = %vm_id, "system  {subtype}");
         }
         "result" => {
             let subtype = v["subtype"].as_str().unwrap_or("?");
-            let session_id = v["session_id"].as_str().unwrap_or("null");
-            info!(vm_id = %vm_id, "agent→ws  result  subtype={subtype}  session_id={session_id}");
+            let session = short_id(v["session_id"].as_str().unwrap_or("?"));
+            if subtype == "success" {
+                info!(vm_id = %vm_id, "result  success  session={session}");
+            } else {
+                let err = v["error"].as_str().or_else(|| v["message"].as_str()).unwrap_or("?");
+                warn!(vm_id = %vm_id, "result  {subtype}  session={session}  error={err:?}");
+            }
         }
         "done" => {
-            let session_id = v["session_id"].as_str().unwrap_or("null");
-            info!(vm_id = %vm_id, "agent→ws  done  session_id={session_id}");
+            let session = short_id(v["session_id"].as_str().unwrap_or("?"));
+            info!(vm_id = %vm_id, "done  session={session}");
         }
         "error" => {
-            let message = v["message"].as_str().unwrap_or("?");
-            warn!(vm_id = %vm_id, "agent→ws  error  message={message:?}");
+            let msg = v["message"].as_str().unwrap_or("?");
+            warn!(vm_id = %vm_id, "error  {msg:?}");
         }
-        "system" => {
-            let subtype = v["subtype"].as_str().unwrap_or("?");
-            info!(vm_id = %vm_id, "agent→ws  system  subtype={subtype}");
+        _ => {}
+    }
+}
+
+fn log_stream_event(vm_id: &str, v: &serde_json::Value) {
+    let inner = &v["event"];
+    match inner["type"].as_str().unwrap_or("") {
+        "content_block_delta" | "message_delta" => {} // skip noisy per-token events
+        "content_block_start" => {
+            let block_type = inner["content_block"]["type"].as_str().unwrap_or("?");
+            info!(vm_id = %vm_id, "stream  block_start  {block_type}");
         }
-        _ => {
-            // Log a preview of unrecognised events so they don't disappear silently.
-            let preview: String = line.chars().take(200).collect();
-            warn!(vm_id = %vm_id, "agent→ws  unknown  {preview}");
+        other => info!(vm_id = %vm_id, "stream  {other}"),
+    }
+}
+
+fn log_assistant_event(vm_id: &str, v: &serde_json::Value) {
+    let blocks = v["message"]["content"].as_array()
+        .or_else(|| v["content"].as_array());
+    let Some(blocks) = blocks else { return };
+    for block in blocks {
+        let block_type = block["type"].as_str().unwrap_or("");
+        if block_type == "text" || block.get("text").is_some() {
+            let preview: String = block["text"].as_str().unwrap_or("").chars().take(80).collect();
+            info!(vm_id = %vm_id, "assistant  text  {preview:?}");
+        } else if block_type == "tool_use" || block.get("name").is_some() {
+            let name = block["name"].as_str().unwrap_or("?");
+            let id = short_id(block["id"].as_str().unwrap_or("?"));
+            info!(vm_id = %vm_id, "assistant  tool_use  {name}  id={id}");
         }
+    }
+}
+
+fn log_user_event(vm_id: &str, v: &serde_json::Value) {
+    let blocks = v["message"]["content"].as_array()
+        .or_else(|| v["content"].as_array());
+    let Some(blocks) = blocks else { return };
+    for block in blocks {
+        if block["type"].as_str() == Some("tool_result") || block.get("tool_use_id").is_some() {
+            let id = short_id(block["tool_use_id"].as_str().unwrap_or("?"));
+            let is_error = block["is_error"].as_bool().unwrap_or(false);
+            let status = if is_error { "error" } else { "ok" };
+            let result: String = block["content"].as_str().unwrap_or("").chars().take(60).collect();
+            info!(vm_id = %vm_id, "user  tool_result  id={id}  {status}  {result:?}");
+        }
+    }
+}
+
+fn short_id(id: &str) -> &str {
+    match id.char_indices().nth(8) {
+        Some((i, _)) => &id[..i],
+        None => id,
     }
 }

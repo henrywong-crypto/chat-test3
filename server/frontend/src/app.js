@@ -162,7 +162,7 @@ function renderEntries(path, entries) {
       row.appendChild(dl);
       list.appendChild(row);
     } else {
-      const row = buildEntryRow(ICON_FILE, entry.name, 'flex-1 truncate', () => { window.location.href = '/sessions/' + vmId + '/download?path=' + encodeURIComponent(entryPath); });
+      const row = buildEntryRow(ICON_FILE, entry.name, 'flex-1 truncate', () => { window.open('/sessions/' + vmId + '/download?path=' + encodeURIComponent(entryPath), '_blank'); });
       const size = document.createElement('span');
       size.className = 'text-xs opacity-50 whitespace-nowrap';
       size.textContent = formatSize(entry.size);
@@ -440,6 +440,7 @@ function connectChatWs() {
     }
   };
   chatWs.onmessage = e => {
+    console.log('[chat] raw ws message', e.data.slice(0, 200));
     let event;
     try { event = JSON.parse(e.data); } catch { console.warn('[chat] failed to parse ws message', e.data); return; }
     logChatEvent(event);
@@ -1217,10 +1218,17 @@ function extractContentBlocks(event) {
 function logChatEvent(event) {
   const t = event.type;
   if (t === 'stream_event') {
-    const inner = event.event?.type;
-    // skip noisy per-character deltas
-    if (inner === 'content_block_delta' || inner === 'message_delta') return;
-    console.log('[chat] ←', t, inner);
+    const inner = event.event;
+    const innerType = inner?.type ?? '(no type)';
+    if (innerType === 'content_block_delta') {
+      const delta = inner?.delta;
+      const preview = delta?.text ?? delta?.thinking ?? delta?.partial_json ?? '';
+      console.log('[chat] ← stream_event  content_block_delta  delta.type=', delta?.type, ' text=', JSON.stringify(preview.slice(0, 40)));
+    } else if (innerType === 'message_delta') {
+      console.log('[chat] ← stream_event  message_delta', inner?.delta);
+    } else {
+      console.log('[chat] ← stream_event', innerType, inner);
+    }
   } else if (t === 'assistant') {
     const blocks = extractContentBlocks(event).map(b => b.type);
     console.log('[chat] ← assistant  blocks=', blocks, ' session_id=', event.session_id);
@@ -1230,11 +1238,11 @@ function logChatEvent(event) {
       .map(b => b.tool_use_id);
     console.log('[chat] ← user  tool_result_ids=', ids);
   } else if (t === 'result' || t === 'done') {
-    console.log('[chat] ←', t, ' session_id=', event.session_id);
+    console.log('[chat] ←', t, ' session_id=', event.session_id, ' result=', typeof event.result === 'string' ? JSON.stringify(event.result.slice(0, 80)) : event.result);
   } else if (t === 'error') {
-    console.error('[chat] ← error', event.message);
+    console.error('[chat] ← error', event.message, event);
   } else {
-    console.log('[chat] ←', t, event.subtype ?? '');
+    console.log('[chat] ←', t, event.subtype ?? '', event);
   }
 }
 
