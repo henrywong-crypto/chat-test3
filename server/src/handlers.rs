@@ -1,4 +1,4 @@
-use std::{sync::Arc, time::Instant};
+use std::time::Instant;
 use anyhow::anyhow;
 use axum::{
     extract::{Form, Path, State},

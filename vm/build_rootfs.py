@@ -212,6 +212,11 @@ def install_artifacts(
     shutil.move(str(kernel), str(kernel_dest))
     shutil.move(str(ext4), str(ext4_dest))
     shutil.move(str(ssh_key), str(ssh_key_dest))
+    # Make files readable by the server user (non-root).
+    # protected_hardlinks blocks hard-linking root-owned files that aren't world-readable.
+    kernel_dest.chmod(0o644)
+    ext4_dest.chmod(0o644)
+    ssh_key_dest.chmod(0o600)
     return kernel_dest, ext4_dest, ssh_key_dest
 
 
