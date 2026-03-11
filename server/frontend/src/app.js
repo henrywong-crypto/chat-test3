@@ -67,6 +67,7 @@ const vmId = config.vmId;
 const fmCsrfToken = config.csrfToken;
 const fmUploadDir = config.uploadDir;
 const fmUploadAction = config.uploadAction;
+const wsBase = (location.protocol === 'https:' ? 'wss:' : 'ws:') + '//' + location.host;
 
 // ── Terminal ──────────────────────────────────────────────────────────────────
 
@@ -74,27 +75,35 @@ const term = new Terminal({ cursorBlink: true, theme: { background: '#000000' } 
 const fitAddon = new FitAddon();
 term.loadAddon(fitAddon);
 
-const container = document.getElementById('term-container');
-term.open(container);
-fitAddon.fit();
-term.focus();
+let shellInitialized = false;
 
-const ws = new WebSocket(
-  (location.protocol === 'https:' ? 'wss:' : 'ws:') + '//' + location.host + '/ws/' + vmId
-);
-ws.binaryType = 'arraybuffer';
-
-function sendResize() {
-  if (ws.readyState === WebSocket.OPEN) {
-    ws.send(JSON.stringify({ type: 'resize', rows: term.rows, cols: term.cols }));
+function initShell() {
+  if (shellInitialized) return;
+  shellInitialized = true;
+  const container = document.getElementById('term-container');
+  term.open(container);
+  fitAddon.fit();
+  term.focus();
+  const termWs = new WebSocket(wsBase + '/ws/' + vmId);
+  termWs.binaryType = 'arraybuffer';
+  function sendResize() {
+    if (termWs.readyState === WebSocket.OPEN) {
+      termWs.send(JSON.stringify({ type: 'resize', rows: term.rows, cols: term.cols }));
+    }
   }
+  term.onResize(sendResize);
+  termWs.onopen = () => {
+    term.onData(d => termWs.send(new TextEncoder().encode(d)));
+    sendResize();
+    termWs.send(new TextEncoder().encode('claude --resume\r'));
+  };
+  termWs.onmessage = e => term.write(new Uint8Array(e.data));
+  termWs.onclose = () => term.write('\r\n\x1b[2mconnection closed\x1b[0m\r\n');
+  new ResizeObserver(() => fitAddon.fit()).observe(container);
 }
 
-term.onResize(sendResize);
-ws.onopen = () => { term.onData(d => ws.send(new TextEncoder().encode(d))); sendResize(); };
-ws.onmessage = e => term.write(new Uint8Array(e.data));
-ws.onclose = () => term.write('\r\n\x1b[2mconnection closed\x1b[0m\r\n');
-new ResizeObserver(() => fitAddon.fit()).observe(container);
+// Default to Chat tab — shell connects lazily on first visit
+switchToChat();
 
 document.getElementById('reset-btn')?.addEventListener('click', () => {
   document.getElementById('reset-dialog').showModal();
@@ -284,8 +293,6 @@ document.getElementById('fm-file-input').addEventListener('change', function() {
 
 // ── Chat panel ────────────────────────────────────────────────────────────────
 
-const wsBase = (location.protocol === 'https:' ? 'wss:' : 'ws:') + '//' + location.host;
-
 let chatSessionId = null;
 let chatWs = null;
 let chatStreaming = false;
@@ -387,8 +394,14 @@ document.getElementById('chat-new-btn').addEventListener('click', startNewSessio
 document.getElementById('chat-history-btn').addEventListener('click', () => {
   const panel = document.getElementById('chat-sessions-panel');
   const nowHidden = panel.classList.toggle('hidden');
-  if (!nowHidden) loadChatHistory();
+  if (!nowHidden) {
+    panel.classList.add('flex');
+    loadChatHistory();
+  } else {
+    panel.classList.remove('flex');
+  }
 });
+document.getElementById('chat-history-refresh-btn').addEventListener('click', loadChatHistory);
 document.getElementById('chat-stop-btn').addEventListener('click', stopGeneration);
 document.getElementById('chat-send-btn').addEventListener('click', () => {
   const input = document.getElementById('chat-input');
@@ -435,6 +448,8 @@ function switchToShell() {
   document.getElementById('tab-chat-btn').classList.replace('btn-primary', 'btn-ghost');
   document.getElementById('tab-shell-btn').classList.replace('btn-ghost', 'btn-primary');
   document.getElementById('files-toggle-btn').classList.remove('hidden');
+  initShell();
+  fitAddon.fit();
 }
 
 function isChatPanelOpen() {
@@ -1286,27 +1301,27 @@ function unlockChatInput() {
 // ── Chat session history ───────────────────────────────────────────────────────
 
 async function loadChatHistory() {
-  const panel = document.getElementById('chat-sessions-panel');
-  panel.innerHTML = '<div class="px-3 py-2 text-xs opacity-50">Loading\u2026</div>';
+  const list = document.getElementById('chat-sessions-list');
+  list.innerHTML = '<div class="px-3 py-2 text-xs opacity-50">Loading\u2026</div>';
   try {
     const res = await fetch('/sessions/' + vmId + '/chat-history');
     if (!res.ok) throw new Error('Failed to load');
     const chatSessions = await res.json();
     renderChatHistory(chatSessions);
   } catch {
-    panel.innerHTML = '<div class="px-3 py-2 text-xs" style="color:#f87171">Failed to load history</div>';
+    list.innerHTML = '<div class="px-3 py-2 text-xs" style="color:#f87171">Failed to load history</div>';
   }
 }
 
 function renderChatHistory(chatSessions) {
-  const panel = document.getElementById('chat-sessions-panel');
-  panel.innerHTML = '';
+  const list = document.getElementById('chat-sessions-list');
+  list.innerHTML = '';
   if (chatSessions.length === 0) {
-    panel.innerHTML = '<div class="px-3 py-2 text-xs opacity-50">No previous sessions</div>';
+    list.innerHTML = '<div class="px-3 py-2 text-xs opacity-50">No previous sessions</div>';
     return;
   }
   for (const chatSession of chatSessions) {
-    panel.appendChild(buildChatSessionItem(chatSession));
+    list.appendChild(buildChatSessionItem(chatSession));
   }
 }
 

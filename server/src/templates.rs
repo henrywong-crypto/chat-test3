@@ -172,9 +172,17 @@ fn ChatView() -> impl IntoView {
                 <button id="chat-history-btn" class="btn btn-xs btn-ghost text-gray-400">"History"</button>
             </div>
         </div>
-        <div id="chat-sessions-panel" class="hidden border-b border-gray-700 overflow-y-auto" style="max-height:200px;background:#1f2937"/>
-        <div id="chat-scroll" class="flex-1 overflow-y-auto" style="background:#111827">
-            <div id="chat-messages" class="max-w-3xl mx-auto py-4 px-4 space-y-3"/>
+        <div class="flex flex-1 min-h-0">
+            <div id="chat-sessions-panel" class="hidden flex-col w-56 shrink-0 border-r border-gray-700 overflow-hidden" style="background:#1f2937">
+                <div class="flex items-center justify-between px-3 py-2 border-b border-gray-700 shrink-0">
+                    <span class="text-xs font-semibold text-gray-400">"History"</span>
+                    <button id="chat-history-refresh-btn" class="btn btn-xs btn-ghost text-gray-500" title="Refresh">"↺"</button>
+                </div>
+                <div id="chat-sessions-list" class="flex-1 overflow-y-auto"/>
+            </div>
+            <div id="chat-scroll" class="flex-1 overflow-y-auto" style="background:#111827">
+                <div id="chat-messages" class="max-w-3xl mx-auto py-4 px-4 space-y-3"/>
+            </div>
         </div>
         <div class="border-t border-gray-700 shrink-0" style="background:#1f2937">
             <div class="max-w-3xl mx-auto px-4 py-3">

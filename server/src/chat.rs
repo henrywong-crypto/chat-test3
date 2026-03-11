@@ -38,11 +38,11 @@ pub(crate) async fn handle_chat_ws_upgrade(
     let guest_ip = match find_vm_guest_ip_for_user(&state.vms, &vm_id, db_user.id) {
         Some(guest_ip) => guest_ip,
         None => {
-            warn!(vm_id = %vm_id, user_id = %db_user.id, "chat ws upgrade: vm not found for user");
+            warn!("chat ws upgrade: vm not found");
             return (StatusCode::NOT_FOUND, "VM not found").into_response();
         }
     };
-    info!(vm_id = %vm_id, user_id = %db_user.id, "chat ws connected");
+    info!("chat ws connected");
     ws.on_upgrade(move |socket| run_chat_session(socket, vm_id, db_user.id.to_string(), guest_ip, state))
 }
 
@@ -50,7 +50,7 @@ async fn run_chat_session(socket: WebSocket, vm_id: String, user_id: String, gue
     if let Err(e) = run_agent_relay(&guest_ip, &state, socket, &vm_id, &user_id).await {
         error!(vm_id = %vm_id, user_id = %user_id, "chat session error: {e}");
     }
-    info!(vm_id = %vm_id, user_id = %user_id, "chat ws disconnected");
+    info!("chat ws disconnected");
 }
 
 async fn run_agent_relay(
@@ -67,7 +67,7 @@ async fn run_agent_relay(
         &state.vm_host_key_path,
     )
     .await?;
-    info!(vm_id = %vm_id, user_id = %user_id, "agent ssh channel opened");
+    info!("agent ssh channel opened");
     let mut ssh_channel = open_exec_channel(&mut ssh_handle, "bash -lc '/usr/local/bin/uv run /opt/agent.py 2> >(tee -a /home/ubuntu/agent.log >&2)'").await?;
     let (mut ws_sender, mut ws_receiver) = socket.split();
     let mut line_buf = String::new();
@@ -99,7 +99,7 @@ async fn run_agent_relay(
                         }
                     }
                     Some(ChannelMsg::ExitStatus { exit_status }) => {
-                        info!(vm_id = %vm_id, user_id = %user_id, "agent exited  status={exit_status}");
+                        info!("agent exited  status={exit_status}");
                         break;
                     }
                     None => break,
@@ -110,7 +110,7 @@ async fn run_agent_relay(
                 match ws_msg {
                     Some(Ok(Message::Text(text))) => {
                         if is_abort_message(text.as_str()) {
-                            info!(vm_id = %vm_id, user_id = %user_id, "abort received, closing agent channel");
+                            info!("abort received, closing agent channel");
                             break;
                         }
                         log_query(vm_id, text.as_str());
@@ -321,86 +321,74 @@ fn log_query(vm_id: &str, text: &str) {
     let Ok(v) = serde_json::from_str::<serde_json::Value>(text) else { return };
     match v["type"].as_str().unwrap_or("") {
         "query" => {
-            let preview: String = v["content"].as_str().unwrap_or("").chars().take(80).collect();
-            let session = short_id(v["session_id"].as_str().unwrap_or("new"));
-            info!(vm_id = %vm_id, "query  session={session}  {preview:?}");
+            let session = if v["session_id"].as_str().unwrap_or("") == "" { "new" } else { "resume" };
+            info!(vm_id = %short_id(vm_id), "query  {session}");
         }
-        other => info!(vm_id = %vm_id, "query  type={other}"),
+        other => info!(vm_id = %short_id(vm_id), "query  type={other}"),
     }
 }
 
 fn log_agent_event(vm_id: &str, line: &str) {
     let Ok(v) = serde_json::from_str::<serde_json::Value>(line) else { return };
+    let vm = short_id(vm_id);
     match v["type"].as_str().unwrap_or("") {
-        "stream_event" => log_stream_event(vm_id, &v),
-        "assistant" => log_assistant_event(vm_id, &v),
-        "user" => log_user_event(vm_id, &v),
+        "stream_event" => log_stream_event(vm, &v),
+        "assistant" => log_assistant_event(vm, &v),
+        "user" => log_user_event(vm, &v),
         "system" => {
             let subtype = v["subtype"].as_str().unwrap_or("?");
-            info!(vm_id = %vm_id, "system  {subtype}");
+            info!(vm_id = %vm, "system  {subtype}");
         }
         "result" => {
             let subtype = v["subtype"].as_str().unwrap_or("?");
-            let session = short_id(v["session_id"].as_str().unwrap_or("?"));
             if subtype == "success" {
-                info!(vm_id = %vm_id, "result  success  session={session}");
+                info!(vm_id = %vm, "result  success");
             } else {
-                let err = v["error"].as_str().or_else(|| v["message"].as_str()).unwrap_or("?");
-                warn!(vm_id = %vm_id, "result  {subtype}  session={session}  error={err:?}");
+                warn!(vm_id = %vm, "result  {subtype}");
             }
         }
-        "done" => {
-            let session = short_id(v["session_id"].as_str().unwrap_or("?"));
-            info!(vm_id = %vm_id, "done  session={session}");
-        }
-        "error" => {
-            let msg = v["message"].as_str().unwrap_or("?");
-            warn!(vm_id = %vm_id, "error  {msg:?}");
-        }
+        "done" => info!(vm_id = %vm, "done"),
+        "error" => warn!(vm_id = %vm, "error"),
         _ => {}
     }
 }
 
-fn log_stream_event(vm_id: &str, v: &serde_json::Value) {
+fn log_stream_event(vm: &str, v: &serde_json::Value) {
     let inner = &v["event"];
     match inner["type"].as_str().unwrap_or("") {
-        "content_block_delta" | "message_delta" => {} // skip noisy per-token events
+        "content_block_delta" | "message_delta" => {}
         "content_block_start" => {
             let block_type = inner["content_block"]["type"].as_str().unwrap_or("?");
-            info!(vm_id = %vm_id, "stream  block_start  {block_type}");
+            info!(vm_id = %vm, "stream  block_start  {block_type}");
         }
-        other => info!(vm_id = %vm_id, "stream  {other}"),
+        other => info!(vm_id = %vm, "stream  {other}"),
     }
 }
 
-fn log_assistant_event(vm_id: &str, v: &serde_json::Value) {
+fn log_assistant_event(vm: &str, v: &serde_json::Value) {
     let blocks = v["message"]["content"].as_array()
         .or_else(|| v["content"].as_array());
     let Some(blocks) = blocks else { return };
     for block in blocks {
         let block_type = block["type"].as_str().unwrap_or("");
         if block_type == "text" || block.get("text").is_some() {
-            let preview: String = block["text"].as_str().unwrap_or("").chars().take(80).collect();
-            info!(vm_id = %vm_id, "assistant  text  {preview:?}");
+            info!(vm_id = %vm, "assistant  text");
         } else if block_type == "tool_use" || block.get("name").is_some() {
             let name = block["name"].as_str().unwrap_or("?");
-            let id = short_id(block["id"].as_str().unwrap_or("?"));
-            info!(vm_id = %vm_id, "assistant  tool_use  {name}  id={id}");
+            info!(vm_id = %vm, "assistant  tool_use  {name}");
         }
     }
 }
 
-fn log_user_event(vm_id: &str, v: &serde_json::Value) {
+fn log_user_event(vm: &str, v: &serde_json::Value) {
     let blocks = v["message"]["content"].as_array()
         .or_else(|| v["content"].as_array());
     let Some(blocks) = blocks else { return };
     for block in blocks {
         if block["type"].as_str() == Some("tool_result") || block.get("tool_use_id").is_some() {
-            let id = short_id(block["tool_use_id"].as_str().unwrap_or("?"));
             let is_error = block["is_error"].as_bool().unwrap_or(false);
             let status = if is_error { "error" } else { "ok" };
-            let result: String = block["content"].as_str().unwrap_or("").chars().take(60).collect();
-            info!(vm_id = %vm_id, "user  tool_result  id={id}  {status}  {result:?}");
+            info!(vm_id = %vm, "user  tool_result  {status}");
         }
     }
 }

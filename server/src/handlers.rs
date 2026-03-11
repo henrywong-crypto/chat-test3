@@ -106,10 +106,10 @@ pub(crate) async fn get_or_create_terminal(
         &state.rootfs_lock,
     )
     .await?;
-    info!(user_id = %db_user.id, rootfs = %user_rootfs.display(), "using rootfs");
+    info!("using rootfs");
     let vm_config = build_vm_config(&state, iam_creds, Some(&user_rootfs))?;
     let vm = create_vm(&vm_config).await?;
-    info!(user_id = %db_user.id, vm_id = %vm.id, guest_ip = %vm.guest_ip(), pid = vm.pid, "vm started");
+    info!("vm started");
     let vm_id = vm.id.clone();
     let vm_entry = VmEntry {
         user_id: db_user.id,
@@ -144,7 +144,7 @@ pub(crate) async fn delete_user_rootfs_handler(
     }
     let db_user = upsert_user(&state.db, &user.email).await?;
     let rootfs_path = user_rootfs_path(&state.user_rootfs_dir, db_user.id);
-    info!(user_id = %db_user.id, path = %rootfs_path.display(), "deleting saved rootfs");
+    info!("deleting saved rootfs");
     let _guard = state.rootfs_lock.lock().await;
     let _ = tokio::fs::remove_file(&rootfs_path).await;
     drop(_guard);
@@ -271,7 +271,7 @@ pub(crate) async fn chat_upload_handler(
         None => return Ok((StatusCode::NOT_FOUND, "Session not found or expired").into_response()),
     };
     let remote_path = build_chat_upload_path(&filename);
-    info!(user_id = %db_user.id, path = %remote_path, "uploading chat attachment via sftp");
+    info!("uploading chat attachment via sftp");
     let mut ssh_handle = connect_ssh(&guest_ip, &state.ssh_key_path, &state.ssh_user, &state.vm_host_key_path).await?;
     let sftp = open_sftp_session(&mut ssh_handle).await?;
     write_chat_file_via_sftp(sftp, &remote_path, &file_bytes).await?;
