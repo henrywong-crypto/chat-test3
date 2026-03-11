@@ -327,4 +327,5 @@ fn log_agent_event(vm_id: &str, line: &str) {
             let preview: String = line.chars().take(200).collect();
             warn!(vm_id = %vm_id, "agent→ws  unknown  {preview}");
         }
+    }
 }
