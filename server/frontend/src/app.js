@@ -1326,22 +1326,40 @@ function renderChatHistory(chatSessions) {
 }
 
 function buildChatSessionItem(chatSession) {
-  const item = document.createElement('div');
-  item.className = 'flex items-center justify-between px-3 py-2 cursor-pointer text-sm';
-  item.style.cssText = 'border-bottom:1px solid #374151';
-  item.addEventListener('mouseenter', () => { item.style.background = '#374151'; });
-  item.addEventListener('mouseleave', () => { item.style.background = ''; });
-  item.onclick = () => resumeSession(chatSession.session_id, chatSession.title);
-  const titleSpan = document.createElement('span');
-  titleSpan.className = 'truncate flex-1';
-  titleSpan.style.color = '#e5e7eb';
-  titleSpan.textContent = chatSession.title;
-  const timeSpan = document.createElement('span');
-  timeSpan.className = 'text-xs opacity-50 shrink-0 ml-2';
-  timeSpan.textContent = formatRelativeTime(chatSession.last_active_at);
-  item.appendChild(titleSpan);
-  item.appendChild(timeSpan);
-  return item;
+  const isActive = chatSession.session_id === chatSessionId;
+  const btn = document.createElement('button');
+  btn.type = 'button';
+  btn.className = 'w-full text-left flex items-start gap-2.5 px-3 py-2.5 rounded-lg transition-colors duration-150 '
+    + (isActive ? 'bg-base-300' : 'hover:bg-base-300/50');
+  btn.onclick = () => resumeSession(chatSession.session_id, chatSession.title);
+
+  const icon = document.createElement('div');
+  icon.className = 'shrink-0 mt-0.5 opacity-30';
+  icon.innerHTML = '<svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z"/></svg>';
+
+  const content = document.createElement('div');
+  content.className = 'flex-1 min-w-0';
+
+  const titleEl = document.createElement('div');
+  titleEl.className = 'text-sm font-medium truncate text-base-content';
+  titleEl.textContent = chatSession.title;
+
+  const timeEl = document.createElement('div');
+  timeEl.className = 'text-xs mt-0.5 opacity-40';
+  timeEl.textContent = formatRelativeTime(chatSession.last_active_at);
+
+  content.appendChild(titleEl);
+  content.appendChild(timeEl);
+  btn.appendChild(icon);
+  btn.appendChild(content);
+
+  if (isActive) {
+    const dot = document.createElement('div');
+    dot.className = 'w-1.5 h-1.5 rounded-full bg-success shrink-0 mt-1.5 animate-pulse';
+    btn.appendChild(dot);
+  }
+
+  return btn;
 }
 
 function formatRelativeTime(isoString) {
@@ -1360,7 +1378,9 @@ function startNewSession() {
   chatAttachments = [];
   renderAttachmentChips();
   document.getElementById('chat-messages').innerHTML = '';
-  document.getElementById('chat-sessions-panel').classList.add('hidden');
+  const panel = document.getElementById('chat-sessions-panel');
+  panel.classList.add('hidden');
+  panel.classList.remove('flex');
 }
 
 function resumeSession(sessionId) {
@@ -1371,7 +1391,9 @@ function resumeSession(sessionId) {
   chatAttachments = [];
   renderAttachmentChips();
   document.getElementById('chat-messages').innerHTML = '';
-  document.getElementById('chat-sessions-panel').classList.add('hidden');
+  const panel = document.getElementById('chat-sessions-panel');
+  panel.classList.add('hidden');
+  panel.classList.remove('flex');
   loadAndRenderTranscript(sessionId);
 }
 

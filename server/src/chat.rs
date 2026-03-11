@@ -16,7 +16,7 @@ use uuid::Uuid;
 use crate::{
     auth::User,
     ssh::{connect_ssh, open_exec_channel},
-    state::{find_vm_guest_ip_for_user, AppState},
+    state::{find_vm_guest_ip_for_user, mark_vm_ws_connected, AppState},
 };
 
 pub(crate) async fn handle_chat_ws_upgrade(
@@ -43,6 +43,7 @@ pub(crate) async fn handle_chat_ws_upgrade(
         }
     };
     info!("chat ws connected");
+    mark_vm_ws_connected(&state.vms, &vm_id);
     ws.on_upgrade(move |socket| run_chat_session(socket, vm_id, db_user.id.to_string(), guest_ip, state))
 }
 
