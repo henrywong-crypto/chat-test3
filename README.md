@@ -137,9 +137,9 @@ sudo chown -R root:root squashfs-root
 sudo chown -R 1000:1000 squashfs-root/home/ubuntu
 
 # SSH key
-ssh-keygen -f id_rsa -N ""
+ssh-keygen -t ed25519 -f id_ed25519 -N ""
 mkdir -p squashfs-root/home/ubuntu/.ssh
-cp id_rsa.pub squashfs-root/home/ubuntu/.ssh/authorized_keys
+cp id_ed25519.pub squashfs-root/home/ubuntu/.ssh/authorized_keys
 sudo chmod 700 squashfs-root/home/ubuntu/.ssh
 sudo chmod 600 squashfs-root/home/ubuntu/.ssh/authorized_keys
 echo "nameserver 1.1.1.1" | sudo tee squashfs-root/etc/resolv.conf > /dev/null
@@ -185,13 +185,13 @@ sudo chown -R 1000:1000 squashfs-root/home/ubuntu/.claude
 truncate -s 10G ubuntu-24.04.ext4
 sudo mkfs.ext4 -d squashfs-root -F ubuntu-24.04.ext4
 sudo rm -rf squashfs-root
-mv id_rsa ubuntu-24.04.id_rsa
+mv id_ed25519 ubuntu-24.04.id_ed25519
 
 # Install to /var/lib/fc
 sudo mkdir -p /var/lib/fc
 sudo mv vmlinux-6.1.155 /var/lib/fc/vmlinux
 sudo mv ubuntu-24.04.ext4 /var/lib/fc/ubuntu-24.04.ext4
-sudo mv ubuntu-24.04.id_rsa /var/lib/fc/ubuntu-24.04.id_rsa
+sudo mv id_ed25519 /var/lib/fc/ubuntu-24.04.id_ed25519
 ```
 
 The rootfs contains:
@@ -207,7 +207,7 @@ Configuration is loaded from `config.toml` (optional) and environment variables.
 ```toml
 kernel_path   = "/var/lib/fc/vmlinux"
 rootfs_path   = "/var/lib/fc/ubuntu-24.04.ext4"
-ssh_key_path  = "/var/lib/fc/ubuntu-24.04.id_rsa"
+ssh_key_path  = "/var/lib/fc/ubuntu-24.04.id_ed25519"
 ssh_user      = "ubuntu"
 jailer_uid    = 999  # id -u webcode
 jailer_gid    = 999  # id -g webcode
@@ -247,7 +247,7 @@ Open http://localhost:3000 — each page load boots a fresh VM and opens an SSH 
 |---|---|---|
 | `KERNEL_PATH` | `/var/lib/fc/vmlinux` | Firecracker kernel image |
 | `ROOTFS_PATH` | `/var/lib/fc/rootfs.ext4` | Root filesystem image |
-| `SSH_KEY_PATH` | `/var/lib/fc/id_rsa` | SSH private key matching the public key baked into the rootfs |
+| `SSH_KEY_PATH` | `/var/lib/fc/id_ed25519` | SSH private key matching the public key baked into the rootfs |
 | `SSH_USER` | `root` | SSH login user inside the VM |
 | `VM_HOST_KEY_PATH` | `/var/lib/fc/vm_host_key.pub` | Known-host public key for the VM's sshd (prevents MITM on the internal TAP network) |
 | `PORT` | `3000` | HTTP listen port |

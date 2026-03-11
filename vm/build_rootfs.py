@@ -170,14 +170,14 @@ def setup_client_ssh_key(workdir: Path, rootfs: Path) -> Path:
     Private key → returned (installed to /var/lib/fc/ later).
     Public key  → baked into the rootfs as ubuntu's authorized_keys.
     """
-    private_key    = workdir / "id_rsa"
-    public_key     = workdir / "id_rsa.pub"
+    private_key    = workdir / "id_ed25519"
+    public_key     = workdir / "id_ed25519.pub"
     authorized_keys = rootfs / "home/ubuntu/.ssh/authorized_keys"
     ssh_dir        = rootfs / "home/ubuntu/.ssh"
 
     private_key.unlink(missing_ok=True)
     public_key.unlink(missing_ok=True)
-    run(["ssh-keygen", "-t", "rsa", "-f", str(private_key), "-N", ""])
+    run(["ssh-keygen", "-t", "ed25519", "-f", str(private_key), "-N", ""])
 
     ssh_dir.mkdir(mode=0o700, exist_ok=True)
     shutil.copy(public_key, authorized_keys)
@@ -282,7 +282,7 @@ def install_artifacts(
 
     kernel_dest       = INSTALL_DIR / kernel.name
     ext4_dest         = INSTALL_DIR / ext4.name
-    client_key_dest   = INSTALL_DIR / f"{ubuntu_name}.id_rsa"
+    client_key_dest   = INSTALL_DIR / f"{ubuntu_name}.id_ed25519"
     host_key_pub_dest = INSTALL_DIR / "vm_host_key.pub"
 
     shutil.move(str(kernel),          str(kernel_dest))
