@@ -39,11 +39,15 @@ async def run_query(content: str, session_id):
         permission_mode='bypassPermissions',
         **({"resume": session_id} if session_id else {}),
     )
+    captured_session_id = session_id
     try:
         async for event in query(prompt=content, options=options):
             emit(event)
+            if hasattr(event, 'session_id') and event.session_id:
+                captured_session_id = event.session_id
     except Exception as exc:
         emit({'type': 'error', 'message': str(exc)})
+    emit({'type': 'done', 'session_id': captured_session_id})
 
 
 def emit(obj):

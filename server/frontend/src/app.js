@@ -292,10 +292,13 @@ function connectChatWs() {
 }
 
 function handleChatEvent(event) {
-  if (event.type === 'system' && event.subtype === 'init') {
+  // Capture session_id from whichever event first carries it
+  if (event.session_id && !chatSessionId) {
     chatSessionId = event.session_id;
+  }
+  if (event.type === 'system' && event.subtype === 'init') {
     showThinkingIndicator();
-  } else if (event.type === 'assistant' || (event.content && Array.isArray(event.content))) {
+  } else if (event.type === 'assistant' || (event.content && Array.isArray(event.content) && !event.content.some(b => b.type === 'tool_result'))) {
     removeThinkingIndicator();
     const blocks = event.content ?? event.message?.content ?? [];
     for (const block of blocks) {
@@ -306,14 +309,15 @@ function handleChatEvent(event) {
         appendToolUseBlock(block.id, block.name, block.input);
       }
     }
-  } else if (event.type === 'user') {
-    for (const block of (event.message?.content ?? [])) {
+  } else if (event.type === 'user' || (event.content && Array.isArray(event.content) && event.content.some(b => b.type === 'tool_result'))) {
+    const blocks = event.content ?? event.message?.content ?? [];
+    for (const block of blocks) {
       if (block.type === 'tool_result') {
         fillToolResult(block.tool_use_id, block.content, block.is_error);
       }
     }
-  } else if (event.type === 'result') {
-    chatSessionId = event.session_id;
+  } else if (event.type === 'result' || event.type === 'done') {
+    if (event.session_id) chatSessionId = event.session_id;
     sealAssistantMessage();
     removeThinkingIndicator();
     chatStreaming = false;
@@ -334,6 +338,7 @@ function sendQuery(content) {
     sealAssistantMessage();
     chatStreaming = true;
     lockChatInput();
+    showThinkingIndicator();
     pendingQuery = { content };
     return;
   }
@@ -341,6 +346,7 @@ function sendQuery(content) {
   sealAssistantMessage();
   chatStreaming = true;
   lockChatInput();
+  showThinkingIndicator();
   chatWs.send(JSON.stringify({ type: 'query', content, session_id: chatSessionId }));
 }
 
