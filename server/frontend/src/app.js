@@ -760,8 +760,7 @@ function renderTranscriptMessages(messages) {
     } else if (message.role === 'assistant') {
       for (const block of message.content) {
         if (block.type === 'text' && block.text) {
-          ensureAssistantMessage();
-          currentAssistantRawText += block.text;
+          appendToAssistantMessage(block.text);
         } else if (block.type === 'tool_use') {
           appendToolUseBlock(block.id, block.name, block.input);
         }
