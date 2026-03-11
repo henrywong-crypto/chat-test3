@@ -1,7 +1,7 @@
 #!/usr/bin/env -S uv run --script
 # /// script
 # requires-python = ">=3.11"
-# dependencies = ["claude-code-sdk"]
+# dependencies = ["claude-agent-sdk"]
 # ///
 
 import asyncio
@@ -32,9 +32,9 @@ async def main():
 
 
 async def run_query(content: str, session_id):
-    from claude_code_sdk import query, ClaudeCodeOptions
+    from claude_agent_sdk import ClaudeAgentOptions, query
 
-    options = ClaudeCodeOptions(
+    options = ClaudeAgentOptions(
         cwd=os.environ.get('HOME', '/root'),
         permission_mode='bypassPermissions',
         **({"resume": session_id} if session_id else {}),

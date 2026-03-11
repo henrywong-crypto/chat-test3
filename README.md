@@ -197,7 +197,7 @@ sudo mv id_ed25519 /var/lib/fc/ubuntu-24.04.id_ed25519
 The rootfs contains:
 - **`claude` CLI** (installed per-user via `https://claude.ai/install.sh`) — the Claude Code binary invoked by the agent
 - **`uv`** (system-wide at `/usr/local/bin/uv`) — runs `agent.py` and manages its Python dependencies
-- **`/opt/agent.py`** — reads JSON queries from stdin, streams results back via stdout using the `claude-code-sdk` Python package
+- **`/opt/agent.py`** — reads JSON queries from stdin, streams results back via stdout using the `claude-agent-sdk` Python package
 - **Claude Code settings** — configured for AWS Bedrock; credentials are inherited from the host instance profile at runtime
 
 ## Run

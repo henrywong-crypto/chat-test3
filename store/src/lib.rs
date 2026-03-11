@@ -1,8 +1,6 @@
-mod chat_session;
 mod user;
 
 use anyhow::Result;
-pub use chat_session::{list_chat_sessions, upsert_chat_session, ChatSession};
 pub use sqlx::PgPool;
 pub use user::{upsert_user, User};
 

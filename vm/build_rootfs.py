@@ -244,7 +244,7 @@ def install_agent(rootfs: Path) -> None:
 
     # Pre-warm the uv dependency cache as the ubuntu user so the first VM
     # startup is instant.  An immediate EOF on stdin causes agent.py to exit
-    # cleanly after uv has downloaded and cached claude-code-sdk.
+    # cleanly after uv has downloaded and cached claude-agent-sdk.
     # bash -l sources ~/.profile → ~/.bashrc so the claude binary is on PATH.
     # Non-fatal: the agent works without the cache; it just downloads on first run.
     result = subprocess.run(
