@@ -25,7 +25,7 @@ import xml.etree.ElementTree as ET
 from pathlib import Path
 
 S3_BASE = "https://s3.amazonaws.com/spec.ccfc.min/firecracker-ci"
-S3_LIST = "https://spec.ccfc.min.s3.amazonaws.com"
+S3_LIST = "https://s3.amazonaws.com/spec.ccfc.min"
 INSTALL_DIR = Path("/var/lib/fc")
 AGENT_PY = Path(__file__).parent / "agent.py"
 
