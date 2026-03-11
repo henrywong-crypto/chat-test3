@@ -60,7 +60,6 @@ pub(crate) async fn download_file_handler(
     if metadata.is_dir() {
         let dirname = real_path.rsplit('/').next().unwrap_or("download").to_owned();
         Ok(build_streaming_zip_response(
-            ssh_handle,
             sftp,
             real_path,
             state.upload_dir.clone(),
@@ -68,7 +67,7 @@ pub(crate) async fn download_file_handler(
         ))
     } else {
         let filename = real_path.rsplit('/').next().unwrap_or("download").to_owned();
-        Ok(build_streaming_file_response(ssh_handle, sftp, &real_path, &filename)
+        Ok(build_streaming_file_response(sftp, &real_path, &filename)
             .await
             .context("failed to build file response")?)
     }
