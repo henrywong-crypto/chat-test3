@@ -1,4 +1,4 @@
-use anyhow::Result;
+use anyhow::{anyhow, Result};
 use chrono::{DateTime, TimeZone, Utc};
 use russh_sftp::client::{fs::DirEntry, SftpSession};
 use serde::Serialize;
@@ -26,7 +26,7 @@ pub(crate) struct TranscriptMessage {
     pub content: Vec<serde_json::Value>,
 }
 
-const PROJECTS_DIR: &str = "/home/ubuntu/.claude/projects/-home-ubuntu";
+const PROJECTS_BASE: &str = "/home/ubuntu/.claude/projects";
 
 pub(crate) async fn list_sessions(
     guest_ip: &str,
@@ -36,30 +36,62 @@ pub(crate) async fn list_sessions(
 ) -> Result<Vec<SessionEntry>> {
     let mut ssh_handle = connect_ssh(guest_ip, ssh_key_path, ssh_user, vm_host_key_path).await?;
     let sftp = open_sftp_session(&mut ssh_handle).await?;
-    let dir_entries: Vec<DirEntry> = match sftp.read_dir(PROJECTS_DIR).await {
-        Ok(rd) => rd.collect(),
-        Err(_) => return Ok(vec![]),
-    };
-    build_session_entries(&sftp, dir_entries).await
+    let project_dirs = find_all_project_dirs(&sftp).await;
+    let mut all_session_entries = Vec::new();
+    for project_dir in &project_dirs {
+        let dir_entries: Vec<DirEntry> = sftp.read_dir(project_dir).await
+            .map(|rd| rd.collect())
+            .unwrap_or_default();
+        let mut session_entries = build_session_entries(&sftp, dir_entries, project_dir).await?;
+        all_session_entries.append(&mut session_entries);
+    }
+    all_session_entries.sort_by(|a, b| b.last_active_at.cmp(&a.last_active_at));
+    Ok(all_session_entries)
+}
+
+async fn find_all_project_dirs(sftp: &SftpSession) -> Vec<String> {
+    let top_entries: Vec<DirEntry> = sftp.read_dir(PROJECTS_BASE).await
+        .map(|rd| rd.collect())
+        .unwrap_or_default();
+    let mut project_dirs = Vec::new();
+    for entry in top_entries {
+        let name = entry.file_name();
+        if name.starts_with('.') {
+            continue;
+        }
+        let path = format!("{PROJECTS_BASE}/{name}");
+        if is_directory_entry(&entry) {
+            project_dirs.push(path);
+        }
+    }
+    project_dirs
+}
+
+fn is_directory_entry(entry: &DirEntry) -> bool {
+    // Unix directory bit: mode & 0o170000 == 0o040000
+    entry.metadata().permissions
+        .map(|p| p & 0o170_000 == 0o040_000)
+        .unwrap_or(false)
 }
 
 async fn build_session_entries(
     sftp: &SftpSession,
     dir_entries: Vec<DirEntry>,
+    project_dir: &str,
 ) -> Result<Vec<SessionEntry>> {
     let mut session_entries = Vec::new();
     for dir_entry in &dir_entries {
-        if let Some(session_entry) = build_session_entry_with_title(sftp, dir_entry).await {
+        if let Some(session_entry) = build_session_entry_with_title(sftp, dir_entry, project_dir).await {
             session_entries.push(session_entry);
         }
     }
-    session_entries.sort_by(|a, b| b.last_active_at.cmp(&a.last_active_at));
     Ok(session_entries)
 }
 
 async fn build_session_entry_with_title(
     sftp: &SftpSession,
     dir_entry: &DirEntry,
+    project_dir: &str,
 ) -> Option<SessionEntry> {
     let session_id = dir_entry.file_name().strip_suffix(".jsonl")?.to_owned();
     if session_id.starts_with("agent-") {
@@ -70,7 +102,7 @@ async fn build_session_entry_with_title(
         .timestamp_opt(mtime as i64, 0)
         .single()
         .unwrap_or_default();
-    let path = format!("{PROJECTS_DIR}/{session_id}.jsonl");
+    let path = format!("{project_dir}/{session_id}.jsonl");
     let title = fetch_session_title(sftp, &path)
         .await
         .unwrap_or_else(|| session_id.clone());
@@ -130,15 +162,27 @@ pub(crate) async fn fetch_transcript(
 ) -> Result<TranscriptResponse> {
     let mut ssh_handle = connect_ssh(guest_ip, ssh_key_path, ssh_user, vm_host_key_path).await?;
     let sftp = open_sftp_session(&mut ssh_handle).await?;
-    let transcript_path = build_transcript_path(session_id);
+    let project_dirs = find_all_project_dirs(&sftp).await;
+    let transcript_path = find_session_path(&sftp, &project_dirs, session_id).await
+        .ok_or_else(|| anyhow::anyhow!("session not found: {session_id}"))?;
     let mut file = sftp.open(&transcript_path).await?;
     let mut contents = String::new();
     file.read_to_string(&mut contents).await?;
     parse_transcript(&contents)
 }
 
-fn build_transcript_path(session_id: &str) -> String {
-    format!("{PROJECTS_DIR}/{session_id}.jsonl")
+async fn find_session_path(
+    sftp: &SftpSession,
+    project_dirs: &[String],
+    session_id: &str,
+) -> Option<String> {
+    for dir in project_dirs {
+        let path = format!("{dir}/{session_id}.jsonl");
+        if sftp.open(&path).await.is_ok() {
+            return Some(path);
+        }
+    }
+    None
 }
 
 fn parse_transcript(contents: &str) -> Result<TranscriptResponse> {

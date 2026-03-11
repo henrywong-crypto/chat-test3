@@ -308,6 +308,65 @@ let streamInThinkingBlock = false;
 // Map tool_use_id → { resultEl, inner, resultHeader, resultIcon, resultLabel, resultBody, toolName }
 const pendingToolUses = new Map();
 
+// ── Document attachments ──────────────────────────────────────────────────────
+
+let chatAttachments = []; // [{name, content}]
+
+document.getElementById('chat-attach-btn').addEventListener('click', () => {
+  document.getElementById('chat-attach-input').click();
+});
+
+document.getElementById('chat-attach-input').addEventListener('change', function() {
+  for (const file of this.files) readAttachment(file);
+  this.value = '';
+});
+
+function readAttachment(file) {
+  const reader = new FileReader();
+  reader.onload = e => {
+    chatAttachments.push({ name: file.name, content: e.target.result });
+    renderAttachmentChips();
+  };
+  reader.onerror = () => console.warn('[chat] failed to read file', file.name);
+  reader.readAsText(file);
+}
+
+function renderAttachmentChips() {
+  const container = document.getElementById('chat-attachments');
+  if (chatAttachments.length === 0) {
+    container.classList.remove('flex');
+    container.classList.add('hidden');
+    return;
+  }
+  container.classList.remove('hidden');
+  container.classList.add('flex');
+  container.innerHTML = '';
+  chatAttachments.forEach((att, i) => {
+    const chip = document.createElement('div');
+    chip.style.cssText = 'display:flex;align-items:center;gap:4px;padding:2px 8px;border-radius:12px;font-size:11px;color:#e5e7eb;background:#374151;border:1px solid #4b5563';
+    const nameEl = document.createElement('span');
+    nameEl.textContent = '📄 ' + att.name;
+    const removeBtn = document.createElement('button');
+    removeBtn.style.cssText = 'background:none;border:none;color:#9ca3af;cursor:pointer;font-size:13px;line-height:1;padding:0 0 0 2px';
+    removeBtn.textContent = '×';
+    removeBtn.addEventListener('click', () => {
+      chatAttachments.splice(i, 1);
+      renderAttachmentChips();
+    });
+    chip.appendChild(nameEl);
+    chip.appendChild(removeBtn);
+    container.appendChild(chip);
+  });
+}
+
+function buildQueryWithAttachments(userMessage) {
+  if (chatAttachments.length === 0) return userMessage;
+  const contextBlocks = chatAttachments
+    .map(att => `<context file="${att.name}">\n${att.content}\n</context>`)
+    .join('\n\n');
+  return `${contextBlocks}\n\n${userMessage}`;
+}
+
 document.getElementById('chat-toggle-btn').addEventListener('click', toggleChat);
 document.getElementById('chat-close-btn').addEventListener('click', closeChatPanel);
 document.getElementById('chat-new-btn').addEventListener('click', startNewSession);
@@ -352,6 +411,10 @@ function toggleChat() {
   if (isOpen && !chatWs) connectChatWs();
 }
 
+function isChatPanelOpen() {
+  return !document.getElementById('chat-panel').classList.contains('hidden');
+}
+
 function connectChatWs() {
   chatWs = new WebSocket(wsBase + '/sessions/' + vmId + '/chat');
   chatWs.onopen = () => {
@@ -376,8 +439,17 @@ function connectChatWs() {
     pendingQuery = null;
     sealAssistantMessage();
     unlockChatInput();
+    // Auto-reconnect if the chat panel is still open
+    if (isChatPanelOpen()) {
+      setTimeout(() => { if (!chatWs && isChatPanelOpen()) connectChatWs(); }, 2000);
+    }
   };
 }
+
+// Refresh history when the tab becomes visible again
+document.addEventListener('visibilitychange', () => {
+  if (!document.hidden) refreshChatHistory();
+});
 
 function handleChatEvent(event) {
   // Capture session_id from whichever event first carries it
@@ -460,16 +532,21 @@ function prepareForQuery(content) {
 }
 
 function sendQuery(content) {
+  const fullContent = buildQueryWithAttachments(content);
+  if (chatAttachments.length > 0) {
+    chatAttachments = [];
+    renderAttachmentChips();
+  }
   if (chatSessionId === null) {
     pendingSessionTitle = content.slice(0, 60);
   }
   console.log('[chat] → query  session_id=', chatSessionId, ' content=', content.slice(0, 80));
-  prepareForQuery(content);
+  prepareForQuery(content); // show user's typed message only (not file content)
   if (chatWs && chatWs.readyState === WebSocket.CONNECTING) {
-    pendingQuery = { content };
+    pendingQuery = { content: fullContent };
     return;
   }
-  chatWs.send(JSON.stringify({ type: 'query', content, session_id: chatSessionId }));
+  chatWs.send(JSON.stringify({ type: 'query', content: fullContent, session_id: chatSessionId }));
 }
 
 // ── Message builders ──────────────────────────────────────────────────────────
@@ -602,7 +679,7 @@ function attachMessageCopyButton(msgEl, rawText) {
 const TOOL_CATEGORIES = {
   bash:     ['Bash'],
   edit:     ['Edit', 'Write', 'MultiEdit'],
-  search:   ['Grep', 'Glob', 'Read'],
+  search:   ['Grep', 'Glob', 'Read', 'LS', 'ToolSearch', 'WebSearch', 'WebFetch'],
   todo:     ['TodoWrite', 'TodoRead'],
   task:     ['TaskCreate', 'TaskUpdate', 'TaskList', 'TaskGet'],
   agent:    ['Task'],
@@ -864,27 +941,56 @@ function buildWritePreview(input) {
 }
 
 function buildGenericInput(toolName, icon, input) {
-  const details = document.createElement('details');
-  details.style.cssText = 'border:1px solid #374151;border-radius:5px;overflow:hidden;margin:2px 0';
-  const summary = document.createElement('summary');
-  summary.style.cssText = 'display:flex;align-items:center;gap:6px;padding:4px 8px;background:#1f2937;color:#9ca3af;font-size:11px;cursor:pointer;list-style:none;user-select:none';
-  const arrow = document.createElement('span');
-  arrow.style.cssText = 'display:inline-block;transition:transform .15s;font-size:9px';
-  arrow.textContent = '▸';
-  details.addEventListener('toggle', () => { arrow.style.transform = details.open ? 'rotate(90deg)' : ''; });
+  // Build a short human-readable summary from the first 1-2 meaningful input fields
+  const summary = summarizeInput(input);
+
+  const wrapper = document.createElement('div');
+  wrapper.style.cssText = 'font-size:11px';
+
+  const headerRow = document.createElement('div');
+  headerRow.style.cssText = 'display:flex;align-items:center;gap:5px;color:#9ca3af;padding:2px 0';
   const iconEl = document.createElement('span');
   iconEl.textContent = icon;
-  const labelEl = document.createElement('span');
-  labelEl.textContent = toolName;
-  summary.appendChild(arrow);
-  summary.appendChild(iconEl);
-  summary.appendChild(labelEl);
+  const nameEl = document.createElement('span');
+  nameEl.style.cssText = 'color:#e5e7eb;font-weight:500';
+  nameEl.textContent = toolName;
+  headerRow.appendChild(iconEl);
+  headerRow.appendChild(nameEl);
+  if (summary) {
+    const sumEl = document.createElement('span');
+    sumEl.style.cssText = 'color:#6b7280;font-family:monospace;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;max-width:200px';
+    sumEl.textContent = summary;
+    headerRow.appendChild(sumEl);
+  }
+
+  const details = document.createElement('details');
+  details.style.cssText = 'margin-top:2px';
+  const detailSummary = document.createElement('summary');
+  detailSummary.style.cssText = 'font-size:10px;color:#4b5563;cursor:pointer;list-style:none;user-select:none';
+  detailSummary.textContent = 'view params';
   const pre = document.createElement('pre');
-  pre.style.cssText = 'margin:0;padding:8px 10px;background:#111827;color:#d1fae5;font-size:11px;overflow-x:auto;white-space:pre-wrap;word-break:break-all';
+  pre.style.cssText = 'margin:4px 0 0;padding:6px 8px;background:#111827;color:#d1fae5;font-size:11px;border-radius:4px;overflow-x:auto;white-space:pre-wrap;word-break:break-all';
   pre.textContent = typeof input === 'object' ? JSON.stringify(input, null, 2) : String(input);
-  details.appendChild(summary);
+  details.appendChild(detailSummary);
   details.appendChild(pre);
-  return details;
+
+  wrapper.appendChild(headerRow);
+  wrapper.appendChild(details);
+  return wrapper;
+}
+
+function summarizeInput(input) {
+  if (!input || typeof input !== 'object') return String(input ?? '').slice(0, 80);
+  // Pick the first string-valued key that looks meaningful
+  const skip = new Set(['type', 'id', 'name']);
+  for (const [k, v] of Object.entries(input)) {
+    if (skip.has(k)) continue;
+    if (typeof v === 'string' && v.length > 0) {
+      const preview = v.slice(0, 80);
+      return k + ': ' + (preview.length < v.length ? preview + '…' : preview);
+    }
+  }
+  return '';
 }
 
 function buildInlineCopyBtn(text) {
@@ -1171,6 +1277,8 @@ function startNewSession() {
   pendingToolUses.clear();
   streamInThinkingBlock = false;
   sealThinkingBlock();
+  chatAttachments = [];
+  renderAttachmentChips();
   document.getElementById('chat-messages').innerHTML = '';
   document.getElementById('chat-sessions-panel').classList.add('hidden');
 }
@@ -1180,6 +1288,8 @@ function resumeSession(sessionId) {
   pendingToolUses.clear();
   streamInThinkingBlock = false;
   sealThinkingBlock();
+  chatAttachments = [];
+  renderAttachmentChips();
   document.getElementById('chat-messages').innerHTML = '';
   document.getElementById('chat-sessions-panel').classList.add('hidden');
   loadAndRenderTranscript(sessionId);

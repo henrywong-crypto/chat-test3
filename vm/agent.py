@@ -102,10 +102,17 @@ async def run_query(content: str, session_id):
 class _Encoder(json.JSONEncoder):
     def default(self, obj):
         if dataclasses.is_dataclass(obj) and not isinstance(obj, type):
-            return dataclasses.asdict(obj)
-        if hasattr(obj, 'model_dump'):
-            return obj.model_dump()
-        return super().default(obj)
+            data = dataclasses.asdict(obj)
+        elif hasattr(obj, 'model_dump'):
+            data = obj.model_dump()
+        else:
+            return super().default(obj)
+        # Pydantic model_dump() may omit discriminator `type`; re-inject from attribute if missing.
+        if isinstance(data, dict) and 'type' not in data:
+            type_val = getattr(obj, 'type', None)
+            if type_val is not None:
+                data['type'] = type_val if isinstance(type_val, str) else str(type_val)
+        return data
 
 
 def emit(obj):
