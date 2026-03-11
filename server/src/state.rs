@@ -202,3 +202,11 @@ pub(crate) fn find_vm_guest_ip_for_user(
     let vm_entry = registry.get(vm_id)?;
     (vm_entry.user_id == user_id).then(|| vm_entry.vm.guest_ip())
 }
+
+pub(crate) fn find_user_vm_guest_ip(vms: &VmRegistry, user_id: Uuid) -> Option<String> {
+    let registry = vms.lock().ok()?;
+    registry
+        .values()
+        .find(|e| e.user_id == user_id)
+        .map(|e| e.vm.guest_ip())
+}
