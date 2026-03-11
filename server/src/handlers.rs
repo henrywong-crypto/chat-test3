@@ -1,20 +1,23 @@
-use std::time::Instant;
-use anyhow::anyhow;
+use std::time::{Instant, SystemTime, UNIX_EPOCH};
+use anyhow::{anyhow, Result};
 use axum::{
-    extract::{Form, Path, Query, State},
+    extract::{Form, Multipart, Path, Query, State},
     http::StatusCode,
     response::{Html, IntoResponse, Redirect, Response},
     Json,
 };
 use firecracker_manager::create_vm;
+use russh_sftp::client::SftpSession;
 use serde::Deserialize;
 use store::upsert_user;
+use tokio::io::AsyncWriteExt;
 use tower_sessions::Session;
 use tracing::{error, info};
 use uuid::Uuid;
 
 use crate::{
     auth::User,
+    ssh::{connect_ssh, open_sftp_session},
     state::{find_vm_guest_ip_for_user, AppError, AppState, VmEntry, VmRegistry},
     transcript::{fetch_transcript, list_sessions},
     static_files::{app_js_version, styles_css_version},
@@ -246,4 +249,73 @@ pub(crate) async fn get_chat_transcript_handler(
             (StatusCode::NOT_FOUND, "Transcript not found").into_response()
         }
     }
+}
+
+pub(crate) async fn chat_upload_handler(
+    user: User,
+    session: Session,
+    Path(vm_id): Path<String>,
+    State(state): State<AppState>,
+    multipart: Multipart,
+) -> Result<Response, AppError> {
+    if !validate_vm_id(&vm_id) {
+        return Ok((StatusCode::NOT_FOUND, "Not found").into_response());
+    }
+    let db_user = upsert_user(&state.db, &user.email).await?;
+    let (csrf_token, filename, file_bytes) = extract_chat_upload_fields(multipart).await?;
+    if !validate_csrf(&session, &csrf_token).await {
+        return Ok((StatusCode::FORBIDDEN, "Forbidden").into_response());
+    }
+    let guest_ip = match find_vm_guest_ip_for_user(&state.vms, &vm_id, db_user.id) {
+        Some(ip) => ip,
+        None => return Ok((StatusCode::NOT_FOUND, "Session not found or expired").into_response()),
+    };
+    let remote_path = build_chat_upload_path(&filename);
+    info!(user_id = %db_user.id, path = %remote_path, "uploading chat attachment via sftp");
+    let mut ssh_handle = connect_ssh(&guest_ip, &state.ssh_key_path, &state.ssh_user, &state.vm_host_key_path).await?;
+    let sftp = open_sftp_session(&mut ssh_handle).await?;
+    write_chat_file_via_sftp(sftp, &remote_path, &file_bytes).await?;
+    Ok(Json(serde_json::json!({"path": remote_path})).into_response())
+}
+
+async fn extract_chat_upload_fields(mut multipart: Multipart) -> Result<(String, String, Vec<u8>)> {
+    let mut csrf_token: Option<String> = None;
+    let mut filename: Option<String> = None;
+    let mut file_bytes: Option<Vec<u8>> = None;
+    while let Some(field) = multipart.next_field().await.map_err(|e| anyhow!("{e}"))? {
+        match field.name() {
+            Some("csrf_token") => {
+                csrf_token = Some(field.text().await.map_err(|e| anyhow!("{e}"))?);
+            }
+            Some("file") => {
+                let orig_name = field.file_name().unwrap_or("upload").to_owned();
+                filename = Some(orig_name);
+                file_bytes = Some(field.bytes().await.map_err(|e| anyhow!("{e}"))?.to_vec());
+            }
+            _ => {}
+        }
+    }
+    let csrf_token = csrf_token.ok_or_else(|| anyhow!("missing csrf_token field"))?;
+    let filename = filename.ok_or_else(|| anyhow!("missing file field"))?;
+    let file_bytes = file_bytes.ok_or_else(|| anyhow!("missing file bytes"))?;
+    Ok((csrf_token, filename, file_bytes))
+}
+
+fn build_chat_upload_path(filename: &str) -> String {
+    let ts = SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .unwrap_or_default()
+        .as_millis();
+    let safe_name: String = filename
+        .chars()
+        .map(|c| if c.is_alphanumeric() || c == '.' || c == '-' || c == '_' { c } else { '_' })
+        .collect();
+    format!("/tmp/{ts}_{safe_name}")
+}
+
+async fn write_chat_file_via_sftp(sftp: SftpSession, path: &str, data: &[u8]) -> Result<()> {
+    let mut file = sftp.create(path).await.map_err(|e| anyhow!("sftp create: {e}"))?;
+    file.write_all(data).await.map_err(|e| anyhow!("sftp write: {e}"))?;
+    file.shutdown().await.map_err(|e| anyhow!("sftp shutdown: {e}"))?;
+    Ok(())
 }

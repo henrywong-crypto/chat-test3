@@ -35,7 +35,7 @@ use crate::{
     chat::handle_chat_ws_upgrade,
     download::download_file_handler,
     files::list_files_handler,
-    handlers::{delete_user_rootfs_handler, get_chat_transcript_handler, get_or_create_terminal, get_terminal_page, list_chat_sessions_handler},
+    handlers::{chat_upload_handler, delete_user_rootfs_handler, get_chat_transcript_handler, get_or_create_terminal, get_terminal_page, list_chat_sessions_handler},
     state::{load_config, AppState},
     static_files::{serve_app_js, serve_styles_css},
     terminal::handle_ws_upgrade,
@@ -91,6 +91,7 @@ fn build_router(app_state: AppState, session_store: PostgresStore) -> Router {
         .route("/sessions/{id}/chat", get(handle_chat_ws_upgrade))
         .route("/sessions/{id}/chat-history", get(list_chat_sessions_handler))
         .route("/sessions/{id}/chat-transcript", get(get_chat_transcript_handler))
+        .route("/sessions/{id}/chat-upload", post(chat_upload_handler))
         .route("/rootfs/delete", post(delete_user_rootfs_handler))
         .route("/terminal/{id}", get(get_terminal_page))
         .route("/ws/{id}", get(handle_ws_upgrade))

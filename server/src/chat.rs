@@ -81,6 +81,7 @@ async fn run_agent_relay(
                         while let Some(newline_pos) = line_buf.find('\n') {
                             let line = line_buf[..newline_pos].trim_end_matches('\r').to_owned();
                             line_buf.drain(..=newline_pos);
+                            let line = normalize_event_line(line);
                             log_agent_event(vm_id, &line);
                             if ws_sender.send(Message::Text(line.into())).await.is_err() {
                                 return Ok(());
@@ -135,6 +136,54 @@ fn is_abort_message(text: &str) -> bool {
     serde_json::from_str::<serde_json::Value>(text)
         .map(|v| v["type"].as_str() == Some("abort"))
         .unwrap_or(false)
+}
+
+/// Re-injects the `type` field into agent events when Pydantic's model_dump() omitted it.
+///
+/// The Claude Agent SDK uses Pydantic v2 discriminated unions whose `type` field is omitted
+/// by `model_dump()`. agent.py attempts to re-inject it, but older deployed versions may not.
+/// This function acts as a server-side safety net: if a valid JSON object arrives without
+/// a `type` field, we infer the type from other structural fields.
+fn normalize_event_line(line: String) -> String {
+    let Ok(mut v) = serde_json::from_str::<serde_json::Value>(&line) else {
+        return line;
+    };
+    let obj = match v.as_object_mut() {
+        Some(obj) => obj,
+        None => return line,
+    };
+    if obj.contains_key("type") && obj["type"] != serde_json::Value::Null {
+        return line;
+    }
+    let inferred_type = infer_event_type(obj);
+    if let Some(t) = inferred_type {
+        obj.insert("type".to_owned(), serde_json::Value::String(t.to_owned()));
+        serde_json::to_string(obj).unwrap_or(line)
+    } else {
+        line
+    }
+}
+
+fn infer_event_type(obj: &serde_json::Map<String, serde_json::Value>) -> Option<&'static str> {
+    let subtype = obj.get("subtype").and_then(|v| v.as_str()).unwrap_or("");
+    if matches!(subtype, "init" | "cwd") {
+        return Some("system");
+    }
+    if matches!(subtype, "success" | "error_during_execution") || obj.contains_key("session_id") {
+        // result events always carry subtype + session_id; guard against plain dicts
+        if obj.contains_key("subtype") {
+            return Some("result");
+        }
+    }
+    let role = obj.get("message")
+        .and_then(|m| m.get("role"))
+        .and_then(|r| r.as_str())
+        .unwrap_or("");
+    match role {
+        "assistant" => Some("assistant"),
+        "user" => Some("user"),
+        _ => None,
+    }
 }
 
 /// Log a query message received from the browser WebSocket.

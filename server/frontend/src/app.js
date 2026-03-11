@@ -310,25 +310,35 @@ const pendingToolUses = new Map();
 
 // ── Document attachments ──────────────────────────────────────────────────────
 
-let chatAttachments = []; // [{name, content}]
+let chatAttachments = []; // [{name, path}]
 
 document.getElementById('chat-attach-btn').addEventListener('click', () => {
   document.getElementById('chat-attach-input').click();
 });
 
 document.getElementById('chat-attach-input').addEventListener('change', function() {
-  for (const file of this.files) readAttachment(file);
+  for (const file of this.files) uploadAttachment(file);
   this.value = '';
 });
 
-function readAttachment(file) {
-  const reader = new FileReader();
-  reader.onload = e => {
-    chatAttachments.push({ name: file.name, content: e.target.result });
-    renderAttachmentChips();
-  };
-  reader.onerror = () => console.warn('[chat] failed to read file', file.name);
-  reader.readAsText(file);
+async function uploadAttachment(file) {
+  const placeholder = { name: file.name, path: null };
+  chatAttachments.push(placeholder);
+  renderAttachmentChips();
+  try {
+    const form = new FormData();
+    form.append('csrf_token', fmCsrfToken);
+    form.append('file', file, file.name);
+    const res = await fetch('/sessions/' + vmId + '/chat-upload', { method: 'POST', body: form });
+    if (!res.ok) throw new Error('upload failed: ' + res.status);
+    const data = await res.json();
+    placeholder.path = data.path;
+  } catch (err) {
+    console.warn('[chat] attachment upload failed', file.name, err);
+    const idx = chatAttachments.indexOf(placeholder);
+    if (idx !== -1) chatAttachments.splice(idx, 1);
+  }
+  renderAttachmentChips();
 }
 
 function renderAttachmentChips() {
@@ -345,7 +355,7 @@ function renderAttachmentChips() {
     const chip = document.createElement('div');
     chip.style.cssText = 'display:flex;align-items:center;gap:4px;padding:2px 8px;border-radius:12px;font-size:11px;color:#e5e7eb;background:#374151;border:1px solid #4b5563';
     const nameEl = document.createElement('span');
-    nameEl.textContent = '📄 ' + att.name;
+    nameEl.textContent = (att.path ? '📄 ' : '⏳ ') + att.name;
     const removeBtn = document.createElement('button');
     removeBtn.style.cssText = 'background:none;border:none;color:#9ca3af;cursor:pointer;font-size:13px;line-height:1;padding:0 0 0 2px';
     removeBtn.textContent = '×';
@@ -360,11 +370,10 @@ function renderAttachmentChips() {
 }
 
 function buildQueryWithAttachments(userMessage) {
-  if (chatAttachments.length === 0) return userMessage;
-  const contextBlocks = chatAttachments
-    .map(att => `<context file="${att.name}">\n${att.content}\n</context>`)
-    .join('\n\n');
-  return `${contextBlocks}\n\n${userMessage}`;
+  const ready = chatAttachments.filter(att => att.path);
+  if (ready.length === 0) return userMessage;
+  const pathList = ready.map((att, i) => `${i + 1}. ${att.path}`).join('\n');
+  return `${userMessage}\n\n[Files provided at the following paths:]\n${pathList}`;
 }
 
 document.getElementById('chat-toggle-btn').addEventListener('click', toggleChat);
