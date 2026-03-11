@@ -5,13 +5,13 @@
 # ///
 """Build the Firecracker rootfs for WebCode.
 
-Must be run as root:
+Must be run as root. Because sudo resets PATH, pass uv's full path:
 
-    sudo uv run vm/build_rootfs.py
+    sudo $(which uv) run vm/build_rootfs.py
 
 Use --workdir to keep artifacts between runs (avoids re-downloading):
 
-    sudo uv run vm/build_rootfs.py --workdir /tmp/fc-build
+    sudo $(which uv) run vm/build_rootfs.py --workdir /tmp/fc-build
 """
 
 import argparse
@@ -136,7 +136,7 @@ def install_agent(rootfs: Path) -> None:
     # bash -l sources ~/.profile → ~/.bashrc so nvm's node/claude are on PATH.
     run(
         ["chroot", str(rootfs), "su", "-", "ubuntu", "-c",
-         "echo | bash -lc 'uv run /opt/agent.py'"],
+         "echo | bash -lc '/usr/local/bin/uv run /opt/agent.py'"],
     )
 
 

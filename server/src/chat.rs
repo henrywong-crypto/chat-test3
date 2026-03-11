@@ -57,8 +57,10 @@ async fn run_agent_relay(
         &state.vm_host_key_path,
     )
     .await?;
-    // bash -l sources ~/.profile → ~/.bashrc so nvm's node and the claude binary are on PATH.
-    let mut ssh_channel = open_exec_channel(&mut ssh_handle, "bash -lc 'uv run /opt/agent.py'").await?;
+    // bash -l sources ~/.profile → ~/.bashrc so the claude binary installed by
+    // https://claude.ai/install.sh is on PATH. uv is addressed by full path since
+    // /usr/local/bin may not be in the login shell's PATH on the minimal image.
+    let mut ssh_channel = open_exec_channel(&mut ssh_handle, "bash -lc '/usr/local/bin/uv run /opt/agent.py'").await?;
     let (mut ws_sender, mut ws_receiver) = socket.split();
     let mut line_buf = String::new();
     loop {

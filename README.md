@@ -117,10 +117,12 @@ Use the latest Firecracker minor version (e.g. `v1.14`) and pick the highest ker
 `vm/build_rootfs.py` automates the full build. It requires root, `uv`, `unsquashfs`, and `mkfs.ext4`:
 
 ```bash
-sudo uv run vm/build_rootfs.py
+sudo $(which uv) run vm/build_rootfs.py
 ```
 
 Pass `--workdir /path/to/dir` to use a specific working directory (defaults to a temporary directory). The script installs the finished artifacts directly into `/var/lib/fc/`.
+
+> **Note:** `sudo $(which uv)` is needed because `sudo` resets PATH and won't find `uv` otherwise.
 
 ### Manual steps
 
