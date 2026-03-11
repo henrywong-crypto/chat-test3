@@ -1,7 +1,7 @@
 use std::time::Instant;
 use anyhow::anyhow;
 use axum::{
-    extract::{Form, Path, State},
+    extract::{Form, Path, Query, State},
     http::StatusCode,
     response::{Html, IntoResponse, Redirect, Response},
     Json,
@@ -15,7 +15,8 @@ use uuid::Uuid;
 
 use crate::{
     auth::User,
-    state::{AppError, AppState, VmEntry, VmRegistry},
+    state::{find_vm_guest_ip_for_user, AppError, AppState, VmEntry, VmRegistry},
+    transcript::fetch_transcript,
     static_files::{app_js_version, styles_css_version},
     templates::render_terminal_page,
     vm::{
@@ -205,7 +206,46 @@ pub(crate) async fn list_chat_sessions_handler(
         return (StatusCode::NOT_FOUND, "Not found").into_response();
     }
     match list_chat_sessions(&state.db, db_user.id).await {
-        Ok(chat_sessions) => Json(chat_sessions).into_response(),
+        Ok(chat_sessions) => {
+            info!(user_id = %db_user.id, count = chat_sessions.len(), "listing chat sessions");
+            Json(chat_sessions).into_response()
+        }
         Err(_) => (StatusCode::INTERNAL_SERVER_ERROR, "Internal error").into_response(),
+    }
+}
+
+#[derive(Deserialize)]
+pub(crate) struct TranscriptQuery {
+    session_id: String,
+}
+
+pub(crate) async fn get_chat_transcript_handler(
+    user: User,
+    Path(vm_id): Path<String>,
+    Query(query): Query<TranscriptQuery>,
+    State(state): State<AppState>,
+) -> impl IntoResponse {
+    if !validate_vm_id(&vm_id) {
+        return (StatusCode::NOT_FOUND, "Not found").into_response();
+    }
+    let db_user = match upsert_user(&state.db, &user.email).await {
+        Ok(db_user) => db_user,
+        Err(_) => return (StatusCode::INTERNAL_SERVER_ERROR, "Internal error").into_response(),
+    };
+    let guest_ip = match find_vm_guest_ip_for_user(&state.vms, &vm_id, db_user.id) {
+        Some(ip) => ip,
+        None => return (StatusCode::NOT_FOUND, "Session not found or expired").into_response(),
+    };
+    match fetch_transcript(
+        &guest_ip,
+        &state.ssh_key_path,
+        &state.ssh_user,
+        &state.vm_host_key_path,
+        &query.session_id,
+    )
+    .await
+    {
+        Ok(transcript) => Json(transcript).into_response(),
+        Err(_) => (StatusCode::NOT_FOUND, "Transcript not found").into_response(),
     }
 }

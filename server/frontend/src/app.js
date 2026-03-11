@@ -629,6 +629,37 @@ function resumeSession(sessionId) {
   chatSessionId = sessionId;
   document.getElementById('chat-messages').innerHTML = '';
   document.getElementById('chat-sessions-panel').classList.add('hidden');
+  loadAndRenderTranscript(sessionId);
+}
+
+async function loadAndRenderTranscript(sessionId) {
+  try {
+    const res = await fetch('/sessions/' + vmId + '/chat-transcript?session_id=' + encodeURIComponent(sessionId));
+    if (!res.ok) return;
+    const transcript = await res.json();
+    renderTranscriptMessages(transcript.messages);
+  } catch {}
+}
+
+function renderTranscriptMessages(messages) {
+  for (const message of messages) {
+    if (message.role === 'user') {
+      const textContent = message.content
+        .filter(b => b.type === 'text')
+        .map(b => b.text)
+        .join('');
+      appendUserMessage(textContent);
+    } else if (message.role === 'assistant') {
+      for (const block of message.content) {
+        if (block.type === 'text') {
+          appendToAssistantMessage(block.text);
+        } else if (block.type === 'tool_use') {
+          appendToolUseBlock(block.id, block.name, block.input);
+        }
+      }
+      sealAssistantMessage();
+    }
+  }
 }
 
 function refreshChatHistory() {
