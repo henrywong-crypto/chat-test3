@@ -204,7 +204,7 @@ pub(crate) async fn list_chat_sessions_handler(
     if !owned {
         return (StatusCode::NOT_FOUND, "Not found").into_response();
     }
-    match list_chat_sessions(&state.db, db_user.id, &vm_id).await {
+    match list_chat_sessions(&state.db, db_user.id).await {
         Ok(chat_sessions) => Json(chat_sessions).into_response(),
         Err(_) => (StatusCode::INTERNAL_SERVER_ERROR, "Internal error").into_response(),
     }

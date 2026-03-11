@@ -46,19 +46,17 @@ pub async fn upsert_chat_session(
 pub async fn list_chat_sessions(
     pool: &PgPool,
     user_id: Uuid,
-    vm_id: &str,
 ) -> Result<Vec<ChatSession>> {
-    let rows = sqlx::query_as!(
+    let rows: Vec<ChatSessionRow> = sqlx::query_as!(
         ChatSessionRow,
         r#"
         SELECT session_id, title, last_active_at
         FROM chat_sessions
-        WHERE user_id = $1 AND vm_id = $2
+        WHERE user_id = $1
         ORDER BY last_active_at DESC
         LIMIT 20
         "#,
         user_id,
-        vm_id,
     )
     .fetch_all(pool)
     .await?;
