@@ -301,13 +301,20 @@ function handleChatEvent(event) {
   } else if (event.type === 'assistant' || (event.content && Array.isArray(event.content) && !event.content.some(b => b.type === 'tool_result'))) {
     removeThinkingIndicator();
     const blocks = event.content ?? event.message?.content ?? [];
+    let hasToolUse = false;
     for (const block of blocks) {
       if (block.text) {
         appendToAssistantMessage(block.text);
       } else if (block.type === 'tool_use') {
+        hasToolUse = true;
         sealAssistantMessage();
         appendToolUseBlock(block.id, block.name, block.input);
       }
+    }
+    if (!hasToolUse) {
+      sealAssistantMessage();
+      chatStreaming = false;
+      unlockChatInput();
     }
   } else if (event.type === 'user' || (event.content && Array.isArray(event.content) && event.content.some(b => b.type === 'tool_result'))) {
     const blocks = event.content ?? event.message?.content ?? [];
