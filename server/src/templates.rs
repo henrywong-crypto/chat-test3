@@ -64,7 +64,6 @@ fn TerminalPage(
     app_js_version: String,
     styles_css_version: String,
 ) -> impl IntoView {
-    let short_id = format!("{}…", vm_id.get(..8).unwrap_or(&vm_id));
     let upload_action = format!("/sessions/{vm_id}/upload");
     let app_js_src = format!("/static/app.js?v={app_js_version}");
     let styles_css_href = format!("/static/styles.css?v={styles_css_version}");
@@ -73,7 +72,7 @@ fn TerminalPage(
         <html lang="en" data-theme="dark">
             <head>
                 <meta charset="utf-8"/>
-                <title>"WebCode — " {short_id.clone()}</title>
+                <title>"WebCode"</title>
                 <link rel="stylesheet" href=styles_css_href/>
             </head>
             <body class="flex flex-col h-screen overflow-hidden">
@@ -85,11 +84,13 @@ fn TerminalPage(
                     data-upload-dir=upload_dir
                     data-upload-action=upload_action
                 />
-                <TerminalTopbar csrf_token=csrf_token has_user_rootfs=has_user_rootfs short_id=short_id/>
-                <div class="flex flex-1 min-h-0">
+                <Topbar csrf_token=csrf_token has_user_rootfs=has_user_rootfs/>
+                <div id="shell-view" class="flex flex-1 min-h-0">
                     <div id="term-container" class="flex-1 min-h-0 bg-black"/>
                     <FilesPanel/>
-                    <ChatPanel/>
+                </div>
+                <div id="chat-view" class="hidden flex-1 min-h-0 flex-col">
+                    <ChatView/>
                 </div>
                 <script src=app_js_src defer/>
             </body>
@@ -98,12 +99,15 @@ fn TerminalPage(
 }
 
 #[component]
-fn TerminalTopbar(csrf_token: String, has_user_rootfs: bool, short_id: String) -> impl IntoView {
+fn Topbar(csrf_token: String, has_user_rootfs: bool) -> impl IntoView {
     view! {
         <div class="flex items-center justify-between h-10 px-4 bg-base-200 border-b border-base-300 shrink-0">
             <div class="flex items-center gap-3">
                 <span class="text-sm font-semibold">"WebCode"</span>
-                <span class="badge badge-neutral font-mono text-xs">{short_id}</span>
+                <div class="flex gap-1">
+                    <button id="tab-shell-btn" class="btn btn-xs btn-primary">"Shell"</button>
+                    <button id="tab-chat-btn" class="btn btn-xs btn-ghost">"Chat"</button>
+                </div>
             </div>
             <div class="flex items-center gap-2">
                 {has_user_rootfs.then(|| view! {
@@ -128,7 +132,6 @@ fn TerminalTopbar(csrf_token: String, has_user_rootfs: bool, short_id: String) -
                     </dialog>
                 })}
                 <button id="files-toggle-btn" class="btn btn-xs btn-ghost">"Files"</button>
-                <button id="chat-toggle-btn" class="btn btn-xs btn-ghost">"Chat"</button>
                 <a href="/logout" class="btn btn-xs btn-ghost">"Logout"</a>
             </div>
         </div>
@@ -157,23 +160,24 @@ fn FilesPanel() -> impl IntoView {
 }
 
 #[component]
-fn ChatPanel() -> impl IntoView {
+fn ChatView() -> impl IntoView {
     view! {
-        <div id="chat-panel" class="hidden w-96 shrink-0 flex-col border-l border-base-300 overflow-hidden" style="background:#111827">
-            <div class="flex items-center justify-between px-4 py-3 border-b border-gray-700 shrink-0" style="background:#1f2937">
-                <div class="flex items-center gap-2">
-                    <div class="w-6 h-6 rounded-full flex items-center justify-center text-xs text-white font-bold" style="background:#f97316">"C"</div>
-                    <span class="text-sm font-semibold text-gray-100">"Claude"</span>
-                </div>
-                <div class="flex items-center gap-1">
-                    <button id="chat-new-btn" class="btn btn-xs btn-ghost text-gray-400">"New"</button>
-                    <button id="chat-history-btn" class="btn btn-xs btn-ghost text-gray-400">"History"</button>
-                    <button id="chat-close-btn" class="text-gray-400 hover:text-gray-200 btn btn-xs btn-ghost btn-square">"✕"</button>
-                </div>
+        <div class="flex items-center justify-between px-4 py-2 border-b border-gray-700 shrink-0" style="background:#1f2937">
+            <div class="flex items-center gap-2">
+                <div class="w-6 h-6 rounded-full flex items-center justify-center text-xs text-white font-bold" style="background:#f97316">"C"</div>
+                <span class="text-sm font-semibold text-gray-100">"Claude"</span>
             </div>
-            <div id="chat-sessions-panel" class="hidden border-b border-gray-700 overflow-y-auto" style="max-height:200px"/>
-            <div id="chat-messages" class="flex-1 overflow-y-auto py-3 space-y-3"/>
-            <div class="px-3 py-3 border-t border-gray-700 shrink-0" style="background:#1f2937">
+            <div class="flex items-center gap-1">
+                <button id="chat-new-btn" class="btn btn-xs btn-ghost text-gray-400">"New"</button>
+                <button id="chat-history-btn" class="btn btn-xs btn-ghost text-gray-400">"History"</button>
+            </div>
+        </div>
+        <div id="chat-sessions-panel" class="hidden border-b border-gray-700 overflow-y-auto" style="max-height:200px;background:#1f2937"/>
+        <div id="chat-scroll" class="flex-1 overflow-y-auto" style="background:#111827">
+            <div id="chat-messages" class="max-w-3xl mx-auto py-4 px-4 space-y-3"/>
+        </div>
+        <div class="border-t border-gray-700 shrink-0" style="background:#1f2937">
+            <div class="max-w-3xl mx-auto px-4 py-3">
                 <div id="chat-attachments" class="hidden flex-wrap gap-1 pb-2"/>
                 <div class="flex items-end gap-2">
                     <button id="chat-attach-btn" class="btn btn-xs btn-ghost text-gray-400 shrink-0" title="Attach file">"📎"</button>

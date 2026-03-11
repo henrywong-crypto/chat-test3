@@ -381,8 +381,8 @@ function buildQueryWithAttachments(userMessage) {
   return `${userMessage}\n\n[Files provided at the following paths:]\n${pathList}`;
 }
 
-document.getElementById('chat-toggle-btn').addEventListener('click', toggleChat);
-document.getElementById('chat-close-btn').addEventListener('click', closeChatPanel);
+document.getElementById('tab-shell-btn').addEventListener('click', switchToShell);
+document.getElementById('tab-chat-btn').addEventListener('click', switchToChat);
 document.getElementById('chat-new-btn').addEventListener('click', startNewSession);
 document.getElementById('chat-history-btn').addEventListener('click', () => {
   const panel = document.getElementById('chat-sessions-panel');
@@ -412,21 +412,33 @@ function autoResizeChatInput() {
   el.style.height = Math.min(el.scrollHeight, 160) + 'px';
 }
 
-function closeChatPanel() {
-  const panel = document.getElementById('chat-panel');
-  panel.classList.remove('flex');
-  panel.classList.add('hidden');
+function switchToChat() {
+  const shellView = document.getElementById('shell-view');
+  const chatView = document.getElementById('chat-view');
+  shellView.classList.add('hidden');
+  shellView.classList.remove('flex');
+  chatView.classList.remove('hidden');
+  chatView.classList.add('flex');
+  document.getElementById('tab-shell-btn').classList.replace('btn-primary', 'btn-ghost');
+  document.getElementById('tab-chat-btn').classList.replace('btn-ghost', 'btn-primary');
+  document.getElementById('files-toggle-btn').classList.add('hidden');
+  if (!chatWs) connectChatWs();
 }
 
-function toggleChat() {
-  const panel = document.getElementById('chat-panel');
-  const isOpen = panel.classList.toggle('flex');
-  panel.classList.toggle('hidden', !isOpen);
-  if (isOpen && !chatWs) connectChatWs();
+function switchToShell() {
+  const shellView = document.getElementById('shell-view');
+  const chatView = document.getElementById('chat-view');
+  chatView.classList.add('hidden');
+  chatView.classList.remove('flex');
+  shellView.classList.remove('hidden');
+  shellView.classList.add('flex');
+  document.getElementById('tab-chat-btn').classList.replace('btn-primary', 'btn-ghost');
+  document.getElementById('tab-shell-btn').classList.replace('btn-ghost', 'btn-primary');
+  document.getElementById('files-toggle-btn').classList.remove('hidden');
 }
 
 function isChatPanelOpen() {
-  return !document.getElementById('chat-panel').classList.contains('hidden');
+  return !document.getElementById('chat-view').classList.contains('hidden');
 }
 
 function connectChatWs() {
@@ -1247,8 +1259,8 @@ function logChatEvent(event) {
 }
 
 function scrollChatToBottom() {
-  const messages = document.getElementById('chat-messages');
-  messages.scrollTop = messages.scrollHeight;
+  const scroll = document.getElementById('chat-scroll');
+  scroll.scrollTop = scroll.scrollHeight;
 }
 
 function stopGeneration() {
