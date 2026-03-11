@@ -14,6 +14,7 @@ axum = { version = "0.8.8", features = ["multipart", "ws"] }
 aws-config = "1.8.15"
 aws-credential-types = "1.2.14"
 bytes = "1.11.1"
+chrono = { version = "0.4", features = ["serde"] }
 config = "0.15.19"
 download = { path = "../download" }
 firecracker-manager = { path = "../firecracker-manager" }

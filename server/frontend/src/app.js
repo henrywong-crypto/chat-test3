@@ -223,6 +223,8 @@ const wsBase = (location.protocol === 'https:' ? 'wss:' : 'ws:') + '//' + locati
 let chatSessionId = null;
 let chatWs = null;
 let chatStreaming = false;
+// True after we received text via stream_event deltas (avoid duplicating on full AssistantMessage)
+let streamHadText = false;
 let pendingQuery = null;
 let pendingSessionTitle = null;
 
@@ -305,12 +307,20 @@ function handleChatEvent(event) {
   }
   if (event.type === 'system' && event.subtype === 'init') {
     showThinkingIndicator();
+  } else if (event.type === 'stream_event' && event.event) {
+    const ev = event.event;
+    if (ev.type === 'content_block_delta' && ev.delta && ev.delta.type === 'text_delta' && ev.delta.text) {
+      removeThinkingIndicator();
+      streamHadText = true;
+      appendToAssistantMessage(ev.delta.text);
+    }
   } else if (event.type === 'assistant' || (event.content && Array.isArray(event.content) && !event.content.some(b => b.type === 'tool_result'))) {
     removeThinkingIndicator();
     const blocks = event.content ?? event.message?.content ?? [];
     let hasToolUse = false;
     for (const block of blocks) {
-      if (block.text) {
+      // Skip replaying full text when we already streamed it token-by-token
+      if (block.text && !streamHadText) {
         appendToAssistantMessage(block.text);
       } else if (block.type === 'tool_use') {
         hasToolUse = true;
@@ -332,12 +342,14 @@ function handleChatEvent(event) {
     }
   } else if (event.type === 'result' || event.type === 'done' || event.subtype === 'success') {
     if (event.session_id) chatSessionId = event.session_id;
+    streamHadText = false;
     sealAssistantMessage();
     removeThinkingIndicator();
     chatStreaming = false;
     unlockChatInput();
     refreshChatHistory();
   } else if (event.type === 'error') {
+    streamHadText = false;
     removeThinkingIndicator();
     sealAssistantMessage();
     appendErrorMessage(event.message ?? String(event));
@@ -352,16 +364,18 @@ function sendQuery(content) {
     pendingSessionTitle = content.slice(0, 60);
   }
   if (chatWs && chatWs.readyState === WebSocket.CONNECTING) {
-    appendUserMessage(content);
-    sealAssistantMessage();
-    chatStreaming = true;
-    lockChatInput();
-    showThinkingIndicator();
-    pendingQuery = { content };
+  appendUserMessage(content);
+  sealAssistantMessage();
+  streamHadText = false;
+  chatStreaming = true;
+  lockChatInput();
+  showThinkingIndicator();
+  pendingQuery = { content };
     return;
   }
   appendUserMessage(content);
   sealAssistantMessage();
+  streamHadText = false;
   chatStreaming = true;
   lockChatInput();
   showThinkingIndicator();

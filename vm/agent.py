@@ -33,16 +33,28 @@ async def main():
 
 async def run_query(content: str, session_id):
     from claude_agent_sdk import ClaudeAgentOptions, query
+    from claude_agent_sdk.types import StreamEvent
 
     options = ClaudeAgentOptions(
         cwd=os.environ.get('HOME', '/root'),
         permission_mode='bypassPermissions',
+        include_partial_messages=True,
         **({"resume": session_id} if session_id else {}),
     )
     captured_session_id = session_id
     try:
         async for event in query(prompt=content, options=options):
-            emit(event)
+            # StreamEvent asdict has no top-level type; frontend expects type stream_event
+            if isinstance(event, StreamEvent):
+                emit(
+                    {
+                        "type": "stream_event",
+                        "session_id": event.session_id,
+                        "event": event.event,
+                    }
+                )
+            else:
+                emit(event)
             if hasattr(event, 'session_id') and event.session_id:
                 captured_session_id = event.session_id
     except Exception as exc:
