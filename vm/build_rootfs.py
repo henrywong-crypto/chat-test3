@@ -298,7 +298,7 @@ def install_artifacts(
 
 # ── smoke test ────────────────────────────────────────────────────────────────
 
-def smoke_test(kernel: Path, ext4: Path, client_key: Path) -> None:
+def smoke_test(kernel: Path, ext4: Path, client_key: Path, host_key_pub: Path) -> None:
     """Boot a temporary Firecracker VM and verify SSH authentication works."""
     if not shutil.which("firecracker"):
         print("Skipping smoke test: firecracker not found in PATH")
@@ -317,10 +317,14 @@ def smoke_test(kernel: Path, ext4: Path, client_key: Path) -> None:
         run(["cp", "--sparse=always", str(ext4), str(test_rootfs)])
 
         setup_test_tap(tap, host_ip)
+        fc_proc = None
         try:
-            boot_vm(kernel, test_rootfs, tap, host_ip, guest_ip, socket_path)
-            verify_ssh(guest_ip, client_key)
+            fc_proc = boot_vm(kernel, test_rootfs, tap, host_ip, guest_ip, socket_path)
+            verify_ssh(guest_ip, client_key, host_key_pub)
         finally:
+            if fc_proc:
+                fc_proc.terminate()
+                fc_proc.wait()
             teardown_test_tap(tap)
 
 
@@ -342,7 +346,7 @@ def boot_vm(
     host_ip: str,
     guest_ip: str,
     socket_path: Path,
-) -> None:
+) -> subprocess.Popen:
     fc_proc = subprocess.Popen(
         ["firecracker", "--api-sock", str(socket_path)],
         stdout=subprocess.DEVNULL,
@@ -370,6 +374,7 @@ def boot_vm(
         "host_dev_name": tap,
     })
     fc_api(socket_path, "PUT", "/actions", {"action_type": "InstanceStart"})
+    return fc_proc
 
 
 def wait_for_socket(socket_path: Path, fc_proc: subprocess.Popen) -> None:
@@ -382,27 +387,40 @@ def wait_for_socket(socket_path: Path, fc_proc: subprocess.Popen) -> None:
     sys.exit("error: firecracker socket not ready within 5s")
 
 
-def verify_ssh(guest_ip: str, client_key: Path) -> None:
-    host_key_pub = INSTALL_DIR / "vm_host_key.pub"
+def verify_ssh(guest_ip: str, client_key: Path, host_key_pub: Path) -> None:
+    # Build a known_hosts line from the bare public key file.
+    # .pub format:  "ssh-ed25519 AAAA... comment"
+    # known_hosts:  "ip ssh-ed25519 AAAA... comment"
+    known_hosts_line = f"{guest_ip} {host_key_pub.read_text().strip()}\n"
+
     print(f"  VM started, waiting for SSH at {guest_ip}...")
-    for _ in range(30):
-        time.sleep(1)
-        result = subprocess.run(
-            ["ssh",
-             "-i", str(client_key),
-             "-o", f"UserKnownHostsFile={host_key_pub}",
-             "-o", "StrictHostKeyChecking=yes",
-             "-o", "ConnectTimeout=2",
-             "-o", "BatchMode=yes",
-             f"ubuntu@{guest_ip}", "echo ok"],
-            capture_output=True,
-            text=True,
-        )
-        if result.returncode == 0 and "ok" in result.stdout:
-            print("  SSH authentication: OK")
-            print("Smoke test passed.")
-            return
-    sys.exit("error: smoke test failed — SSH did not succeed within 30s")
+    print(f"  To test manually: ssh -i {client_key} -o UserKnownHostsFile={host_key_pub} -o StrictHostKeyChecking=yes ubuntu@{guest_ip}")
+    with tempfile.NamedTemporaryFile(mode="w", suffix=".known_hosts", delete=False) as kh:
+        kh.write(known_hosts_line)
+        known_hosts_path = kh.name
+
+    try:
+        for _ in range(60):
+            time.sleep(1)
+            result = subprocess.run(
+                ["ssh",
+                 "-i", str(client_key),
+                 "-o", f"UserKnownHostsFile={known_hosts_path}",
+                 "-o", "StrictHostKeyChecking=yes",
+                 "-o", "ConnectTimeout=2",
+                 "-o", "BatchMode=yes",
+                 f"ubuntu@{guest_ip}", "echo ok"],
+                capture_output=True,
+                text=True,
+            )
+            if result.returncode == 0 and "ok" in result.stdout:
+                print("  SSH authentication: OK")
+                print("Smoke test passed.")
+                return
+    finally:
+        Path(known_hosts_path).unlink(missing_ok=True)
+
+    sys.exit("error: smoke test failed — SSH did not succeed within 60s")
 
 
 def fc_api(socket_path: Path, method: str, path: str, body: dict) -> None:
@@ -482,7 +500,7 @@ def main() -> None:
     print(f"  {host_key_pub_dest}")
 
     if not args.no_test:
-        smoke_test(kernel_dest, ext4_dest, client_key_dest)
+        smoke_test(kernel_dest, ext4_dest, client_key_dest, host_key_pub_dest)
 
 
 if __name__ == "__main__":
