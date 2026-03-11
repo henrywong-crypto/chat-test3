@@ -182,6 +182,7 @@ fn ChatPanel() -> impl IntoView {
                         rows="1"
                         placeholder="Message Claude\u{2026}"
                     />
+                    <button id="chat-stop-btn" class="btn btn-sm rounded-xl hidden" style="background:#dc2626;color:white;border:none" title="Stop (Esc)">"■ Stop"</button>
                     <button id="chat-send-btn" class="btn btn-sm rounded-xl" style="background:#2563eb;color:white;border:none">"Send"</button>
                 </div>
             </div>

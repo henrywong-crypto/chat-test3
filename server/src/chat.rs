@@ -108,6 +108,10 @@ async fn run_agent_relay(
             ws_msg = ws_receiver.next() => {
                 match ws_msg {
                     Some(Ok(Message::Text(text))) => {
+                        if is_abort_message(text.as_str()) {
+                            info!(vm_id = %vm_id, user_id = %user_id, "abort received, closing agent channel");
+                            break;
+                        }
                         log_query(vm_id, text.as_str());
                         let line = format!("{}\n", text.as_str());
                         if ssh_channel.data(Bytes::from(line).as_ref()).await.is_err() {
@@ -124,6 +128,13 @@ async fn run_agent_relay(
         }
     }
     Ok(())
+}
+
+/// Returns true if the WebSocket message is an abort request.
+fn is_abort_message(text: &str) -> bool {
+    serde_json::from_str::<serde_json::Value>(text)
+        .map(|v| v["type"].as_str() == Some("abort"))
+        .unwrap_or(false)
 }
 
 /// Log a query message received from the browser WebSocket.

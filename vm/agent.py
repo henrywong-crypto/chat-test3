@@ -117,6 +117,11 @@ def emit(obj):
         data = obj
     else:
         data = {'raw': str(obj)}
+    # Pydantic's model_dump() may omit discriminator `type` fields; re-inject from attribute if missing.
+    if isinstance(data, dict) and 'type' not in data:
+        type_val = getattr(obj, 'type', None)
+        if type_val is not None:
+            data['type'] = type_val if isinstance(type_val, str) else str(type_val)
     sys.stdout.write(json.dumps(data, cls=_Encoder) + '\n')
     sys.stdout.flush()
 

@@ -105,7 +105,12 @@ let fmOpened = false;
 
 document.getElementById('files-toggle-btn').addEventListener('click', toggleFiles);
 document.getElementById('files-close-btn').addEventListener('click', closePanel);
-document.addEventListener('keydown', e => { if (e.key === 'Escape') closePanel(); });
+document.addEventListener('keydown', e => {
+  if (e.key === 'Escape') {
+    closePanel();
+    if (chatStreaming) stopGeneration();
+  }
+});
 
 function closePanel() {
   const panel = document.getElementById('files-panel');
@@ -305,6 +310,7 @@ document.getElementById('chat-history-btn').addEventListener('click', () => {
   const nowHidden = panel.classList.toggle('hidden');
   if (!nowHidden) loadChatHistory();
 });
+document.getElementById('chat-stop-btn').addEventListener('click', stopGeneration);
 document.getElementById('chat-send-btn').addEventListener('click', () => {
   const input = document.getElementById('chat-input');
   const content = input.value.trim();
@@ -492,13 +498,37 @@ function appendToAssistantMessage(text) {
   currentAssistantRawText += text;
   currentAssistantTextEl.className = 'markdown-body text-sm pl-8';
   currentAssistantTextEl.innerHTML = marked.parse(currentAssistantRawText);
+  injectCodeCopyButtons(currentAssistantTextEl);
   scrollChatToBottom();
 }
 
 function sealAssistantMessage() {
+  if (currentAssistantMsgEl && currentAssistantRawText) {
+    attachMessageCopyButton(currentAssistantMsgEl, currentAssistantRawText);
+  }
   currentAssistantMsgEl = null;
   currentAssistantTextEl = null;
   currentAssistantRawText = '';
+}
+
+function attachMessageCopyButton(msgEl, rawText) {
+  const header = msgEl.querySelector('.flex.items-center.gap-2.mb-1');
+  if (!header || header.querySelector('.msg-copy-btn')) return;
+  const btn = document.createElement('button');
+  btn.className = 'msg-copy-btn ml-auto text-xs';
+  btn.style.cssText = 'color:#6b7280;background:none;border:none;cursor:pointer;padding:0 2px;opacity:0;transition:opacity .15s';
+  btn.title = 'Copy message';
+  btn.textContent = '⎘';
+  btn.addEventListener('click', () => {
+    navigator.clipboard.writeText(rawText).then(() => {
+      btn.textContent = '✓';
+      btn.style.color = '#34d399';
+      setTimeout(() => { btn.textContent = '⎘'; btn.style.color = '#6b7280'; }, 2000);
+    });
+  });
+  header.appendChild(btn);
+  msgEl.addEventListener('mouseenter', () => { btn.style.opacity = '1'; });
+  msgEl.addEventListener('mouseleave', () => { btn.style.opacity = '0'; });
 }
 
 function appendToolUseBlock(toolId, toolName, input) {
@@ -574,15 +604,49 @@ function fillToolResult(toolId, content, isError) {
   const text = Array.isArray(content)
     ? content.filter(c => c.type === 'text').map(c => c.text).join('')
     : String(content ?? '');
-  const truncated = text.length > 500 ? text.slice(0, 500) + '...' : text;
   if (isError) {
     resultHeader.style.color = '#f87171';
     resultIcon.textContent = '\u2717';
     resultLabel.textContent = 'Error';
     detailsEl.open = true;
   }
-  resultBody.textContent = truncated;
+  if (text.length > 300) {
+    resultBody.textContent = text.slice(0, 300) + '…';
+    const showMoreBtn = document.createElement('button');
+    showMoreBtn.className = 'text-xs mt-1';
+    showMoreBtn.style.cssText = 'color:#60a5fa;background:none;border:none;cursor:pointer;padding:0';
+    showMoreBtn.textContent = 'show more';
+    showMoreBtn.addEventListener('click', () => {
+      resultBody.textContent = text;
+      showMoreBtn.remove();
+    });
+    resultEl.appendChild(showMoreBtn);
+  } else {
+    resultBody.textContent = text;
+  }
   resultEl.style.display = '';
+}
+
+function injectCodeCopyButtons(container) {
+  container.querySelectorAll('pre').forEach(pre => {
+    if (pre.querySelector('.code-copy-btn')) return; // already injected
+    pre.style.position = 'relative';
+    const btn = document.createElement('button');
+    btn.className = 'code-copy-btn';
+    btn.textContent = 'Copy';
+    btn.style.cssText = 'position:absolute;top:6px;right:8px;font-size:11px;padding:2px 8px;border-radius:4px;border:1px solid #374151;background:#1f2937;color:#9ca3af;cursor:pointer;opacity:0;transition:opacity .15s';
+    pre.appendChild(btn);
+    pre.addEventListener('mouseenter', () => { btn.style.opacity = '1'; });
+    pre.addEventListener('mouseleave', () => { btn.style.opacity = '0'; });
+    btn.addEventListener('click', () => {
+      const code = pre.querySelector('code')?.textContent ?? '';
+      navigator.clipboard.writeText(code).then(() => {
+        btn.textContent = 'Copied!';
+        btn.style.color = '#34d399';
+        setTimeout(() => { btn.textContent = 'Copy'; btn.style.color = '#9ca3af'; }, 2000);
+      });
+    });
+  });
 }
 
 function appendErrorMessage(msg) {
@@ -595,6 +659,9 @@ function appendErrorMessage(msg) {
 }
 
 // ── Thinking indicator ────────────────────────────────────────────────────────
+
+let thinkingTimerInterval = null;
+let thinkingStartTime = null;
 
 function showThinkingIndicator() {
   if (document.getElementById('chat-thinking')) return;
@@ -614,13 +681,27 @@ function showThinkingIndicator() {
     d.style.cssText = 'background:#6b7280;animation:chatDot 1.2s ease-in-out infinite;animation-delay:' + (i * 0.2) + 's';
     dots.appendChild(d);
   }
+  const timerEl = document.createElement('span');
+  timerEl.id = 'chat-thinking-timer';
+  timerEl.className = 'text-xs';
+  timerEl.style.color = '#6b7280';
+  timerEl.textContent = '0s';
   row.appendChild(avatar);
   row.appendChild(dots);
+  row.appendChild(timerEl);
   messages.appendChild(row);
+  thinkingStartTime = Date.now();
+  thinkingTimerInterval = setInterval(() => {
+    const el = document.getElementById('chat-thinking-timer');
+    if (el) el.textContent = Math.floor((Date.now() - thinkingStartTime) / 1000) + 's';
+  }, 1000);
   scrollChatToBottom();
 }
 
 function removeThinkingIndicator() {
+  clearInterval(thinkingTimerInterval);
+  thinkingTimerInterval = null;
+  thinkingStartTime = null;
   document.getElementById('chat-thinking')?.remove();
 }
 
@@ -661,13 +742,23 @@ function scrollChatToBottom() {
   messages.scrollTop = messages.scrollHeight;
 }
 
+function stopGeneration() {
+  if (!chatStreaming || !chatWs) return;
+  chatWs.send(JSON.stringify({ type: 'abort' }));
+  // UI updates happen when the server closes the WS (onclose handler)
+}
+
 function lockChatInput() {
   document.getElementById('chat-send-btn').disabled = true;
+  document.getElementById('chat-send-btn').classList.add('hidden');
+  document.getElementById('chat-stop-btn').classList.remove('hidden');
   document.getElementById('chat-input').disabled = true;
 }
 
 function unlockChatInput() {
   document.getElementById('chat-send-btn').disabled = false;
+  document.getElementById('chat-send-btn').classList.remove('hidden');
+  document.getElementById('chat-stop-btn').classList.add('hidden');
   document.getElementById('chat-input').disabled = false;
 }
 
