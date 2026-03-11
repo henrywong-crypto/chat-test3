@@ -85,7 +85,7 @@ fn default_ssh_user() -> String {
     "root".to_string()
 }
 fn default_vm_host_key_path() -> PathBuf {
-    PathBuf::from("/var/lib/fc/vm_host_key.pub")
+    PathBuf::from("/var/lib/fc/vm_host_ed25519_key.pub")
 }
 fn default_cognito_redirect_uri() -> String {
     "http://localhost:3000/callback".to_string()

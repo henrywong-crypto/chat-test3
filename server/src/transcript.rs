@@ -3,7 +3,7 @@ use chrono::{DateTime, TimeZone, Utc};
 use russh_sftp::client::{fs::DirEntry, SftpSession};
 use serde::Serialize;
 use std::path::PathBuf;
-use tokio::io::AsyncReadExt;
+use tokio::io::{AsyncBufReadExt, AsyncReadExt, BufReader};
 
 use crate::ssh::{connect_ssh, open_sftp_session};
 
@@ -75,10 +75,25 @@ async fn build_session_entry_with_title(
 }
 
 async fn fetch_session_title(sftp: &SftpSession, path: &str) -> Option<String> {
-    let mut file = sftp.open(path).await.ok()?;
-    let mut buf = String::new();
-    file.take(4096).read_to_string(&mut buf).await.ok()?;
-    extract_title_from_jsonl(&buf)
+    let file = sftp.open(path).await.ok()?;
+    let mut lines = BufReader::new(file).lines();
+    while let Ok(Some(line)) = lines.next_line().await {
+        let Ok(entry) = serde_json::from_str::<serde_json::Value>(&line) else {
+            continue;
+        };
+        match entry["type"].as_str().unwrap_or("") {
+            "summary" => return entry["summary"].as_str().map(|s| s.to_owned()),
+            "user" => {
+                if let Some(msg) = extract_transcript_message(&entry, "user") {
+                    if let Some(title) = extract_title_from_message(&msg) {
+                        return Some(title);
+                    }
+                }
+            }
+            _ => {}
+        }
+    }
+    None
 }
 
 fn extract_title_from_jsonl(chunk: &str) -> Option<String> {
