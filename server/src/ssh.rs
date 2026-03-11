@@ -56,7 +56,11 @@ fn load_ssh_keys(
     ssh_key_path: &PathBuf,
     vm_host_key_path: &PathBuf,
 ) -> Result<(Option<PublicKey>, Arc<PrivateKey>)> {
-    let vm_host_key = load_public_key(vm_host_key_path).ok();
+    let vm_host_key = if vm_host_key_path.as_os_str().is_empty() {
+        None
+    } else {
+        load_public_key(vm_host_key_path).ok()
+    };
     let ssh_keypair =
         Arc::new(load_secret_key(ssh_key_path, None).context("failed to load SSH key")?);
     Ok((vm_host_key, ssh_keypair))
