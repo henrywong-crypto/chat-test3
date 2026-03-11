@@ -69,6 +69,7 @@ pub async fn list_chat_sessions(
 fn build_chat_session(row: ChatSessionRow) -> ChatSession {
     let last_active_at = Utc
         .timestamp_opt(row.last_active_at.unix_timestamp(), 0)
+        .single()
         .unwrap_or_default();
     ChatSession { session_id: row.session_id, title: row.title, last_active_at }
 }
