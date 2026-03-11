@@ -37,17 +37,16 @@ pub(crate) async fn handle_chat_ws_upgrade(
         None => return (StatusCode::NOT_FOUND, "VM not found").into_response(),
     };
     let user_id = db_user.id;
-    ws.on_upgrade(move |socket| run_chat_session(socket, guest_ip, vm_id, user_id, state))
+    ws.on_upgrade(move |socket| run_chat_session(socket, guest_ip, user_id, state))
 }
 
 async fn run_chat_session(
     socket: WebSocket,
     guest_ip: String,
-    vm_id: String,
     user_id: Uuid,
     state: AppState,
 ) {
-    if let Err(e) = run_agent_relay(&guest_ip, &state, socket, user_id, &vm_id).await {
+    if let Err(e) = run_agent_relay(&guest_ip, &state, socket, user_id).await {
         error!("chat session error: {e}");
     }
 }
@@ -57,7 +56,6 @@ async fn run_agent_relay(
     state: &AppState,
     socket: WebSocket,
     user_id: Uuid,
-    vm_id: &str,
 ) -> anyhow::Result<()> {
     let mut ssh_handle = connect_ssh(
         guest_ip,
@@ -83,7 +81,7 @@ async fn run_agent_relay(
                         while let Some(newline_pos) = line_buf.find('\n') {
                             let line = line_buf[..newline_pos].trim_end_matches('\r').to_owned();
                             line_buf.drain(..=newline_pos);
-                            persist_session_if_done(&line, state, user_id, vm_id, &mut pending_title).await;
+                            persist_session_if_done(&line, state, user_id, &mut pending_title).await;
                             if ws_sender.send(Message::Text(line.into())).await.is_err() {
                                 return Ok(());
                             }
@@ -123,7 +121,7 @@ fn capture_pending_title(text: &str, pending_title: &mut String) {
     *pending_title = content.chars().take(60).collect();
 }
 
-async fn persist_session_if_done(line: &str, state: &AppState, user_id: Uuid, vm_id: &str, pending_title: &mut String) {
+async fn persist_session_if_done(line: &str, state: &AppState, user_id: Uuid, pending_title: &mut String) {
     let Ok(json_value) = serde_json::from_str::<serde_json::Value>(line) else { return };
     let Some(type_str) = json_value.get("type").and_then(|t| t.as_str()) else { return };
     info!("agent event type={type_str}");
@@ -133,7 +131,7 @@ async fn persist_session_if_done(line: &str, state: &AppState, user_id: Uuid, vm
         return;
     };
     let title = if pending_title.is_empty() { session_id.to_owned() } else { pending_title.clone() };
-    if let Err(e) = upsert_chat_session(&state.db, user_id, vm_id, session_id, &title).await {
+    if let Err(e) = upsert_chat_session(&state.db, user_id, session_id, &title).await {
         error!("failed to persist chat session {session_id}: {e}");
     } else {
         info!("persisted chat session {session_id}");

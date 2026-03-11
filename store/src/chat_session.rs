@@ -22,19 +22,17 @@ struct ChatSessionRow {
 pub async fn upsert_chat_session(
     pool: &PgPool,
     user_id: Uuid,
-    vm_id: &str,
     session_id: &str,
     title: &str,
 ) -> Result<()> {
     sqlx::query!(
         r#"
-        INSERT INTO chat_sessions (user_id, vm_id, session_id, title)
-        VALUES ($1, $2, $3, $4)
+        INSERT INTO chat_sessions (user_id, session_id, title)
+        VALUES ($1, $2, $3)
         ON CONFLICT (user_id, session_id)
         DO UPDATE SET title = EXCLUDED.title, last_active_at = NOW()
         "#,
         user_id,
-        vm_id,
         session_id,
         title,
     )
