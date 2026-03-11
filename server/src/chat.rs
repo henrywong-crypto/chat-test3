@@ -152,8 +152,6 @@ fn normalize_event_line(line: String) -> String {
         Some(obj) => obj,
         None => return line,
     };
-    // For stream_event: outer type is hardcoded by agent.py, but the inner
-    // event object's type field may be stripped by Pydantic model_dump().
     if obj.get("type").and_then(|t| t.as_str()) == Some("stream_event") {
         let changed = normalize_stream_event_inner(obj);
         return if changed {
@@ -162,16 +160,67 @@ fn normalize_event_line(line: String) -> String {
             line
         };
     }
-    if obj.contains_key("type") && obj["type"] != serde_json::Value::Null {
-        return line;
+    let mut changed = false;
+    if !obj.contains_key("type") || obj["type"] == serde_json::Value::Null {
+        if let Some(t) = infer_event_type(obj) {
+            obj.insert("type".to_owned(), serde_json::Value::String(t.to_owned()));
+            changed = true;
+        }
     }
-    let inferred_type = infer_event_type(obj);
-    if let Some(t) = inferred_type {
-        obj.insert("type".to_owned(), serde_json::Value::String(t.to_owned()));
+    // Content blocks from Pydantic model_dump() also lose their `type` discriminator.
+    // Inject it for assistant and user events so the frontend can render them.
+    let event_type = obj.get("type").and_then(|t| t.as_str()).unwrap_or("");
+    if matches!(event_type, "assistant" | "user") {
+        changed |= normalize_event_content_blocks(obj);
+    }
+    if changed {
         serde_json::to_string(obj).unwrap_or(line)
     } else {
         line
     }
+}
+
+fn normalize_event_content_blocks(obj: &mut serde_json::Map<String, serde_json::Value>) -> bool {
+    if let Some(serde_json::Value::Array(blocks)) = obj.get_mut("content") {
+        return normalize_blocks(blocks);
+    }
+    if let Some(message) = obj.get_mut("message").and_then(|m| m.as_object_mut()) {
+        if let Some(serde_json::Value::Array(blocks)) = message.get_mut("content") {
+            return normalize_blocks(blocks);
+        }
+    }
+    false
+}
+
+fn normalize_blocks(blocks: &mut Vec<serde_json::Value>) -> bool {
+    let mut changed = false;
+    for block in blocks.iter_mut() {
+        let Some(block_obj) = block.as_object_mut() else { continue };
+        if block_obj.contains_key("type") {
+            continue;
+        }
+        if let Some(t) = infer_block_type(block_obj) {
+            block_obj.insert("type".to_owned(), serde_json::Value::String(t.to_owned()));
+            changed = true;
+        }
+    }
+    changed
+}
+
+fn infer_block_type(block: &serde_json::Map<String, serde_json::Value>) -> Option<&'static str> {
+    if block.contains_key("text") {
+        return Some("text");
+    }
+    if block.contains_key("thinking") {
+        return Some("thinking");
+    }
+    if block.contains_key("id") && block.contains_key("name") && block.contains_key("input") {
+        return Some("tool_use");
+    }
+    if block.contains_key("tool_use_id") {
+        return Some("tool_result");
+    }
+    None
 }
 
 /// Normalizes the nested `event` object inside a `stream_event` line.
@@ -258,7 +307,10 @@ fn infer_event_type(obj: &serde_json::Map<String, serde_json::Value>) -> Option<
         if first.get("tool_use_id").is_some() {
             return Some("user");
         }
-        if first.get("text").is_some() || (first.get("id").is_some() && first.get("name").is_some()) {
+        if first.get("text").is_some()
+            || first.get("thinking").is_some()
+            || (first.get("id").is_some() && first.get("name").is_some())
+        {
             return Some("assistant");
         }
     }
