@@ -81,7 +81,6 @@ async fn run_agent_relay(
                         while let Some(newline_pos) = line_buf.find('\n') {
                             let line = line_buf[..newline_pos].trim_end_matches('\r').to_owned();
                             line_buf.drain(..=newline_pos);
-                            info!("agent line: {line}");
                             persist_session_if_done(&line, state, user_id, &mut pending_title).await;
                             if ws_sender.send(Message::Text(line.into())).await.is_err() {
                                 return Ok(());
@@ -124,9 +123,10 @@ fn capture_pending_title(text: &str, pending_title: &mut String) {
 
 async fn persist_session_if_done(line: &str, state: &AppState, user_id: Uuid, pending_title: &mut String) {
     let Ok(json_value) = serde_json::from_str::<serde_json::Value>(line) else { return };
-    let Some(type_str) = json_value.get("type").and_then(|t| t.as_str()) else { return };
-    info!("agent event type={type_str}");
-    if type_str != "done" { return };
+    let type_str = json_value.get("type").and_then(|t| t.as_str()).unwrap_or("");
+    let subtype_str = json_value.get("subtype").and_then(|s| s.as_str()).unwrap_or("");
+    let is_query_done = type_str == "done" || subtype_str == "success";
+    if !is_query_done { return };
     let Some(session_id) = json_value.get("session_id").and_then(|s| s.as_str()) else {
         error!("done event missing session_id: {line}");
         return;

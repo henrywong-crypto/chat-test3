@@ -330,7 +330,7 @@ function handleChatEvent(event) {
         fillToolResult(block.tool_use_id, block.content, block.is_error);
       }
     }
-  } else if (event.type === 'result' || event.type === 'done') {
+  } else if (event.type === 'result' || event.type === 'done' || event.subtype === 'success') {
     if (event.session_id) chatSessionId = event.session_id;
     sealAssistantMessage();
     removeThinkingIndicator();
