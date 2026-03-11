@@ -295,10 +295,11 @@ function handleChatEvent(event) {
   if (event.type === 'system' && event.subtype === 'init') {
     chatSessionId = event.session_id;
     showThinkingIndicator();
-  } else if (event.type === 'assistant') {
+  } else if (event.type === 'assistant' || (event.content && Array.isArray(event.content))) {
     removeThinkingIndicator();
-    for (const block of (event.message?.content ?? [])) {
-      if (block.type === 'text' && block.text) {
+    const blocks = event.content ?? event.message?.content ?? [];
+    for (const block of blocks) {
+      if (block.text) {
         appendToAssistantMessage(block.text);
       } else if (block.type === 'tool_use') {
         sealAssistantMessage();
