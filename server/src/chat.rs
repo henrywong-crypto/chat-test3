@@ -126,8 +126,13 @@ fn capture_pending_title(text: &str, pending_title: &mut String) {
 async fn persist_session_if_done(line: &str, state: &AppState, user_id: Uuid, vm_id: &str, pending_title: &mut String) {
     let Ok(json_value) = serde_json::from_str::<serde_json::Value>(line) else { return };
     if json_value.get("type").and_then(|t| t.as_str()) != Some("done") { return };
-    let Some(session_id) = json_value.get("session_id").and_then(|s| s.as_str()) else { return };
+    let Some(session_id) = json_value.get("session_id").and_then(|s| s.as_str()) else {
+        error!("done event missing session_id: {line}");
+        return;
+    };
     let title = if pending_title.is_empty() { session_id.to_owned() } else { pending_title.clone() };
-    let _ = upsert_chat_session(&state.db, user_id, vm_id, session_id, &title).await;
+    if let Err(e) = upsert_chat_session(&state.db, user_id, vm_id, session_id, &title).await {
+        error!("failed to persist chat session {session_id}: {e}");
+    }
     pending_title.clear();
 }
