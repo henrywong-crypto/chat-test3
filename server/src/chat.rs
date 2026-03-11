@@ -68,7 +68,7 @@ async fn run_agent_relay(
     )
     .await?;
     info!(vm_id = %vm_id, user_id = %user_id, "agent ssh channel opened");
-    let mut ssh_channel = open_exec_channel(&mut ssh_handle, "bash -lc '/usr/local/bin/uv run /opt/agent.py'").await?;
+    let mut ssh_channel = open_exec_channel(&mut ssh_handle, "bash -lc '/usr/local/bin/uv run /opt/agent.py 2> >(tee -a /home/ubuntu/agent.log >&2)'").await?;
     let (mut ws_sender, mut ws_receiver) = socket.split();
     let mut line_buf = String::new();
     loop {
@@ -152,6 +152,16 @@ fn normalize_event_line(line: String) -> String {
         Some(obj) => obj,
         None => return line,
     };
+    // For stream_event: outer type is hardcoded by agent.py, but the inner
+    // event object's type field may be stripped by Pydantic model_dump().
+    if obj.get("type").and_then(|t| t.as_str()) == Some("stream_event") {
+        let changed = normalize_stream_event_inner(obj);
+        return if changed {
+            serde_json::to_string(obj).unwrap_or(line)
+        } else {
+            line
+        };
+    }
     if obj.contains_key("type") && obj["type"] != serde_json::Value::Null {
         return line;
     }
@@ -162,6 +172,71 @@ fn normalize_event_line(line: String) -> String {
     } else {
         line
     }
+}
+
+/// Normalizes the nested `event` object inside a `stream_event` line.
+/// Returns true if the inner event was modified.
+fn normalize_stream_event_inner(obj: &mut serde_json::Map<String, serde_json::Value>) -> bool {
+    let inner = match obj.get_mut("event").and_then(|e| e.as_object_mut()) {
+        Some(inner) => inner,
+        None => return false,
+    };
+    if inner.contains_key("type") && inner["type"] != serde_json::Value::Null {
+        // Also normalize delta.type inside content_block_delta events
+        if inner.get("type").and_then(|t| t.as_str()) == Some("content_block_delta") {
+            return normalize_delta_type(inner);
+        }
+        return false;
+    }
+    let inferred = infer_stream_inner_type(inner);
+    if let Some(t) = inferred {
+        inner.insert("type".to_owned(), serde_json::Value::String(t.to_owned()));
+        // Also normalize delta.type for content_block_delta
+        if t == "content_block_delta" {
+            normalize_delta_type(inner);
+        }
+        true
+    } else {
+        false
+    }
+}
+
+fn normalize_delta_type(inner: &mut serde_json::Map<String, serde_json::Value>) -> bool {
+    let delta = match inner.get_mut("delta").and_then(|d| d.as_object_mut()) {
+        Some(d) => d,
+        None => return false,
+    };
+    if delta.contains_key("type") && delta["type"] != serde_json::Value::Null {
+        return false;
+    }
+    let inferred = if delta.contains_key("text") {
+        Some("text_delta")
+    } else if delta.contains_key("thinking") {
+        Some("thinking_delta")
+    } else if delta.contains_key("partial_json") {
+        Some("input_json_delta")
+    } else {
+        None
+    };
+    if let Some(t) = inferred {
+        delta.insert("type".to_owned(), serde_json::Value::String(t.to_owned()));
+        true
+    } else {
+        false
+    }
+}
+
+fn infer_stream_inner_type(inner: &serde_json::Map<String, serde_json::Value>) -> Option<&'static str> {
+    if inner.contains_key("delta") {
+        return Some("content_block_delta");
+    }
+    if inner.contains_key("content_block") {
+        return Some("content_block_start");
+    }
+    if inner.contains_key("message") {
+        return Some("message_start");
+    }
+    None
 }
 
 fn infer_event_type(obj: &serde_json::Map<String, serde_json::Value>) -> Option<&'static str> {
@@ -247,6 +322,9 @@ fn log_agent_event(vm_id: &str, line: &str) {
             let subtype = v["subtype"].as_str().unwrap_or("?");
             info!(vm_id = %vm_id, "agent→ws  system  subtype={subtype}");
         }
-        _ => {}
-    }
+        _ => {
+            // Log a preview of unrecognised events so they don't disappear silently.
+            let preview: String = line.chars().take(200).collect();
+            warn!(vm_id = %vm_id, "agent→ws  unknown  {preview}");
+        }
 }

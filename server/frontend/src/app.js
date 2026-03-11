@@ -460,6 +460,38 @@ document.addEventListener('visibilitychange', () => {
   if (!document.hidden) refreshChatHistory();
 });
 
+/// Infer and inject missing `type` (and `delta.type`) into raw Anthropic streaming inner events.
+/// The old agent.py on the VM may not carry these through Pydantic model_dump().
+function normalizeStreamInnerEvent(ev) {
+  if (!ev || typeof ev !== 'object') return ev;
+  if (ev.type) {
+    // delta.type might still be missing for content_block_delta
+    if (ev.type === 'content_block_delta' && ev.delta && !ev.delta.type) {
+      const delta = { ...ev.delta };
+      if ('text' in delta) delta.type = 'text_delta';
+      else if ('thinking' in delta) delta.type = 'thinking_delta';
+      else if ('partial_json' in delta) delta.type = 'input_json_delta';
+      return { ...ev, delta };
+    }
+    return ev;
+  }
+  // Infer outer type from structure
+  let type = undefined;
+  if (ev.delta !== undefined) type = 'content_block_delta';
+  else if (ev.content_block !== undefined) type = 'content_block_start';
+  else if (ev.message !== undefined) type = 'message_start';
+  const normalized = type ? { ...ev, type } : ev;
+  // Also fix delta.type
+  if (normalized.type === 'content_block_delta' && normalized.delta && !normalized.delta.type) {
+    const delta = { ...normalized.delta };
+    if ('text' in delta) delta.type = 'text_delta';
+    else if ('thinking' in delta) delta.type = 'thinking_delta';
+    else if ('partial_json' in delta) delta.type = 'input_json_delta';
+    return { ...normalized, delta };
+  }
+  return normalized;
+}
+
 function handleChatEvent(event) {
   // Capture session_id from whichever event first carries it
   if (event.session_id && !chatSessionId) {
@@ -468,7 +500,7 @@ function handleChatEvent(event) {
   if (event.type === 'system' && event.subtype === 'init') {
     showThinkingIndicator();
   } else if (event.type === 'stream_event' && event.event) {
-    const ev = event.event;
+    const ev = normalizeStreamInnerEvent(event.event);
     if (ev.type === 'content_block_start') {
       const blockType = ev.content_block?.type;
       if (blockType === 'thinking') {
@@ -514,6 +546,10 @@ function handleChatEvent(event) {
     }
   } else if (event.type === 'result' || event.type === 'done') {
     if (event.session_id) chatSessionId = event.session_id;
+    // Fallback: if the SDK delivered text in result.result instead of streaming deltas, render it now.
+    if (event.type === 'result' && typeof event.result === 'string' && event.result && !streamHadText) {
+      appendToAssistantMessage(event.result);
+    }
     streamHadText = false;
     sealAssistantMessage();
     removeThinkingIndicator();
