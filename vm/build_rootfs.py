@@ -216,7 +216,9 @@ def install_artifacts(
     # protected_hardlinks blocks hard-linking root-owned files that aren't world-readable.
     kernel_dest.chmod(0o644)
     ext4_dest.chmod(0o644)
-    ssh_key_dest.chmod(0o600)
+    # The SSH key is the server's identity key for connecting to VMs; it must be
+    # readable by the server process user.
+    ssh_key_dest.chmod(0o644)
     return kernel_dest, ext4_dest, ssh_key_dest
 
 
