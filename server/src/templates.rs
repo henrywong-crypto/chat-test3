@@ -165,8 +165,13 @@ fn ChatPanel() -> impl IntoView {
                     <div class="w-6 h-6 rounded-full flex items-center justify-center text-xs text-white font-bold" style="background:#f97316">"C"</div>
                     <span class="text-sm font-semibold text-gray-100">"Claude"</span>
                 </div>
-                <button id="chat-close-btn" class="text-gray-400 hover:text-gray-200 btn btn-xs btn-ghost btn-square">"✕"</button>
+                <div class="flex items-center gap-1">
+                    <button id="chat-new-btn" class="btn btn-xs btn-ghost text-gray-400">"New"</button>
+                    <button id="chat-history-btn" class="btn btn-xs btn-ghost text-gray-400">"History"</button>
+                    <button id="chat-close-btn" class="text-gray-400 hover:text-gray-200 btn btn-xs btn-ghost btn-square">"✕"</button>
+                </div>
             </div>
+            <div id="chat-sessions-panel" class="hidden border-b border-gray-700 overflow-y-auto" style="max-height:200px"/>
             <div id="chat-messages" class="flex-1 overflow-y-auto py-3 space-y-3"/>
             <div class="px-3 py-3 border-t border-gray-700 shrink-0" style="background:#1f2937">
                 <div class="flex items-end gap-2">

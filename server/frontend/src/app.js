@@ -224,16 +224,23 @@ let chatSessionId = null;
 let chatWs = null;
 let chatStreaming = false;
 let pendingQuery = null;
+let pendingSessionTitle = null;
 
 // Current assistant message container (text node inside it)
 let currentAssistantMsgEl = null;
 let currentAssistantTextEl = null;
 
-// Map tool_use_id → { resultEl } for filling in tool results
+// Map tool_use_id → { resultEl, detailsEl, resultHeader, resultIcon, resultLabel, resultBody } for filling in tool results
 const pendingToolUses = new Map();
 
 document.getElementById('chat-toggle-btn').addEventListener('click', toggleChat);
 document.getElementById('chat-close-btn').addEventListener('click', closeChatPanel);
+document.getElementById('chat-new-btn').addEventListener('click', startNewSession);
+document.getElementById('chat-history-btn').addEventListener('click', () => {
+  const panel = document.getElementById('chat-sessions-panel');
+  const nowHidden = panel.classList.toggle('hidden');
+  if (!nowHidden) loadChatHistory();
+});
 document.getElementById('chat-send-btn').addEventListener('click', () => {
   const input = document.getElementById('chat-input');
   const content = input.value.trim();
@@ -329,6 +336,7 @@ function handleChatEvent(event) {
     removeThinkingIndicator();
     chatStreaming = false;
     unlockChatInput();
+    refreshChatHistory();
   } else if (event.type === 'error') {
     removeThinkingIndicator();
     sealAssistantMessage();
@@ -340,6 +348,9 @@ function handleChatEvent(event) {
 }
 
 function sendQuery(content) {
+  if (chatSessionId === null) {
+    pendingSessionTitle = content.slice(0, 60);
+  }
   if (chatWs && chatWs.readyState === WebSocket.CONNECTING) {
     appendUserMessage(content);
     sealAssistantMessage();
@@ -414,55 +425,68 @@ function sealAssistantMessage() {
   currentAssistantTextEl = null;
 }
 
-function appendToolUseBlock(toolId, name, input) {
+function appendToolUseBlock(toolId, toolName, input) {
   const messages = document.getElementById('chat-messages');
   const wrapper = document.createElement('div');
   wrapper.className = 'px-3 py-1 pl-11';
 
-  const details = document.createElement('details');
-  details.className = 'rounded-lg overflow-hidden';
-  details.style.border = '1px solid #374151';
+  const header = document.createElement('div');
+  header.className = 'flex items-center gap-2 py-1 text-sm';
+  header.style.color = '#9ca3af';
+  const headerIcon = document.createElement('span');
+  headerIcon.textContent = '⚙';
+  headerIcon.style.color = '#60a5fa';
+  const headerLabel = document.createElement('span');
+  headerLabel.textContent = 'Using ' + toolName;
+  header.appendChild(headerIcon);
+  header.appendChild(headerLabel);
 
+  const detailsEl = document.createElement('details');
+  detailsEl.className = 'rounded overflow-hidden';
+  detailsEl.style.cssText = 'border:1px solid #374151;margin-bottom:4px';
   const summary = document.createElement('summary');
-  summary.className = 'flex items-center gap-2 px-3 py-2 cursor-pointer text-xs font-mono select-none';
-  summary.style.background = '#1f2937';
-  summary.style.color = '#9ca3af';
+  summary.className = 'flex items-center gap-1 px-2 py-1 cursor-pointer text-xs select-none';
+  summary.style.cssText = 'background:#1f2937;color:#9ca3af;list-style:none';
   const arrow = document.createElement('span');
   arrow.textContent = '\u25b8';
   arrow.style.cssText = 'transition:transform .15s;display:inline-block';
-  details.addEventListener('toggle', () => {
-    arrow.style.transform = details.open ? 'rotate(90deg)' : '';
+  detailsEl.addEventListener('toggle', () => {
+    arrow.style.transform = detailsEl.open ? 'rotate(90deg)' : '';
   });
-  const nameSpan = document.createElement('span');
-  nameSpan.style.color = '#60a5fa';
-  nameSpan.textContent = name;
-  const inputPreview = document.createElement('span');
-  inputPreview.style.cssText = 'opacity:.6;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;max-width:200px';
-  const firstVal = input && typeof input === 'object' ? Object.values(input)[0] : input;
-  inputPreview.textContent = typeof firstVal === 'string' ? firstVal : JSON.stringify(firstVal ?? input);
+  const summaryLabel = document.createElement('span');
+  summaryLabel.textContent = 'View input parameters';
   summary.appendChild(arrow);
-  summary.appendChild(nameSpan);
-  summary.appendChild(inputPreview);
-
-  const body = document.createElement('div');
-  body.style.background = '#111827';
+  summary.appendChild(summaryLabel);
   const pre = document.createElement('pre');
   pre.className = 'text-xs p-3 overflow-x-auto';
-  pre.style.color = '#d1fae5';
+  pre.style.cssText = 'background:#111827;color:#d1fae5';
   pre.textContent = typeof input === 'object' ? JSON.stringify(input, null, 2) : String(input);
-  body.appendChild(pre);
+  detailsEl.appendChild(summary);
+  detailsEl.appendChild(pre);
 
   const resultEl = document.createElement('div');
-  resultEl.className = 'text-xs font-mono px-3 pb-2';
-  resultEl.style.cssText = 'color:#9ca3af;white-space:pre-wrap;display:none';
-  body.appendChild(resultEl);
+  resultEl.style.display = 'none';
+  const resultHeader = document.createElement('div');
+  resultHeader.className = 'flex items-center gap-1 text-xs py-1';
+  resultHeader.style.color = '#10b981';
+  const resultIcon = document.createElement('span');
+  resultIcon.textContent = '\u2713';
+  const resultLabel = document.createElement('span');
+  resultLabel.textContent = 'Tool Result';
+  resultHeader.appendChild(resultIcon);
+  resultHeader.appendChild(resultLabel);
+  const resultBody = document.createElement('div');
+  resultBody.className = 'text-xs font-mono whitespace-pre-wrap';
+  resultBody.style.cssText = 'color:#9ca3af;padding-left:4px';
+  resultEl.appendChild(resultHeader);
+  resultEl.appendChild(resultBody);
 
-  details.appendChild(summary);
-  details.appendChild(body);
-  wrapper.appendChild(details);
+  wrapper.appendChild(header);
+  wrapper.appendChild(detailsEl);
+  wrapper.appendChild(resultEl);
   messages.appendChild(wrapper);
 
-  pendingToolUses.set(toolId, { resultEl, details });
+  pendingToolUses.set(toolId, { resultEl, detailsEl, resultHeader, resultIcon, resultLabel, resultBody });
   scrollChatToBottom();
 }
 
@@ -470,14 +494,19 @@ function fillToolResult(toolId, content, isError) {
   const entry = pendingToolUses.get(toolId);
   if (!entry) return;
   pendingToolUses.delete(toolId);
-  const { resultEl, details } = entry;
+  const { resultEl, detailsEl, resultHeader, resultIcon, resultLabel, resultBody } = entry;
   const text = Array.isArray(content)
     ? content.filter(c => c.type === 'text').map(c => c.text).join('')
     : String(content ?? '');
-  resultEl.textContent = text;
+  const truncated = text.length > 500 ? text.slice(0, 500) + '...' : text;
+  if (isError) {
+    resultHeader.style.color = '#f87171';
+    resultIcon.textContent = '\u2717';
+    resultLabel.textContent = 'Error';
+    detailsEl.open = true;
+  }
+  resultBody.textContent = truncated;
   resultEl.style.display = '';
-  if (isError) resultEl.style.color = '#f87171';
-  details.open = !!isError;
 }
 
 function appendErrorMessage(msg) {
@@ -534,4 +563,75 @@ function lockChatInput() {
 function unlockChatInput() {
   document.getElementById('chat-send-btn').disabled = false;
   document.getElementById('chat-input').disabled = false;
+}
+
+// ── Chat session history ───────────────────────────────────────────────────────
+
+async function loadChatHistory() {
+  const panel = document.getElementById('chat-sessions-panel');
+  panel.innerHTML = '<div class="px-3 py-2 text-xs opacity-50">Loading\u2026</div>';
+  try {
+    const res = await fetch('/sessions/' + vmId + '/chat-history');
+    if (!res.ok) throw new Error('Failed to load');
+    const chatSessions = await res.json();
+    renderChatHistory(chatSessions);
+  } catch {
+    panel.innerHTML = '<div class="px-3 py-2 text-xs" style="color:#f87171">Failed to load history</div>';
+  }
+}
+
+function renderChatHistory(chatSessions) {
+  const panel = document.getElementById('chat-sessions-panel');
+  panel.innerHTML = '';
+  if (chatSessions.length === 0) {
+    panel.innerHTML = '<div class="px-3 py-2 text-xs opacity-50">No previous sessions</div>';
+    return;
+  }
+  for (const chatSession of chatSessions) {
+    panel.appendChild(buildChatSessionItem(chatSession));
+  }
+}
+
+function buildChatSessionItem(chatSession) {
+  const item = document.createElement('div');
+  item.className = 'flex items-center justify-between px-3 py-2 cursor-pointer text-sm';
+  item.style.cssText = 'border-bottom:1px solid #374151';
+  item.addEventListener('mouseenter', () => { item.style.background = '#374151'; });
+  item.addEventListener('mouseleave', () => { item.style.background = ''; });
+  item.onclick = () => resumeSession(chatSession.session_id, chatSession.title);
+  const titleSpan = document.createElement('span');
+  titleSpan.className = 'truncate flex-1';
+  titleSpan.style.color = '#e5e7eb';
+  titleSpan.textContent = chatSession.title;
+  const timeSpan = document.createElement('span');
+  timeSpan.className = 'text-xs opacity-50 shrink-0 ml-2';
+  timeSpan.textContent = formatRelativeTime(chatSession.last_active_at);
+  item.appendChild(titleSpan);
+  item.appendChild(timeSpan);
+  return item;
+}
+
+function formatRelativeTime(isoString) {
+  const diff = Math.floor((Date.now() - new Date(isoString).getTime()) / 1000);
+  if (diff < 60) return 'just now';
+  if (diff < 3600) return Math.floor(diff / 60) + 'm ago';
+  if (diff < 86400) return Math.floor(diff / 3600) + 'h ago';
+  return new Date(isoString).toLocaleDateString('en-US', { month: 'short', day: 'numeric' });
+}
+
+function startNewSession() {
+  chatSessionId = null;
+  document.getElementById('chat-messages').innerHTML = '';
+  document.getElementById('chat-sessions-panel').classList.add('hidden');
+}
+
+function resumeSession(sessionId) {
+  chatSessionId = sessionId;
+  document.getElementById('chat-messages').innerHTML = '';
+  document.getElementById('chat-sessions-panel').classList.add('hidden');
+}
+
+function refreshChatHistory() {
+  const panel = document.getElementById('chat-sessions-panel');
+  if (!panel.classList.contains('hidden')) loadChatHistory();
 }

@@ -4,10 +4,11 @@ use axum::{
     extract::{Form, Path, State},
     http::StatusCode,
     response::{Html, IntoResponse, Redirect, Response},
+    Json,
 };
 use firecracker_manager::create_vm;
 use serde::Deserialize;
-use store::upsert_user;
+use store::{list_chat_sessions, upsert_user};
 use tower_sessions::Session;
 use tracing::info;
 use uuid::Uuid;
@@ -180,4 +181,31 @@ pub(crate) async fn get_terminal_page(
         styles_css_version(),
     ))
     .into_response()
+}
+
+pub(crate) async fn list_chat_sessions_handler(
+    user: User,
+    Path(vm_id): Path<String>,
+    State(state): State<AppState>,
+) -> impl IntoResponse {
+    if !validate_vm_id(&vm_id) {
+        return (StatusCode::NOT_FOUND, "Not found").into_response();
+    }
+    let db_user = match upsert_user(&state.db, &user.email).await {
+        Ok(db_user) => db_user,
+        Err(_) => return (StatusCode::INTERNAL_SERVER_ERROR, "Internal error").into_response(),
+    };
+    let owned = state
+        .vms
+        .lock()
+        .ok()
+        .and_then(|r| r.get(&vm_id).map(|e| e.user_id == db_user.id))
+        .unwrap_or(false);
+    if !owned {
+        return (StatusCode::NOT_FOUND, "Not found").into_response();
+    }
+    match list_chat_sessions(&state.db, db_user.id, &vm_id).await {
+        Ok(chat_sessions) => Json(chat_sessions).into_response(),
+        Err(_) => (StatusCode::INTERNAL_SERVER_ERROR, "Internal error").into_response(),
+    }
 }
