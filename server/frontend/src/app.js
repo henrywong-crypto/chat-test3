@@ -299,7 +299,13 @@ let currentAssistantMsgEl = null;
 let currentAssistantTextEl = null;
 let currentAssistantRawText = '';
 
-// Map tool_use_id → { resultEl, detailsEl, resultHeader, resultIcon, resultLabel, resultBody } for filling in tool results
+// Thinking block state
+let currentThinkingEl = null;
+let currentThinkingTextEl = null;
+let currentThinkingRawText = '';
+let streamInThinkingBlock = false;
+
+// Map tool_use_id → { resultEl, inner, resultHeader, resultIcon, resultLabel, resultBody, toolName }
 const pendingToolUses = new Map();
 
 document.getElementById('chat-toggle-btn').addEventListener('click', toggleChat);
@@ -382,10 +388,30 @@ function handleChatEvent(event) {
     showThinkingIndicator();
   } else if (event.type === 'stream_event' && event.event) {
     const ev = event.event;
-    if (ev.type === 'content_block_delta' && ev.delta?.type === 'text_delta' && ev.delta.text) {
-      removeThinkingIndicator();
-      streamHadText = true;
-      appendToAssistantMessage(ev.delta.text);
+    if (ev.type === 'content_block_start') {
+      const blockType = ev.content_block?.type;
+      if (blockType === 'thinking') {
+        streamInThinkingBlock = true;
+        removeThinkingIndicator();
+        ensureThinkingBlock();
+      } else if (blockType === 'text') {
+        streamInThinkingBlock = false;
+      } else if (blockType === 'tool_use') {
+        streamInThinkingBlock = false;
+      }
+    } else if (ev.type === 'content_block_stop') {
+      if (streamInThinkingBlock) {
+        sealThinkingBlock();
+        streamInThinkingBlock = false;
+      }
+    } else if (ev.type === 'content_block_delta') {
+      if (ev.delta?.type === 'thinking_delta' && ev.delta.thinking) {
+        appendToThinkingBlock(ev.delta.thinking);
+      } else if (ev.delta?.type === 'text_delta' && ev.delta.text) {
+        removeThinkingIndicator();
+        streamHadText = true;
+        appendToAssistantMessage(ev.delta.text);
+      }
     }
   } else if (event.type === 'assistant') {
     removeThinkingIndicator();
@@ -509,6 +535,46 @@ function sealAssistantMessage() {
   currentAssistantMsgEl = null;
   currentAssistantTextEl = null;
   currentAssistantRawText = '';
+  sealThinkingBlock();
+}
+
+function sealThinkingBlock() {
+  currentThinkingEl = null;
+  currentThinkingTextEl = null;
+  currentThinkingRawText = '';
+}
+
+function ensureThinkingBlock() {
+  if (currentThinkingEl) return;
+  const messages = document.getElementById('chat-messages');
+  const details = document.createElement('details');
+  details.style.cssText = 'margin:4px 12px 0 12px;border-left:2px solid #374151;padding-left:10px';
+
+  const summary = document.createElement('summary');
+  summary.style.cssText = 'cursor:pointer;font-size:11px;color:#6b7280;user-select:none;list-style:none;display:flex;align-items:center;gap:4px;padding:2px 0';
+  const arrow = document.createElement('span');
+  arrow.style.cssText = 'font-size:9px;display:inline-block;transition:transform .15s';
+  arrow.textContent = '▸';
+  details.addEventListener('toggle', () => { arrow.style.transform = details.open ? 'rotate(90deg)' : ''; });
+  summary.appendChild(arrow);
+  summary.appendChild(document.createTextNode('🤔 Thinking…'));
+  details.appendChild(summary);
+
+  const textEl = document.createElement('div');
+  textEl.style.cssText = 'font-size:11px;color:#6b7280;white-space:pre-wrap;word-break:break-words;padding:4px 0;line-height:1.5';
+  details.appendChild(textEl);
+  messages.appendChild(details);
+
+  currentThinkingEl = details;
+  currentThinkingTextEl = textEl;
+  currentThinkingRawText = '';
+}
+
+function appendToThinkingBlock(text) {
+  if (!text) return;
+  ensureThinkingBlock();
+  currentThinkingRawText += text;
+  currentThinkingTextEl.textContent = currentThinkingRawText;
 }
 
 function attachMessageCopyButton(msgEl, rawText) {
@@ -531,54 +597,88 @@ function attachMessageCopyButton(msgEl, rawText) {
   msgEl.addEventListener('mouseleave', () => { btn.style.opacity = '0'; });
 }
 
+// ── Tool category helpers ─────────────────────────────────────────────────────
+
+const TOOL_CATEGORIES = {
+  bash:     ['Bash'],
+  edit:     ['Edit', 'Write', 'MultiEdit'],
+  search:   ['Grep', 'Glob', 'Read'],
+  todo:     ['TodoWrite', 'TodoRead'],
+  task:     ['TaskCreate', 'TaskUpdate', 'TaskList', 'TaskGet'],
+  agent:    ['Task'],
+  plan:     ['ExitPlanMode', 'exit_plan_mode'],
+  question: ['AskUserQuestion'],
+};
+
+const TOOL_CATEGORY_COLORS = {
+  bash:     '#22c55e',
+  edit:     '#f59e0b',
+  search:   '#9ca3af',
+  todo:     '#8b5cf6',
+  task:     '#8b5cf6',
+  agent:    '#a855f7',
+  plan:     '#6366f1',
+  question: '#3b82f6',
+  default:  '#6b7280',
+};
+
+const TOOL_ICONS = {
+  bash:     '⬡',
+  edit:     '✎',
+  search:   '⌕',
+  todo:     '✓',
+  task:     '◈',
+  agent:    '◎',
+  plan:     '◆',
+  question: '?',
+  default:  '⚙',
+};
+
+function getToolCategory(toolName) {
+  for (const [cat, tools] of Object.entries(TOOL_CATEGORIES)) {
+    if (tools.includes(toolName)) return cat;
+  }
+  return 'default';
+}
+
+// ── Tool input rendering ──────────────────────────────────────────────────────
+
 function appendToolUseBlock(toolId, toolName, input) {
   const messages = document.getElementById('chat-messages');
+  const category = getToolCategory(toolName);
+  const borderColor = TOOL_CATEGORY_COLORS[category];
+  const icon = TOOL_ICONS[category];
+
   const wrapper = document.createElement('div');
-  wrapper.className = 'px-3 py-1 pl-11';
+  wrapper.className = 'px-3 py-1 pl-8';
 
-  const header = document.createElement('div');
-  header.className = 'flex items-center gap-2 py-1 text-sm';
-  header.style.color = '#9ca3af';
-  const headerIcon = document.createElement('span');
-  headerIcon.textContent = '⚙';
-  headerIcon.style.color = '#60a5fa';
-  const headerLabel = document.createElement('span');
-  headerLabel.textContent = 'Using ' + toolName;
-  header.appendChild(headerIcon);
-  header.appendChild(headerLabel);
+  const inner = document.createElement('div');
+  inner.style.cssText = `border-left:2px solid ${borderColor};padding-left:10px;margin:2px 0`;
 
-  const detailsEl = document.createElement('details');
-  detailsEl.className = 'rounded overflow-hidden';
-  detailsEl.style.cssText = 'border:1px solid #374151;margin-bottom:4px';
-  const summary = document.createElement('summary');
-  summary.className = 'flex items-center gap-1 px-2 py-1 cursor-pointer text-xs select-none';
-  summary.style.cssText = 'background:#1f2937;color:#9ca3af;list-style:none';
-  const arrow = document.createElement('span');
-  arrow.textContent = '\u25b8';
-  arrow.style.cssText = 'transition:transform .15s;display:inline-block';
-  detailsEl.addEventListener('toggle', () => {
-    arrow.style.transform = detailsEl.open ? 'rotate(90deg)' : '';
-  });
-  const summaryLabel = document.createElement('span');
-  summaryLabel.textContent = 'View input parameters';
-  summary.appendChild(arrow);
-  summary.appendChild(summaryLabel);
-  const pre = document.createElement('pre');
-  pre.className = 'text-xs p-3 overflow-x-auto';
-  pre.style.cssText = 'background:#111827;color:#d1fae5';
-  pre.textContent = typeof input === 'object' ? JSON.stringify(input, null, 2) : String(input);
-  detailsEl.appendChild(summary);
-  detailsEl.appendChild(pre);
+  if (toolName === 'Bash') {
+    inner.appendChild(buildBashInput(input));
+  } else if (toolName === 'Read') {
+    inner.appendChild(buildReadInput(input));
+  } else if (toolName === 'Grep' || toolName === 'Glob') {
+    inner.appendChild(buildSearchInput(toolName, input));
+  } else if (toolName === 'Edit') {
+    inner.appendChild(buildEditDiff(input));
+  } else if (toolName === 'Write') {
+    inner.appendChild(buildWritePreview(input));
+  } else {
+    inner.appendChild(buildGenericInput(toolName, icon, input));
+  }
 
   const resultEl = document.createElement('div');
   resultEl.style.display = 'none';
+  resultEl.style.marginTop = '4px';
   const resultHeader = document.createElement('div');
-  resultHeader.className = 'flex items-center gap-1 text-xs py-1';
+  resultHeader.className = 'flex items-center gap-1 text-xs py-0.5';
   resultHeader.style.color = '#10b981';
   const resultIcon = document.createElement('span');
   resultIcon.textContent = '\u2713';
   const resultLabel = document.createElement('span');
-  resultLabel.textContent = 'Tool Result';
+  resultLabel.textContent = 'Result';
   resultHeader.appendChild(resultIcon);
   resultHeader.appendChild(resultLabel);
   const resultBody = document.createElement('div');
@@ -587,39 +687,289 @@ function appendToolUseBlock(toolId, toolName, input) {
   resultEl.appendChild(resultHeader);
   resultEl.appendChild(resultBody);
 
-  wrapper.appendChild(header);
-  wrapper.appendChild(detailsEl);
+  wrapper.appendChild(inner);
   wrapper.appendChild(resultEl);
   messages.appendChild(wrapper);
 
-  pendingToolUses.set(toolId, { resultEl, detailsEl, resultHeader, resultIcon, resultLabel, resultBody });
+  pendingToolUses.set(toolId, { resultEl, inner, resultHeader, resultIcon, resultLabel, resultBody, toolName });
   scrollChatToBottom();
 }
+
+function buildBashInput(input) {
+  const cmd = input?.command ?? input?.cmd ?? (typeof input === 'string' ? input : JSON.stringify(input));
+  const row = document.createElement('div');
+  row.className = 'flex items-start gap-2 my-0.5';
+
+  const iconEl = document.createElement('span');
+  iconEl.style.cssText = 'color:#22c55e;font-size:11px;margin-top:3px;flex-shrink:0';
+  iconEl.textContent = '⬡';
+
+  const pill = document.createElement('div');
+  pill.style.cssText = 'background:#0d1117;border-radius:5px;padding:4px 10px;flex:1;min-width:0;display:flex;align-items:center;gap:6px;overflow:hidden';
+
+  const prompt = document.createElement('span');
+  prompt.style.cssText = 'color:#166534;font-size:11px;font-family:monospace;flex-shrink:0;user-select:none';
+  prompt.textContent = '$';
+
+  const code = document.createElement('code');
+  code.style.cssText = 'color:#4ade80;font-size:11px;font-family:monospace;white-space:pre-wrap;word-break:break-all';
+  code.textContent = cmd;
+
+  const copyBtn = buildInlineCopyBtn(cmd);
+
+  pill.appendChild(prompt);
+  pill.appendChild(code);
+  pill.appendChild(copyBtn);
+  row.appendChild(iconEl);
+  row.appendChild(pill);
+  return row;
+}
+
+function buildReadInput(input) {
+  const filePath = input?.file_path ?? input?.path ?? String(input);
+  const fileName = filePath.split('/').pop();
+  const row = document.createElement('div');
+  row.className = 'flex items-center gap-1.5 py-0.5 text-xs';
+  const iconEl = document.createElement('span');
+  iconEl.style.color = '#9ca3af';
+  iconEl.textContent = '⌕';
+  const nameEl = document.createElement('span');
+  nameEl.style.cssText = 'font-family:monospace;color:#60a5fa;font-size:11px';
+  nameEl.textContent = fileName;
+  nameEl.title = filePath;
+  const labelEl = document.createElement('span');
+  labelEl.style.color = '#4b5563';
+  labelEl.textContent = 'Read';
+  row.appendChild(iconEl);
+  row.appendChild(nameEl);
+  row.appendChild(labelEl);
+  return row;
+}
+
+function buildSearchInput(toolName, input) {
+  const pattern = input?.pattern ?? input?.glob ?? '';
+  const path = input?.path ?? input?.directory ?? '';
+  const row = document.createElement('div');
+  row.className = 'flex items-center gap-1.5 py-0.5 text-xs';
+  const iconEl = document.createElement('span');
+  iconEl.style.color = '#9ca3af';
+  iconEl.textContent = '⌕';
+  const patternEl = document.createElement('span');
+  patternEl.style.cssText = 'font-family:monospace;color:#e5e7eb;font-size:11px';
+  patternEl.textContent = pattern;
+  const labelEl = document.createElement('span');
+  labelEl.style.color = '#4b5563';
+  labelEl.textContent = toolName;
+  row.appendChild(iconEl);
+  row.appendChild(patternEl);
+  if (path) {
+    const inEl = document.createElement('span');
+    inEl.style.color = '#4b5563';
+    inEl.textContent = 'in';
+    const pathEl = document.createElement('span');
+    pathEl.style.cssText = 'font-family:monospace;color:#9ca3af;font-size:11px;max-width:180px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap';
+    pathEl.textContent = path;
+    pathEl.title = path;
+    row.appendChild(inEl);
+    row.appendChild(pathEl);
+  }
+  row.appendChild(labelEl);
+  return row;
+}
+
+function buildEditDiff(input) {
+  const filePath = input?.file_path ?? '';
+  const oldStr = input?.old_string ?? '';
+  const newStr = input?.new_string ?? '';
+  const fileName = filePath.split('/').pop() || filePath;
+
+  const container = document.createElement('div');
+  container.style.cssText = 'border:1px solid #374151;border-radius:5px;overflow:hidden;margin:2px 0;font-size:11px';
+
+  // Header
+  const headerEl = document.createElement('div');
+  headerEl.style.cssText = 'display:flex;align-items:center;justify-content:space-between;padding:3px 8px;background:#1f2937;border-bottom:1px solid #374151';
+  const fileEl = document.createElement('span');
+  fileEl.style.cssText = 'font-family:monospace;color:#60a5fa;font-size:11px';
+  fileEl.textContent = fileName;
+  fileEl.title = filePath;
+  const badge = document.createElement('span');
+  badge.style.cssText = 'font-size:10px;padding:1px 6px;border-radius:3px;background:#374151;color:#9ca3af';
+  badge.textContent = 'Edit';
+  headerEl.appendChild(fileEl);
+  headerEl.appendChild(badge);
+  container.appendChild(headerEl);
+
+  // Diff lines
+  const diffEl = document.createElement('div');
+  diffEl.style.cssText = 'font-family:monospace;line-height:18px;max-height:300px;overflow-y:auto';
+  const oldLines = oldStr.split('\n');
+  const newLines = newStr.split('\n');
+  oldLines.forEach(line => diffEl.appendChild(buildDiffLine('-', line, false)));
+  newLines.forEach(line => diffEl.appendChild(buildDiffLine('+', line, true)));
+  container.appendChild(diffEl);
+  return container;
+}
+
+function buildDiffLine(sign, content, isAdd) {
+  const row = document.createElement('div');
+  row.style.cssText = 'display:flex';
+  const sigEl = document.createElement('span');
+  sigEl.style.cssText = `width:20px;text-align:center;flex-shrink:0;user-select:none;${
+    isAdd
+      ? 'background:#052e16;color:#4ade80'
+      : 'background:#2d0505;color:#f87171'
+  }`;
+  sigEl.textContent = sign;
+  const textEl = document.createElement('span');
+  textEl.style.cssText = `flex:1;white-space:pre-wrap;word-break:break-all;padding:0 8px;${
+    isAdd
+      ? 'background:#031a0e;color:#bbf7d0'
+      : 'background:#1a0505;color:#fecaca'
+  }`;
+  textEl.textContent = content;
+  row.appendChild(sigEl);
+  row.appendChild(textEl);
+  return row;
+}
+
+function buildWritePreview(input) {
+  const filePath = input?.file_path ?? '';
+  const content = input?.content ?? '';
+  const fileName = filePath.split('/').pop() || filePath;
+  const lines = content.split('\n');
+  const preview = lines.slice(0, 20).join('\n') + (lines.length > 20 ? '\n…' : '');
+
+  const container = document.createElement('div');
+  container.style.cssText = 'border:1px solid #374151;border-radius:5px;overflow:hidden;margin:2px 0;font-size:11px';
+
+  const headerEl = document.createElement('div');
+  headerEl.style.cssText = 'display:flex;align-items:center;justify-content:space-between;padding:3px 8px;background:#1f2937;border-bottom:1px solid #374151';
+  const fileEl = document.createElement('span');
+  fileEl.style.cssText = 'font-family:monospace;color:#60a5fa;font-size:11px';
+  fileEl.textContent = fileName;
+  fileEl.title = filePath;
+  const badge = document.createElement('span');
+  badge.style.cssText = 'font-size:10px;padding:1px 6px;border-radius:3px;background:#052e16;color:#4ade80';
+  badge.textContent = 'New file';
+  headerEl.appendChild(fileEl);
+  headerEl.appendChild(badge);
+  container.appendChild(headerEl);
+
+  const pre = document.createElement('pre');
+  pre.style.cssText = 'margin:0;padding:6px 10px;background:#0d1117;color:#e5e7eb;font-size:11px;line-height:18px;max-height:200px;overflow-y:auto;white-space:pre-wrap;word-break:break-all';
+  pre.textContent = preview;
+  container.appendChild(pre);
+  return container;
+}
+
+function buildGenericInput(toolName, icon, input) {
+  const details = document.createElement('details');
+  details.style.cssText = 'border:1px solid #374151;border-radius:5px;overflow:hidden;margin:2px 0';
+  const summary = document.createElement('summary');
+  summary.style.cssText = 'display:flex;align-items:center;gap:6px;padding:4px 8px;background:#1f2937;color:#9ca3af;font-size:11px;cursor:pointer;list-style:none;user-select:none';
+  const arrow = document.createElement('span');
+  arrow.style.cssText = 'display:inline-block;transition:transform .15s;font-size:9px';
+  arrow.textContent = '▸';
+  details.addEventListener('toggle', () => { arrow.style.transform = details.open ? 'rotate(90deg)' : ''; });
+  const iconEl = document.createElement('span');
+  iconEl.textContent = icon;
+  const labelEl = document.createElement('span');
+  labelEl.textContent = toolName;
+  summary.appendChild(arrow);
+  summary.appendChild(iconEl);
+  summary.appendChild(labelEl);
+  const pre = document.createElement('pre');
+  pre.style.cssText = 'margin:0;padding:8px 10px;background:#111827;color:#d1fae5;font-size:11px;overflow-x:auto;white-space:pre-wrap;word-break:break-all';
+  pre.textContent = typeof input === 'object' ? JSON.stringify(input, null, 2) : String(input);
+  details.appendChild(summary);
+  details.appendChild(pre);
+  return details;
+}
+
+function buildInlineCopyBtn(text) {
+  const btn = document.createElement('button');
+  btn.style.cssText = 'margin-left:auto;flex-shrink:0;font-size:10px;padding:1px 6px;border-radius:3px;border:1px solid #374151;background:#1f2937;color:#6b7280;cursor:pointer;opacity:0;transition:opacity .15s';
+  btn.textContent = 'Copy';
+  btn.addEventListener('click', () => {
+    navigator.clipboard.writeText(text).then(() => {
+      btn.textContent = '✓';
+      btn.style.color = '#34d399';
+      setTimeout(() => { btn.textContent = 'Copy'; btn.style.color = '#6b7280'; }, 2000);
+    });
+  });
+  // Show on hover of parent pill
+  btn.closest?.('div')?.addEventListener('mouseenter', () => { btn.style.opacity = '1'; });
+  btn.closest?.('div')?.addEventListener('mouseleave', () => { btn.style.opacity = '0'; });
+  return btn;
+}
+
+// ── Tool result rendering ─────────────────────────────────────────────────────
 
 function fillToolResult(toolId, content, isError) {
   const entry = pendingToolUses.get(toolId);
   if (!entry) return;
   pendingToolUses.delete(toolId);
-  const { resultEl, detailsEl, resultHeader, resultIcon, resultLabel, resultBody } = entry;
+  const { resultEl, inner, resultHeader, resultIcon, resultLabel, resultBody, toolName } = entry;
+
+  const category = getToolCategory(toolName);
+
+  // Edit/Write: hide result on success — the diff already shows what changed
+  if (!isError && (category === 'edit')) {
+    return;
+  }
+
   const text = Array.isArray(content)
     ? content.filter(c => c.type === 'text').map(c => c.text).join('')
     : String(content ?? '');
+
   if (isError) {
-    resultHeader.style.color = '#f87171';
-    resultIcon.textContent = '\u2717';
-    resultLabel.textContent = 'Error';
-    detailsEl.open = true;
+    // Red error box
+    const errorBox = document.createElement('div');
+    errorBox.style.cssText = 'margin-top:4px;padding:6px 10px;border:1px solid #7f1d1d;border-radius:5px;background:#450a0a;font-size:11px';
+    const errHeader = document.createElement('div');
+    errHeader.style.cssText = 'display:flex;align-items:center;gap:4px;color:#f87171;margin-bottom:2px;font-weight:500';
+    errHeader.innerHTML = '✗ Error';
+    const errBody = document.createElement('div');
+    errBody.style.cssText = 'color:#fecaca;white-space:pre-wrap;word-break:break-all;font-family:monospace';
+    errBody.textContent = text;
+    errorBox.appendChild(errHeader);
+    errorBox.appendChild(errBody);
+    inner.appendChild(errorBox);
+    return;
   }
+
+  // Bash: dark code block
+  if (category === 'bash') {
+    if (!text) return;
+    const pre = document.createElement('pre');
+    pre.style.cssText = 'margin-top:4px;padding:6px 10px;background:#0d1117;border:1px solid #374151;border-radius:5px;font-size:11px;font-family:monospace;color:#e5e7eb;white-space:pre-wrap;word-break:break-all;max-height:300px;overflow-y:auto';
+    if (text.length > 400) {
+      pre.textContent = text.slice(0, 400) + '…';
+      const showMoreBtn = document.createElement('button');
+      showMoreBtn.style.cssText = 'display:block;margin-top:4px;color:#60a5fa;background:none;border:none;cursor:pointer;font-size:11px;padding:0';
+      showMoreBtn.textContent = 'show more';
+      showMoreBtn.addEventListener('click', () => { pre.textContent = text; showMoreBtn.remove(); });
+      inner.appendChild(pre);
+      inner.appendChild(showMoreBtn);
+    } else {
+      pre.textContent = text;
+      inner.appendChild(pre);
+    }
+    return;
+  }
+
+  // Default: plain text with show-more
+  if (!text) return;
+  resultHeader.style.color = '#10b981';
+  resultIcon.textContent = '\u2713';
+  resultLabel.textContent = 'Result';
   if (text.length > 300) {
     resultBody.textContent = text.slice(0, 300) + '…';
     const showMoreBtn = document.createElement('button');
-    showMoreBtn.className = 'text-xs mt-1';
-    showMoreBtn.style.cssText = 'color:#60a5fa;background:none;border:none;cursor:pointer;padding:0';
+    showMoreBtn.style.cssText = 'display:block;margin-top:2px;color:#60a5fa;background:none;border:none;cursor:pointer;font-size:11px;padding:0';
     showMoreBtn.textContent = 'show more';
-    showMoreBtn.addEventListener('click', () => {
-      resultBody.textContent = text;
-      showMoreBtn.remove();
-    });
+    showMoreBtn.addEventListener('click', () => { resultBody.textContent = text; showMoreBtn.remove(); });
     resultEl.appendChild(showMoreBtn);
   } else {
     resultBody.textContent = text;
@@ -819,6 +1169,8 @@ function formatRelativeTime(isoString) {
 function startNewSession() {
   chatSessionId = null;
   pendingToolUses.clear();
+  streamInThinkingBlock = false;
+  sealThinkingBlock();
   document.getElementById('chat-messages').innerHTML = '';
   document.getElementById('chat-sessions-panel').classList.add('hidden');
 }
@@ -826,6 +1178,8 @@ function startNewSession() {
 function resumeSession(sessionId) {
   chatSessionId = sessionId;
   pendingToolUses.clear();
+  streamInThinkingBlock = false;
+  sealThinkingBlock();
   document.getElementById('chat-messages').innerHTML = '';
   document.getElementById('chat-sessions-panel').classList.add('hidden');
   loadAndRenderTranscript(sessionId);
