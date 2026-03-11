@@ -88,7 +88,7 @@ pub(crate) async fn open_terminal_channel(
         .request_pty(false, "xterm-256color", 80, 24, 0, 0, &[])
         .await?;
     ssh_channel
-        .exec(false, "bash -c 'claude; exec bash'")
+        .exec(false, "bash -ic 'claude; exec bash'")
         .await?;
     Ok(ssh_channel)
 }

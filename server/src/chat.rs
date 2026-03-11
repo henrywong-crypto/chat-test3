@@ -83,7 +83,7 @@ async fn run_agent_relay(
                         while let Some(newline_pos) = line_buf.find('\n') {
                             let line = line_buf[..newline_pos].trim_end_matches('\r').to_owned();
                             line_buf.drain(..=newline_pos);
-                            persist_session_if_done(&line, state, user_id, vm_id, &pending_title);
+                            persist_session_if_done(&line, state, user_id, vm_id, &mut pending_title).await;
                             if ws_sender.send(Message::Text(line.into())).await.is_err() {
                                 return Ok(());
                             }
@@ -123,15 +123,11 @@ fn capture_pending_title(text: &str, pending_title: &mut String) {
     *pending_title = content.chars().take(60).collect();
 }
 
-fn persist_session_if_done(line: &str, state: &AppState, user_id: Uuid, vm_id: &str, pending_title: &str) {
+async fn persist_session_if_done(line: &str, state: &AppState, user_id: Uuid, vm_id: &str, pending_title: &mut String) {
     let Ok(json_value) = serde_json::from_str::<serde_json::Value>(line) else { return };
     if json_value.get("type").and_then(|t| t.as_str()) != Some("done") { return };
     let Some(session_id) = json_value.get("session_id").and_then(|s| s.as_str()) else { return };
-    let title = if pending_title.is_empty() { session_id.to_owned() } else { pending_title.to_owned() };
-    let db = state.db.clone();
-    let session_id = session_id.to_owned();
-    let vm_id = vm_id.to_owned();
-    tokio::spawn(async move {
-        let _ = upsert_chat_session(&db, user_id, &vm_id, &session_id, &title).await;
-    });
+    let title = if pending_title.is_empty() { session_id.to_owned() } else { pending_title.clone() };
+    let _ = upsert_chat_session(&state.db, user_id, vm_id, session_id, &title).await;
+    pending_title.clear();
 }
