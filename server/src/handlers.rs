@@ -10,7 +10,7 @@ use firecracker_manager::create_vm;
 use serde::Deserialize;
 use store::upsert_user;
 use tower_sessions::Session;
-use tracing::info;
+use tracing::{error, info};
 use uuid::Uuid;
 
 use crate::{
@@ -202,7 +202,10 @@ pub(crate) async fn list_chat_sessions_handler(
     };
     match list_sessions(&guest_ip, &state.ssh_key_path, &state.ssh_user, &state.vm_host_key_path).await {
         Ok(session_entries) => Json(session_entries).into_response(),
-        Err(_) => (StatusCode::INTERNAL_SERVER_ERROR, "Internal error").into_response(),
+        Err(e) => {
+            error!(vm_id = %vm_id, "list_sessions failed: {e}");
+            (StatusCode::INTERNAL_SERVER_ERROR, "Internal error").into_response()
+        }
     }
 }
 
@@ -238,6 +241,9 @@ pub(crate) async fn get_chat_transcript_handler(
     .await
     {
         Ok(transcript) => Json(transcript).into_response(),
-        Err(_) => (StatusCode::NOT_FOUND, "Transcript not found").into_response(),
+        Err(e) => {
+            error!(vm_id = %vm_id, session_id = %query.session_id, "fetch_transcript failed: {e}");
+            (StatusCode::NOT_FOUND, "Transcript not found").into_response()
+        }
     }
 }

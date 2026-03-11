@@ -343,6 +343,7 @@ function toggleChat() {
 function connectChatWs() {
   chatWs = new WebSocket(wsBase + '/sessions/' + vmId + '/chat');
   chatWs.onopen = () => {
+    console.log('[chat] ws connected');
     if (pendingQuery) {
       const { content } = pendingQuery;
       pendingQuery = null;
@@ -351,10 +352,12 @@ function connectChatWs() {
   };
   chatWs.onmessage = e => {
     let event;
-    try { event = JSON.parse(e.data); } catch { return; }
+    try { event = JSON.parse(e.data); } catch { console.warn('[chat] failed to parse ws message', e.data); return; }
+    logChatEvent(event);
     handleChatEvent(event);
   };
   chatWs.onclose = () => {
+    console.log('[chat] ws closed');
     chatWs = null;
     chatStreaming = false;
     streamHadText = false;
@@ -428,6 +431,7 @@ function sendQuery(content) {
   if (chatSessionId === null) {
     pendingSessionTitle = content.slice(0, 60);
   }
+  console.log('[chat] → query  session_id=', chatSessionId, ' content=', content.slice(0, 80));
   prepareForQuery(content);
   if (chatWs && chatWs.readyState === WebSocket.CONNECTING) {
     pendingQuery = { content };
@@ -483,6 +487,7 @@ function ensureAssistantMessage() {
 }
 
 function appendToAssistantMessage(text) {
+  if (!text) return;
   ensureAssistantMessage();
   currentAssistantRawText += text;
   currentAssistantTextEl.className = 'markdown-body text-sm pl-8';
@@ -627,6 +632,30 @@ function extractContentBlocks(event) {
   return [];
 }
 
+function logChatEvent(event) {
+  const t = event.type;
+  if (t === 'stream_event') {
+    const inner = event.event?.type;
+    // skip noisy per-character deltas
+    if (inner === 'content_block_delta' || inner === 'message_delta') return;
+    console.log('[chat] ←', t, inner);
+  } else if (t === 'assistant') {
+    const blocks = extractContentBlocks(event).map(b => b.type);
+    console.log('[chat] ← assistant  blocks=', blocks, ' session_id=', event.session_id);
+  } else if (t === 'user') {
+    const ids = extractContentBlocks(event)
+      .filter(b => b.type === 'tool_result')
+      .map(b => b.tool_use_id);
+    console.log('[chat] ← user  tool_result_ids=', ids);
+  } else if (t === 'result' || t === 'done') {
+    console.log('[chat] ←', t, ' session_id=', event.session_id);
+  } else if (t === 'error') {
+    console.error('[chat] ← error', event.message);
+  } else {
+    console.log('[chat] ←', t, event.subtype ?? '');
+  }
+}
+
 function scrollChatToBottom() {
   const messages = document.getElementById('chat-messages');
   messages.scrollTop = messages.scrollHeight;
@@ -730,7 +759,7 @@ function renderTranscriptMessages(messages) {
       appendUserMessage(textContent);
     } else if (message.role === 'assistant') {
       for (const block of message.content) {
-        if (block.type === 'text') {
+        if (block.type === 'text' && block.text) {
           ensureAssistantMessage();
           currentAssistantRawText += block.text;
         } else if (block.type === 'tool_use') {
