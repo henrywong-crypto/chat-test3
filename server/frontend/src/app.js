@@ -309,38 +309,30 @@ function handleChatEvent(event) {
     showThinkingIndicator();
   } else if (event.type === 'stream_event' && event.event) {
     const ev = event.event;
-    if (ev.type === 'content_block_delta' && ev.delta && ev.delta.type === 'text_delta' && ev.delta.text) {
+    if (ev.type === 'content_block_delta' && ev.delta?.type === 'text_delta' && ev.delta.text) {
       removeThinkingIndicator();
       streamHadText = true;
       appendToAssistantMessage(ev.delta.text);
     }
-  } else if (event.type === 'assistant' || (event.content && Array.isArray(event.content) && !event.content.some(b => b.type === 'tool_result'))) {
+  } else if (event.type === 'assistant') {
     removeThinkingIndicator();
-    const blocks = event.content ?? event.message?.content ?? [];
-    let hasToolUse = false;
+    const blocks = event.message?.content ?? event.content ?? [];
     for (const block of blocks) {
-      // Skip replaying full text when we already streamed it token-by-token
-      if (block.text && !streamHadText) {
+      if (block.type === 'text' && !streamHadText) {
         appendToAssistantMessage(block.text);
       } else if (block.type === 'tool_use') {
-        hasToolUse = true;
         sealAssistantMessage();
         appendToolUseBlock(block.id, block.name, block.input);
       }
     }
-    if (!hasToolUse) {
-      sealAssistantMessage();
-      chatStreaming = false;
-      unlockChatInput();
-    }
-  } else if (event.type === 'user' || (event.content && Array.isArray(event.content) && event.content.some(b => b.type === 'tool_result'))) {
-    const blocks = event.content ?? event.message?.content ?? [];
+  } else if (event.type === 'user') {
+    const blocks = event.message?.content ?? [];
     for (const block of blocks) {
       if (block.type === 'tool_result') {
         fillToolResult(block.tool_use_id, block.content, block.is_error);
       }
     }
-  } else if (event.type === 'result' || event.type === 'done' || event.subtype === 'success') {
+  } else if (event.type === 'result' || event.type === 'done') {
     if (event.session_id) chatSessionId = event.session_id;
     streamHadText = false;
     sealAssistantMessage();
@@ -359,26 +351,24 @@ function handleChatEvent(event) {
   scrollChatToBottom();
 }
 
+function prepareForQuery(content) {
+  appendUserMessage(content);
+  sealAssistantMessage();
+  streamHadText = false;
+  chatStreaming = true;
+  lockChatInput();
+  showThinkingIndicator();
+}
+
 function sendQuery(content) {
   if (chatSessionId === null) {
     pendingSessionTitle = content.slice(0, 60);
   }
+  prepareForQuery(content);
   if (chatWs && chatWs.readyState === WebSocket.CONNECTING) {
-  appendUserMessage(content);
-  sealAssistantMessage();
-  streamHadText = false;
-  chatStreaming = true;
-  lockChatInput();
-  showThinkingIndicator();
-  pendingQuery = { content };
+    pendingQuery = { content };
     return;
   }
-  appendUserMessage(content);
-  sealAssistantMessage();
-  streamHadText = false;
-  chatStreaming = true;
-  lockChatInput();
-  showThinkingIndicator();
   chatWs.send(JSON.stringify({ type: 'query', content, session_id: chatSessionId }));
 }
 

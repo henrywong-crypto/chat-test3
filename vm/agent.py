@@ -38,7 +38,6 @@ async def run_query(content: str, session_id):
     options = ClaudeAgentOptions(
         cwd=os.environ.get('HOME', '/root'),
         permission_mode='bypassPermissions',
-        include_partial_messages=True,
         **({"resume": session_id} if session_id else {}),
     )
     captured_session_id = session_id

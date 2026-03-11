@@ -62,6 +62,9 @@ async fn build_session_entry_with_title(
     dir_entry: &DirEntry,
 ) -> Option<SessionEntry> {
     let session_id = dir_entry.file_name().strip_suffix(".jsonl")?.to_owned();
+    if session_id.starts_with("agent-") {
+        return None;
+    }
     let mtime = dir_entry.metadata().mtime.unwrap_or(0);
     let last_active_at = Utc
         .timestamp_opt(mtime as i64, 0)
@@ -96,6 +99,7 @@ async fn fetch_session_title(sftp: &SftpSession, path: &str) -> Option<String> {
     None
 }
 
+#[cfg(test)]
 fn extract_title_from_jsonl(chunk: &str) -> Option<String> {
     let mut first_user_title = None;
     for line in chunk.lines() {
