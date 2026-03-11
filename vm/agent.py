@@ -62,6 +62,15 @@ async def run_query(content: str, session_id):
     emit({'type': 'done', 'session_id': captured_session_id})
 
 
+class _Encoder(json.JSONEncoder):
+    def default(self, obj):
+        if dataclasses.is_dataclass(obj) and not isinstance(obj, type):
+            return dataclasses.asdict(obj)
+        if hasattr(obj, 'model_dump'):
+            return obj.model_dump()
+        return super().default(obj)
+
+
 def emit(obj):
     if dataclasses.is_dataclass(obj) and not isinstance(obj, type):
         data = dataclasses.asdict(obj)
@@ -71,7 +80,7 @@ def emit(obj):
         data = obj
     else:
         data = {'raw': str(obj)}
-    sys.stdout.write(json.dumps(data) + '\n')
+    sys.stdout.write(json.dumps(data, cls=_Encoder) + '\n')
     sys.stdout.flush()
 
 
