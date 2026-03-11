@@ -1,6 +1,5 @@
 use anyhow::{bail, Context, Result};
 use std::{
-    io::ErrorKind,
     path::{Path, PathBuf},
     process::Stdio,
     time::Duration,
@@ -77,28 +76,16 @@ pub(crate) fn build_chroot_dir(chroot_base: &Path, vm_id: &str) -> PathBuf {
 pub(crate) async fn prepare_jail_resources(chroot_dir: &Path, kernel_src: &Path) -> Result<()> {
     tokio::fs::create_dir_all(chroot_dir.join("run")).await?;
     let kernel_dst = chroot_dir.join("vmlinux");
-    if let Err(e) = tokio::fs::hard_link(kernel_src, &kernel_dst).await {
-        if e.kind() == ErrorKind::CrossesDevices {
-            tokio::fs::copy(kernel_src, &kernel_dst)
-                .await
-                .with_context(|| {
-                    format!(
-                        "failed to copy kernel from {} to {}",
-                        kernel_src.display(),
-                        kernel_dst.display()
-                    )
-                })?;
-        } else {
-            let kind = e.kind();
-            return Err(e).with_context(|| {
+    if tokio::fs::hard_link(kernel_src, &kernel_dst).await.is_err() {
+        tokio::fs::copy(kernel_src, &kernel_dst)
+            .await
+            .with_context(|| {
                 format!(
-                    "failed to hard-link kernel from {} to {}: {}",
+                    "failed to copy kernel from {} to {}",
                     kernel_src.display(),
-                    kernel_dst.display(),
-                    kind
+                    kernel_dst.display()
                 )
-            });
-        }
+            })?;
     }
     Ok(())
 }
