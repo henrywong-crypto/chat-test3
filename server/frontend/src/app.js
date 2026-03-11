@@ -223,6 +223,7 @@ const wsBase = (location.protocol === 'https:' ? 'wss:' : 'ws:') + '//' + locati
 let chatSessionId = null;
 let chatWs = null;
 let chatStreaming = false;
+let pendingQuery = null;
 
 // Current assistant message container (text node inside it)
 let currentAssistantMsgEl = null;
@@ -270,6 +271,13 @@ function toggleChat() {
 
 function connectChatWs() {
   chatWs = new WebSocket(wsBase + '/sessions/' + vmId + '/chat');
+  chatWs.onopen = () => {
+    if (pendingQuery) {
+      const { content } = pendingQuery;
+      pendingQuery = null;
+      sendQuery(content);
+    }
+  };
   chatWs.onmessage = e => {
     let event;
     try { event = JSON.parse(e.data); } catch { return; }
@@ -278,6 +286,7 @@ function connectChatWs() {
   chatWs.onclose = () => {
     chatWs = null;
     chatStreaming = false;
+    pendingQuery = null;
     unlockChatInput();
   };
 }
@@ -319,6 +328,14 @@ function handleChatEvent(event) {
 }
 
 function sendQuery(content) {
+  if (chatWs && chatWs.readyState === WebSocket.CONNECTING) {
+    appendUserMessage(content);
+    sealAssistantMessage();
+    chatStreaming = true;
+    lockChatInput();
+    pendingQuery = { content };
+    return;
+  }
   appendUserMessage(content);
   sealAssistantMessage();
   chatStreaming = true;
