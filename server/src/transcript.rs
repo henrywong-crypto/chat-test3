@@ -93,6 +93,9 @@ fn parse_transcript(contents: &str) -> Result<TranscriptResponse> {
             }
             "user" | "assistant" => {
                 if let Some(transcript_message) = extract_transcript_message(&entry, type_str) {
+                    if title.is_none() && type_str == "user" {
+                        title = extract_title_from_message(&transcript_message);
+                    }
                     messages.push(transcript_message);
                 }
             }
@@ -102,19 +105,38 @@ fn parse_transcript(contents: &str) -> Result<TranscriptResponse> {
     Ok(TranscriptResponse { title, messages })
 }
 
+fn extract_title_from_message(message: &TranscriptMessage) -> Option<String> {
+    let text = message.content.iter().find_map(|b| b["text"].as_str())?;
+    let title: String = text.chars().take(60).collect();
+    if title.is_empty() { None } else { Some(title) }
+}
+
 fn extract_transcript_message(
     entry: &serde_json::Value,
     type_str: &str,
 ) -> Option<TranscriptMessage> {
     let message = &entry["message"];
     let role = message["role"].as_str().unwrap_or(type_str).to_owned();
-    let content = message["content"].as_array()?.clone();
-    if type_str == "user"
-        && content
-            .iter()
-            .all(|b| b["type"].as_str() == Some("tool_result"))
-    {
+    let content = normalize_content(&message["content"]);
+    if content.is_empty() {
+        return None;
+    }
+    if type_str == "user" && content.iter().all(|b| b["type"].as_str() == Some("tool_result")) {
         return None;
     }
     Some(TranscriptMessage { role, content })
+}
+
+fn normalize_content(raw: &serde_json::Value) -> Vec<serde_json::Value> {
+    match raw {
+        serde_json::Value::String(text) => {
+            vec![serde_json::json!({"type": "text", "text": text})]
+        }
+        serde_json::Value::Array(blocks) => blocks
+            .iter()
+            .filter(|b| b["type"].as_str() != Some("thinking"))
+            .cloned()
+            .collect(),
+        _ => vec![],
+    }
 }

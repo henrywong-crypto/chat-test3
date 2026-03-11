@@ -51,7 +51,8 @@ KERNEL_DEST = FC_DIR / "vmlinux"
 ROOTFS_DEST = FC_DIR / "rootfs.ext4"
 SSH_KEY = FC_DIR / "id_rsa"
 SSH_KEY_PUB = FC_DIR / "id_rsa.pub"
-VM_HOST_KEY_PUB = FC_DIR / "vm_host_key.pub"
+VM_HOST_KEY = FC_DIR / "vm_host_ed25519_key"
+VM_HOST_KEY_PUB = FC_DIR / "vm_host_ed25519_key.pub"
 
 # ── Output helpers ─────────────────────────────────────────────────────────────
 def step(title: str) -> None:
@@ -309,6 +310,20 @@ def generate_vm_ssh_key() -> None:
         sudo("chmod", "600", str(SSH_KEY))
     ok(f"Generated {SSH_KEY}")
 
+def generate_vm_host_key() -> None:
+    step("Generating VM SSH host key (persistent)")
+    if VM_HOST_KEY.exists():
+        skip(str(VM_HOST_KEY))
+        return
+    with tempfile.TemporaryDirectory() as tmp_str:
+        tmp = Path(tmp_str)
+        tmp_key = tmp / "vm_host_ed25519_key"
+        run(["ssh-keygen", "-t", "ed25519", "-f", str(tmp_key), "-N", ""])
+        sudo("cp", str(tmp_key), str(VM_HOST_KEY))
+        sudo("cp", str(str(tmp_key) + ".pub"), str(VM_HOST_KEY_PUB))
+        sudo("chmod", "600", str(VM_HOST_KEY))
+    ok(f"Generated {VM_HOST_KEY}")
+
 # ══════════════════════════════════════════════════════════════════════════════
 # Step 8 — VM kernel + rootfs
 # ══════════════════════════════════════════════════════════════════════════════
@@ -358,17 +373,13 @@ def build_rootfs(ci_version: str) -> None:
             # DNS inside the rootfs
             sudo_write(squashfs_root / "etc" / "resolv.conf", "nameserver 1.1.1.1\n")
 
-            # Pre-generate a fixed SSH host key so the server can verify identity
-            host_key_tmp = tmp / "ssh_host_ed25519_key"
-            run(["ssh-keygen", "-t", "ed25519", "-f", str(host_key_tmp), "-N", ""])
+            # Inject the persistent SSH host key so it never changes across rebuilds
             etc_ssh = squashfs_root / "etc" / "ssh"
             sudo("mkdir", "-p", str(etc_ssh))
-            sudo("cp", str(host_key_tmp), str(etc_ssh / "ssh_host_ed25519_key"))
-            sudo("cp", str(str(host_key_tmp) + ".pub"), str(etc_ssh / "ssh_host_ed25519_key.pub"))
+            sudo("cp", str(VM_HOST_KEY), str(etc_ssh / "ssh_host_ed25519_key"))
+            sudo("cp", str(VM_HOST_KEY_PUB), str(etc_ssh / "ssh_host_ed25519_key.pub"))
             sudo("chmod", "600", str(etc_ssh / "ssh_host_ed25519_key"))
-            # Store public key for the server to verify against
-            sudo("cp", str(str(host_key_tmp) + ".pub"), str(VM_HOST_KEY_PUB))
-            ok(f"Stored VM host public key → {VM_HOST_KEY_PUB}")
+            ok(f"Injected persistent VM host key → {etc_ssh}")
 
             # Bind-mount /proc /sys /dev for chroot
             for mount_point in ("proc", "sys", "dev"):
@@ -431,8 +442,7 @@ def generate_config(project_dir: Path, database_url: str) -> None:
         f'rootfs_path     = "{ROOTFS_DEST}"\n'
         f'ssh_key_path    = "{SSH_KEY}"\n'
         f'ssh_user        = "ubuntu"\n'
-        f'vm_host_key_path = "{VM_HOST_KEY_PUB}"\n'
-        f"\n"
+        f'vm_host_key_path = "{VM_HOST_KEY_PUB}"\n'        f"\n"
         f'user_rootfs_dir = "{USER_ROOTFS_DIR}"\n'
         f'upload_dir      = "/home/ubuntu"\n'
         f"\n"
@@ -512,7 +522,8 @@ def print_summary(project_dir: Path) -> None:
             f"  {KERNEL_DEST}          VM kernel\n"
             f"  {ROOTFS_DEST}       VM base rootfs (Ubuntu 24.04 + Claude Code)\n"
             f"  {SSH_KEY}          SSH key for VM access\n"
-            f"  {VM_HOST_KEY_PUB}  VM host public key[/dim]",
+            f"  {VM_HOST_KEY}  VM SSH host key (private, persistent)\n"
+            f"  {VM_HOST_KEY_PUB}  VM SSH host key (public)[/dim]",
             title="[bold]WebCode[/bold]",
             border_style="green",
         )
@@ -576,6 +587,7 @@ def main() -> None:
         install_server_binary(project_dir)
 
     generate_vm_ssh_key()
+    generate_vm_host_key()
 
     if not args.skip_rootfs:
         build_rootfs(args.ci_version)
