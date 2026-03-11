@@ -112,6 +112,18 @@ jailer_gid = 999  # id -g webcode
 
 Use the latest Firecracker minor version (e.g. `v1.14`) and pick the highest kernel version from the S3 listing at `http://spec.ccfc.min.s3.amazonaws.com/?prefix=firecracker-ci/v1.14/x86_64/vmlinux-&list-type=2`.
 
+### Automated (recommended)
+
+`vm/build_rootfs.py` automates the full build. It requires root, `uv`, `unsquashfs`, and `mkfs.ext4`:
+
+```bash
+sudo uv run vm/build_rootfs.py
+```
+
+Pass `--workdir /path/to/dir` to use a specific working directory (defaults to a temporary directory). The script installs the finished artifacts directly into `/var/lib/fc/`.
+
+### Manual steps
+
 ```bash
 # Download
 wget "https://s3.amazonaws.com/spec.ccfc.min/firecracker-ci/v1.14/x86_64/vmlinux-6.1.155"
@@ -130,7 +142,7 @@ sudo chmod 700 squashfs-root/home/ubuntu/.ssh
 sudo chmod 600 squashfs-root/home/ubuntu/.ssh/authorized_keys
 echo "nameserver 1.1.1.1" | sudo tee squashfs-root/etc/resolv.conf > /dev/null
 
-# Install Node.js and Claude Code
+# Install uv (system-wide) and Claude Code CLI (ubuntu user)
 sudo chmod 1777 squashfs-root/tmp
 sudo mkdir -p squashfs-root/var/cache/apt/archives/partial
 sudo mkdir -p squashfs-root/var/log/apt
@@ -139,16 +151,22 @@ sudo mount --bind /sys  squashfs-root/sys
 sudo mount --bind /dev  squashfs-root/dev
 sudo chroot squashfs-root bash -c "
   apt-get update -qq &&
-  apt-get install -y -qq nodejs npm &&
-  npm install -g @anthropic-ai/claude-code
+  apt-get install -y -qq curl &&
+  curl -LsSf https://astral.sh/uv/install.sh | env UV_INSTALL_DIR=/usr/local sh
 "
+sudo chroot squashfs-root su - ubuntu -c "curl -fsSL https://claude.ai/install.sh | bash"
+
+# Place the agent and pre-warm the uv dependency cache as the ubuntu user
+sudo cp vm/agent.py squashfs-root/opt/agent.py
+sudo chroot squashfs-root su - ubuntu -c "echo | bash -lc 'uv run /opt/agent.py'" || true
+
 sudo umount squashfs-root/dev
 sudo umount squashfs-root/sys
 sudo umount squashfs-root/proc
 
 # Claude Code settings
-mkdir -p squashfs-root/home/ubuntu/.claude
-cat > squashfs-root/home/ubuntu/.claude/settings.json << 'EOF'
+sudo mkdir -p squashfs-root/home/ubuntu/.claude
+sudo tee squashfs-root/home/ubuntu/.claude/settings.json > /dev/null << 'EOF'
 {
   "$schema": "https://json.schemastore.org/claude-code-settings.json",
   "env": {
@@ -159,6 +177,7 @@ cat > squashfs-root/home/ubuntu/.claude/settings.json << 'EOF'
   }
 }
 EOF
+sudo chown -R 1000:1000 squashfs-root/home/ubuntu/.claude
 
 # Build ext4 image
 truncate -s 10G ubuntu-24.04.ext4
@@ -172,6 +191,12 @@ sudo mv vmlinux-6.1.155 /var/lib/fc/vmlinux
 sudo mv ubuntu-24.04.ext4 /var/lib/fc/ubuntu-24.04.ext4
 sudo mv ubuntu-24.04.id_rsa /var/lib/fc/ubuntu-24.04.id_rsa
 ```
+
+The rootfs contains:
+- **`claude` CLI** (installed per-user via `https://claude.ai/install.sh`) — the Claude Code binary invoked by the agent
+- **`uv`** (system-wide at `/usr/local/bin/uv`) — runs `agent.py` and manages its Python dependencies
+- **`/opt/agent.py`** — reads JSON queries from stdin, streams results back via stdout using the `claude-code-sdk` Python package
+- **Claude Code settings** — configured for AWS Bedrock; credentials are inherited from the host instance profile at runtime
 
 ## Run
 

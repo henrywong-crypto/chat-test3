@@ -223,8 +223,13 @@ const wsBase = (location.protocol === 'https:' ? 'wss:' : 'ws:') + '//' + locati
 let chatSessionId = null;
 let chatWs = null;
 let chatStreaming = false;
-let currentAssistantEl = null;
-let pendingToolApprovals = 0;
+
+// Current assistant message container (text node inside it)
+let currentAssistantMsgEl = null;
+let currentAssistantTextEl = null;
+
+// Map tool_use_id → { resultEl } for filling in tool results
+const pendingToolUses = new Map();
 
 document.getElementById('chat-toggle-btn').addEventListener('click', toggleChat);
 document.getElementById('chat-close-btn').addEventListener('click', closeChatPanel);
@@ -233,6 +238,7 @@ document.getElementById('chat-send-btn').addEventListener('click', () => {
   const content = input.value.trim();
   if (!content || chatStreaming) return;
   input.value = '';
+  autoResizeChatInput();
   sendQuery(content);
 });
 document.getElementById('chat-input').addEventListener('keydown', e => {
@@ -241,6 +247,13 @@ document.getElementById('chat-input').addEventListener('keydown', e => {
     document.getElementById('chat-send-btn').click();
   }
 });
+document.getElementById('chat-input').addEventListener('input', autoResizeChatInput);
+
+function autoResizeChatInput() {
+  const el = document.getElementById('chat-input');
+  el.style.height = 'auto';
+  el.style.height = Math.min(el.scrollHeight, 160) + 'px';
+}
 
 function closeChatPanel() {
   const panel = document.getElementById('chat-panel');
@@ -252,147 +265,242 @@ function toggleChat() {
   const panel = document.getElementById('chat-panel');
   const isOpen = panel.classList.toggle('flex');
   panel.classList.toggle('hidden', !isOpen);
-  if (isOpen && !chatWs) {
-    connectChatWs();
-  }
+  if (isOpen && !chatWs) connectChatWs();
 }
 
 function connectChatWs() {
   chatWs = new WebSocket(wsBase + '/sessions/' + vmId + '/chat');
   chatWs.onmessage = e => {
-    const data = JSON.parse(e.data);
-    if (data.type === 'session-started') {
-      chatSessionId = data.session_id;
-    } else if (data.type === 'text') {
-      appendToAssistantBubble(data.content);
-    } else if (data.type === 'tool-use') {
-      currentAssistantEl = null;
-      appendToolUseRow(data.tool_name, data.input);
-    } else if (data.type === 'tool-result') {
-      appendToolResultRow(data.output, data.is_error);
-      pendingToolApprovals = Math.max(0, pendingToolApprovals - 1);
-      if (pendingToolApprovals === 0) unlockSend();
-    } else if (data.type === 'complete') {
-      chatSessionId = data.session_id;
-      currentAssistantEl = null;
-      chatStreaming = false;
-      unlockSend();
-    } else if (data.type === 'error') {
-      currentAssistantEl = null;
-      appendErrorRow(data.message);
-      chatStreaming = false;
-      unlockSend();
-    }
+    let event;
+    try { event = JSON.parse(e.data); } catch { return; }
+    handleChatEvent(event);
   };
   chatWs.onclose = () => {
     chatWs = null;
     chatStreaming = false;
-    unlockSend();
+    unlockChatInput();
   };
 }
 
+function handleChatEvent(event) {
+  if (event.type === 'system' && event.subtype === 'init') {
+    chatSessionId = event.session_id;
+    showThinkingIndicator();
+  } else if (event.type === 'assistant') {
+    removeThinkingIndicator();
+    for (const block of (event.message?.content ?? [])) {
+      if (block.type === 'text' && block.text) {
+        appendToAssistantMessage(block.text);
+      } else if (block.type === 'tool_use') {
+        sealAssistantMessage();
+        appendToolUseBlock(block.id, block.name, block.input);
+      }
+    }
+  } else if (event.type === 'user') {
+    for (const block of (event.message?.content ?? [])) {
+      if (block.type === 'tool_result') {
+        fillToolResult(block.tool_use_id, block.content, block.is_error);
+      }
+    }
+  } else if (event.type === 'result') {
+    chatSessionId = event.session_id;
+    sealAssistantMessage();
+    removeThinkingIndicator();
+    chatStreaming = false;
+    unlockChatInput();
+  } else if (event.type === 'error') {
+    removeThinkingIndicator();
+    sealAssistantMessage();
+    appendErrorMessage(event.message ?? String(event));
+    chatStreaming = false;
+    unlockChatInput();
+  }
+  scrollChatToBottom();
+}
+
 function sendQuery(content) {
-  appendUserBubble(content);
-  currentAssistantEl = null;
+  appendUserMessage(content);
+  sealAssistantMessage();
   chatStreaming = true;
-  lockSend();
+  lockChatInput();
   chatWs.send(JSON.stringify({ type: 'query', content, session_id: chatSessionId }));
 }
 
-function lockSend() {
+// ── Message builders ──────────────────────────────────────────────────────────
+
+function appendUserMessage(content) {
+  const messages = document.getElementById('chat-messages');
+  const row = document.createElement('div');
+  row.className = 'flex justify-end px-3 py-1';
+  const bubble = document.createElement('div');
+  bubble.className = 'max-w-xs rounded-2xl rounded-br-sm px-3 py-2 text-sm text-white whitespace-pre-wrap break-words';
+  bubble.style.background = '#2563eb';
+  bubble.textContent = content;
+  row.appendChild(bubble);
+  messages.appendChild(row);
+  scrollChatToBottom();
+}
+
+function ensureAssistantMessage() {
+  if (currentAssistantMsgEl) return;
+  const messages = document.getElementById('chat-messages');
+  const row = document.createElement('div');
+  row.className = 'px-3 py-1';
+
+  const header = document.createElement('div');
+  header.className = 'flex items-center gap-2 mb-1';
+  const avatar = document.createElement('div');
+  avatar.className = 'w-6 h-6 rounded-full flex items-center justify-center text-xs font-bold text-white shrink-0';
+  avatar.style.background = '#f97316';
+  avatar.textContent = 'C';
+  const label = document.createElement('span');
+  label.className = 'text-xs font-medium';
+  label.style.color = '#9ca3af';
+  label.textContent = 'Claude';
+  header.appendChild(avatar);
+  header.appendChild(label);
+
+  const textEl = document.createElement('div');
+  textEl.className = 'text-sm pl-8 whitespace-pre-wrap break-words';
+  textEl.style.color = '#e5e7eb';
+
+  row.appendChild(header);
+  row.appendChild(textEl);
+  messages.appendChild(row);
+
+  currentAssistantMsgEl = row;
+  currentAssistantTextEl = textEl;
+}
+
+function appendToAssistantMessage(text) {
+  ensureAssistantMessage();
+  currentAssistantTextEl.textContent += text;
+  scrollChatToBottom();
+}
+
+function sealAssistantMessage() {
+  currentAssistantMsgEl = null;
+  currentAssistantTextEl = null;
+}
+
+function appendToolUseBlock(toolId, name, input) {
+  const messages = document.getElementById('chat-messages');
+  const wrapper = document.createElement('div');
+  wrapper.className = 'px-3 py-1 pl-11';
+
+  const details = document.createElement('details');
+  details.className = 'rounded-lg overflow-hidden';
+  details.style.border = '1px solid #374151';
+
+  const summary = document.createElement('summary');
+  summary.className = 'flex items-center gap-2 px-3 py-2 cursor-pointer text-xs font-mono select-none';
+  summary.style.background = '#1f2937';
+  summary.style.color = '#9ca3af';
+  const arrow = document.createElement('span');
+  arrow.textContent = '\u25b8';
+  arrow.style.cssText = 'transition:transform .15s;display:inline-block';
+  details.addEventListener('toggle', () => {
+    arrow.style.transform = details.open ? 'rotate(90deg)' : '';
+  });
+  const nameSpan = document.createElement('span');
+  nameSpan.style.color = '#60a5fa';
+  nameSpan.textContent = name;
+  const inputPreview = document.createElement('span');
+  inputPreview.style.cssText = 'opacity:.6;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;max-width:200px';
+  const firstVal = input && typeof input === 'object' ? Object.values(input)[0] : input;
+  inputPreview.textContent = typeof firstVal === 'string' ? firstVal : JSON.stringify(firstVal ?? input);
+  summary.appendChild(arrow);
+  summary.appendChild(nameSpan);
+  summary.appendChild(inputPreview);
+
+  const body = document.createElement('div');
+  body.style.background = '#111827';
+  const pre = document.createElement('pre');
+  pre.className = 'text-xs p-3 overflow-x-auto';
+  pre.style.color = '#d1fae5';
+  pre.textContent = typeof input === 'object' ? JSON.stringify(input, null, 2) : String(input);
+  body.appendChild(pre);
+
+  const resultEl = document.createElement('div');
+  resultEl.className = 'text-xs font-mono px-3 pb-2';
+  resultEl.style.cssText = 'color:#9ca3af;white-space:pre-wrap;display:none';
+  body.appendChild(resultEl);
+
+  details.appendChild(summary);
+  details.appendChild(body);
+  wrapper.appendChild(details);
+  messages.appendChild(wrapper);
+
+  pendingToolUses.set(toolId, { resultEl, details });
+  scrollChatToBottom();
+}
+
+function fillToolResult(toolId, content, isError) {
+  const entry = pendingToolUses.get(toolId);
+  if (!entry) return;
+  pendingToolUses.delete(toolId);
+  const { resultEl, details } = entry;
+  const text = Array.isArray(content)
+    ? content.filter(c => c.type === 'text').map(c => c.text).join('')
+    : String(content ?? '');
+  resultEl.textContent = text;
+  resultEl.style.display = '';
+  if (isError) resultEl.style.color = '#f87171';
+  details.open = !!isError;
+}
+
+function appendErrorMessage(msg) {
+  const messages = document.getElementById('chat-messages');
+  const row = document.createElement('div');
+  row.className = 'px-3 py-1 text-sm rounded-lg mx-3';
+  row.style.cssText = 'color:#fca5a5;background:#450a0a;border:1px solid #7f1d1d';
+  row.textContent = 'Error: ' + msg;
+  messages.appendChild(row);
+}
+
+// ── Thinking indicator ────────────────────────────────────────────────────────
+
+function showThinkingIndicator() {
+  if (document.getElementById('chat-thinking')) return;
+  const messages = document.getElementById('chat-messages');
+  const row = document.createElement('div');
+  row.id = 'chat-thinking';
+  row.className = 'flex items-center gap-2 px-3 py-1';
+  const avatar = document.createElement('div');
+  avatar.className = 'w-6 h-6 rounded-full flex items-center justify-center text-xs font-bold text-white shrink-0';
+  avatar.style.background = '#f97316';
+  avatar.textContent = 'C';
+  const dots = document.createElement('div');
+  dots.className = 'flex gap-1';
+  for (let i = 0; i < 3; i++) {
+    const d = document.createElement('div');
+    d.className = 'w-1.5 h-1.5 rounded-full';
+    d.style.cssText = 'background:#6b7280;animation:chatDot 1.2s ease-in-out infinite;animation-delay:' + (i * 0.2) + 's';
+    dots.appendChild(d);
+  }
+  row.appendChild(avatar);
+  row.appendChild(dots);
+  messages.appendChild(row);
+  scrollChatToBottom();
+}
+
+function removeThinkingIndicator() {
+  document.getElementById('chat-thinking')?.remove();
+}
+
+// ── Helpers ───────────────────────────────────────────────────────────────────
+
+function scrollChatToBottom() {
+  const messages = document.getElementById('chat-messages');
+  messages.scrollTop = messages.scrollHeight;
+}
+
+function lockChatInput() {
   document.getElementById('chat-send-btn').disabled = true;
   document.getElementById('chat-input').disabled = true;
 }
 
-function unlockSend() {
+function unlockChatInput() {
   document.getElementById('chat-send-btn').disabled = false;
   document.getElementById('chat-input').disabled = false;
 }
-
-function appendUserBubble(content) {
-  const messages = document.getElementById('chat-messages');
-  const row = document.createElement('div');
-  row.className = 'chat chat-end';
-  const bubble = document.createElement('div');
-  bubble.className = 'chat-bubble chat-bubble-primary text-sm whitespace-pre-wrap';
-  bubble.textContent = content;
-  row.appendChild(bubble);
-  messages.appendChild(row);
-  messages.scrollTop = messages.scrollHeight;
-}
-
-function appendAssistantBubble() {
-  const messages = document.getElementById('chat-messages');
-  const row = document.createElement('div');
-  row.className = 'chat chat-start';
-  const bubble = document.createElement('div');
-  bubble.className = 'chat-bubble text-sm whitespace-pre-wrap';
-  row.appendChild(bubble);
-  messages.appendChild(row);
-  messages.scrollTop = messages.scrollHeight;
-  return bubble;
-}
-
-function appendToAssistantBubble(text) {
-  if (!currentAssistantEl) {
-    currentAssistantEl = appendAssistantBubble();
-  }
-  currentAssistantEl.textContent += text;
-  document.getElementById('chat-messages').scrollTop = document.getElementById('chat-messages').scrollHeight;
-}
-
-function appendToolUseRow(name, input) {
-  const messages = document.getElementById('chat-messages');
-  const row = document.createElement('div');
-  row.className = 'bg-base-300 rounded text-xs font-mono p-2 flex flex-col gap-1';
-  const header = document.createElement('div');
-  header.className = 'flex items-center gap-2';
-  const label = document.createElement('span');
-  label.className = 'opacity-70';
-  label.textContent = '\u25b8 ' + name + ': ' + JSON.stringify(input);
-  header.appendChild(label);
-  const allowBtn = document.createElement('button');
-  allowBtn.className = 'btn btn-xs btn-success ml-auto';
-  allowBtn.textContent = 'Allow';
-  const denyBtn = document.createElement('button');
-  denyBtn.className = 'btn btn-xs btn-error';
-  denyBtn.textContent = 'Deny';
-  allowBtn.addEventListener('click', () => {
-    allowBtn.remove();
-    denyBtn.remove();
-    chatWs.send(JSON.stringify({ type: 'tool-response', allow: true }));
-  });
-  denyBtn.addEventListener('click', () => {
-    allowBtn.remove();
-    denyBtn.remove();
-    chatWs.send(JSON.stringify({ type: 'tool-response', allow: false }));
-    pendingToolApprovals = Math.max(0, pendingToolApprovals - 1);
-    if (pendingToolApprovals === 0) unlockSend();
-  });
-  header.appendChild(allowBtn);
-  header.appendChild(denyBtn);
-  row.appendChild(header);
-  messages.appendChild(row);
-  messages.scrollTop = messages.scrollHeight;
-  pendingToolApprovals++;
-  lockSend();
-}
-
-function appendToolResultRow(output, isError) {
-  const messages = document.getElementById('chat-messages');
-  const row = document.createElement('div');
-  row.className = 'opacity-60 text-xs font-mono pl-4 whitespace-pre-wrap' + (isError ? ' text-error' : '');
-  row.textContent = output;
-  messages.appendChild(row);
-  messages.scrollTop = messages.scrollHeight;
-}
-
-function appendErrorRow(message) {
-  const messages = document.getElementById('chat-messages');
-  const row = document.createElement('div');
-  row.className = 'text-error text-xs p-2 bg-base-300 rounded';
-  row.textContent = 'Error: ' + message;
-  messages.appendChild(row);
-  messages.scrollTop = messages.scrollHeight;
-}
-

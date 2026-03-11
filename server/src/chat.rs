@@ -57,7 +57,8 @@ async fn run_agent_relay(
         &state.vm_host_key_path,
     )
     .await?;
-    let mut ssh_channel = open_exec_channel(&mut ssh_handle, "node /opt/claude-agent.js").await?;
+    // bash -l sources ~/.profile → ~/.bashrc so nvm's node and the claude binary are on PATH.
+    let mut ssh_channel = open_exec_channel(&mut ssh_handle, "bash -lc 'uv run /opt/agent.py'").await?;
     let (mut ws_sender, mut ws_receiver) = socket.split();
     let mut line_buf = String::new();
     loop {

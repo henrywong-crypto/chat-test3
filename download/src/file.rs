@@ -24,7 +24,7 @@ pub async fn build_streaming_file_response(
         .context("failed to open remote file")?;
     let stream = SftpFileStream {
         inner: ReaderStream::new(file),
-        sftp,
+        _sftp: sftp,
     };
     let content_disposition =
         HeaderValue::from_str(&format!("attachment; filename=\"{filename}\""))
@@ -39,7 +39,8 @@ pub async fn build_streaming_file_response(
 
 struct SftpFileStream {
     inner: ReaderStream<SftpFile>,
-    sftp: SftpSession,
+    // Held to keep the SSH channel open until the stream is fully consumed.
+    _sftp: SftpSession,
 }
 
 impl Stream for SftpFileStream {

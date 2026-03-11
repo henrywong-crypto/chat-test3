@@ -159,20 +159,26 @@ fn FilesPanel() -> impl IntoView {
 #[component]
 fn ChatPanel() -> impl IntoView {
     view! {
-        <div id="chat-panel" class="hidden w-96 shrink-0 flex-col bg-base-200 border-l border-base-300 overflow-hidden">
-            <div class="flex items-center justify-between px-3 py-2 border-b border-base-300 shrink-0">
-                <span class="font-semibold text-sm">"Chat"</span>
-                <button id="chat-close-btn" class="btn btn-xs btn-ghost btn-square">"✕"</button>
+        <div id="chat-panel" class="hidden w-96 shrink-0 flex-col border-l border-base-300 overflow-hidden" style="background:#111827">
+            <div class="flex items-center justify-between px-4 py-3 border-b border-gray-700 shrink-0" style="background:#1f2937">
+                <div class="flex items-center gap-2">
+                    <div class="w-6 h-6 rounded-full flex items-center justify-center text-xs text-white font-bold" style="background:#f97316">"C"</div>
+                    <span class="text-sm font-semibold text-gray-100">"Claude"</span>
+                </div>
+                <button id="chat-close-btn" class="text-gray-400 hover:text-gray-200 btn btn-xs btn-ghost btn-square">"✕"</button>
             </div>
-            <div id="chat-messages" class="flex-1 overflow-y-auto p-3 flex flex-col gap-2"/>
-            <div class="flex items-end gap-2 px-3 py-2 border-t border-base-300 shrink-0">
-                <textarea
-                    id="chat-input"
-                    class="textarea textarea-bordered textarea-xs flex-1 resize-none"
-                    rows="2"
-                    placeholder="Ask Claude\u{2026}"
-                />
-                <button id="chat-send-btn" class="btn btn-xs btn-primary">"Send \u{23ce}"</button>
+            <div id="chat-messages" class="flex-1 overflow-y-auto py-3 space-y-3"/>
+            <div class="px-3 py-3 border-t border-gray-700 shrink-0" style="background:#1f2937">
+                <div class="flex items-end gap-2">
+                    <textarea
+                        id="chat-input"
+                        class="flex-1 resize-none rounded-xl border border-gray-600 px-3 py-2 text-sm text-gray-100 placeholder-gray-500 focus:outline-none focus:border-blue-500"
+                        style="background:#374151;min-height:40px;max-height:160px"
+                        rows="1"
+                        placeholder="Message Claude\u{2026}"
+                    />
+                    <button id="chat-send-btn" class="btn btn-sm rounded-xl" style="background:#2563eb;color:white;border:none">"Send"</button>
+                </div>
             </div>
         </div>
     }
