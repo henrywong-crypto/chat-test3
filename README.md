@@ -154,7 +154,7 @@ sudo mount --bind /dev  squashfs-root/dev
 sudo chroot squashfs-root bash -c "
   apt-get update -qq &&
   apt-get install -y -qq curl &&
-  curl -LsSf https://astral.sh/uv/install.sh | env UV_INSTALL_DIR=/usr/local sh
+  curl -LsSf https://astral.sh/uv/install.sh | env UV_INSTALL_DIR=/usr/local/bin sh
 "
 sudo chroot squashfs-root su - ubuntu -c "curl -fsSL https://claude.ai/install.sh | bash"
 

@@ -46,7 +46,7 @@ CHROOT_INSTALL_SCRIPT = """\
 set -e
 apt-get update -qq
 apt-get install -y -qq curl
-curl -LsSf https://astral.sh/uv/install.sh | env UV_INSTALL_DIR=/usr/local sh
+curl -LsSf https://astral.sh/uv/install.sh | env UV_INSTALL_DIR=/usr/local/bin sh
 """
 
 # Runs as the ubuntu user inside the chroot: installs Claude Code CLI.
