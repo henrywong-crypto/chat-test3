@@ -89,12 +89,13 @@ pub(crate) async fn prepare_jail_resources(chroot_dir: &Path, kernel_src: &Path)
                     )
                 })?;
         } else {
+            let kind = e.kind();
             return Err(e).with_context(|| {
                 format!(
                     "failed to hard-link kernel from {} to {}: {}",
                     kernel_src.display(),
                     kernel_dst.display(),
-                    e.kind()
+                    kind
                 )
             });
         }
