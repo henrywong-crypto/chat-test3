@@ -29,6 +29,8 @@ pub(crate) struct AppConfig {
     pub(crate) ssh_key_path: PathBuf,
     #[serde(default = "default_ssh_user")]
     pub(crate) ssh_user: String,
+    #[serde(default = "default_ssh_user_home")]
+    pub(crate) ssh_user_home: String,
     #[serde(default = "default_vm_host_key_path")]
     pub(crate) vm_host_key_path: PathBuf,
     #[serde(default)]
@@ -83,6 +85,9 @@ fn default_ssh_key_path() -> PathBuf {
 }
 fn default_ssh_user() -> String {
     "root".to_string()
+}
+fn default_ssh_user_home() -> String {
+    "/root".to_string()
 }
 fn default_vm_host_key_path() -> PathBuf {
     PathBuf::from("/var/lib/fc/vm_host_ed25519_key.pub")

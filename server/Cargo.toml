@@ -12,6 +12,7 @@ path = "src/main.rs"
 anyhow = "1.0.102"
 axum = { version = "0.8.8", features = ["multipart", "ws"] }
 bytes = "1.11.1"
+chat-history = { path = "../chat-history" }
 chat-relay = { path = "../chat-relay" }
 chrono = { version = "0.4", features = ["serde"] }
 config = "0.15.19"

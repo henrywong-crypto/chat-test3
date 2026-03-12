@@ -20,7 +20,7 @@ use vm_lifecycle::{
     find_user_rootfs, VmEntry, VmRegistry,
 };
 
-use chat_relay::{fetch_transcript, list_sessions};
+use chat_history::{fetch_chat_history, list_chat_sessions};
 
 use crate::{
     auth::User,
@@ -207,17 +207,18 @@ pub(crate) async fn list_chat_sessions_handler(
         Some(ip) => ip,
         None => return (StatusCode::NOT_FOUND, "Session not found or expired").into_response(),
     };
-    match list_sessions(
+    match list_chat_sessions(
         &guest_ip,
         &state.ssh_key_path,
         &state.ssh_user,
         &state.vm_host_key_path,
+        &state.ssh_user_home,
     )
     .await
     {
-        Ok(session_entries) => Json(session_entries).into_response(),
+        Ok(chat_sessions) => Json(chat_sessions).into_response(),
         Err(e) => {
-            error!(vm_id = %vm_id, "list_sessions failed: {e}");
+            error!(vm_id = %vm_id, "list_chat_sessions failed: {e}");
             (StatusCode::INTERNAL_SERVER_ERROR, "Internal error").into_response()
         }
     }
@@ -245,18 +246,19 @@ pub(crate) async fn get_chat_transcript_handler(
         Some(ip) => ip,
         None => return (StatusCode::NOT_FOUND, "Session not found or expired").into_response(),
     };
-    match fetch_transcript(
+    match fetch_chat_history(
         &guest_ip,
         &state.ssh_key_path,
         &state.ssh_user,
         &state.vm_host_key_path,
         &query.session_id,
+        &state.ssh_user_home,
     )
     .await
     {
-        Ok(transcript) => Json(transcript).into_response(),
+        Ok(chat_history) => Json(chat_history).into_response(),
         Err(e) => {
-            error!(vm_id = %vm_id, session_id = %query.session_id, "fetch_transcript failed: {e}");
+            error!(vm_id = %vm_id, session_id = %query.session_id, "fetch_chat_history failed: {e}");
             (StatusCode::NOT_FOUND, "Transcript not found").into_response()
         }
     }

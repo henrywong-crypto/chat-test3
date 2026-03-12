@@ -1,5 +1,6 @@
 [workspace]
 members = [
+    "chat-history",
     "chat-relay",
     "download",
     "firecracker-client",

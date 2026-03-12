@@ -835,17 +835,28 @@ dependencies = [
 ]
 
 [[package]]
+name = "chat-history"
+version = "0.1.0"
+dependencies = [
+ "anyhow",
+ "chrono",
+ "serde",
+ "serde_json",
+ "sftp-client",
+ "ssh-client",
+ "tokio",
+]
+
+[[package]]
 name = "chat-relay"
 version = "0.1.0"
 dependencies = [
  "anyhow",
  "bytes",
- "chrono",
  "futures",
  "russh",
  "serde",
  "serde_json",
- "sftp-client",
  "ssh-client",
  "tokio",
  "tokio-stream",
@@ -4464,6 +4475,7 @@ dependencies = [
  "anyhow",
  "axum",
  "bytes",
+ "chat-history",
  "chat-relay",
  "chrono",
  "config",
