@@ -5,13 +5,15 @@ use axum::response::sse::Event;
 use bytes::Bytes;
 use futures::stream::Stream;
 use russh::{client, Channel, ChannelMsg};
+use ssh_client::{connect_ssh, open_exec_channel, SshClient};
 use tokio::{sync::mpsc, time::timeout};
 use tokio_stream::wrappers::ReceiverStream;
 use tracing::info;
 
-use ssh_client::{connect_ssh, open_exec_channel, SshClient};
-
-const AGENT_CMD: &str = "bash -lc 'PYTHONUNBUFFERED=1 /usr/local/bin/uv run /opt/agent.py 2> >(tee -a \"$HOME/agent.log\" >&2)'";
+const AGENT_CMD: &str = "bash -lc '\
+    /usr/sbin/logrotate --state /dev/null <(printf \"%s/agent.log {\\n  rotate 2\\n  size 10M\\n  missingok\\n  nocreate\\n}\\n\" \"$HOME\"); \
+    PYTHONUNBUFFERED=1 /usr/local/bin/uv run /opt/agent.py 2> >(tee -a \"$HOME/agent.log\" >&2)\
+'";
 
 pub enum AgentMessage {
     Query { content: String, session_id: Option<String> },
@@ -40,7 +42,7 @@ async fn run_relay(
     mut inbound: mpsc::Receiver<AgentMessage>,
     event_tx: mpsc::Sender<anyhow::Result<Event>>,
     vm_id: String,
-) {
+) -> Result<()> {
     let mut line_buf = String::new();
     let mut pending_event_name: Option<String> = None;
     loop {
@@ -50,7 +52,7 @@ async fn run_relay(
                 match msg {
                     None | Some(AgentMessage::Abort) => break,
                     Some(AgentMessage::Query { content, session_id }) => {
-                        let payload = build_query_payload(&content, session_id.as_deref());
+                        let payload = build_query_payload(&content, session_id.as_deref())?;
                         let line = format!("{payload}\n");
                         if ssh_channel.data(Bytes::from(line).as_ref()).await.is_err() {
                             break;
@@ -92,6 +94,7 @@ async fn run_relay(
         }
     }
     info!(vm_id = %vm_id, "agent relay ended");
+    Ok(())
 }
 
 /// Parses one SSE line and forwards a data event if applicable.
@@ -114,10 +117,10 @@ async fn forward_sse_line(
     Ok(())
 }
 
-fn build_query_payload(content: &str, session_id: Option<&str>) -> String {
+fn build_query_payload(content: &str, session_id: Option<&str>) -> Result<String> {
     let v = match session_id {
         Some(id) => serde_json::json!({"type": "query", "content": content, "session_id": id}),
         None => serde_json::json!({"type": "query", "content": content}),
     };
-    serde_json::to_string(&v).unwrap_or_default()
+    Ok(serde_json::to_string(&v)?)
 }
