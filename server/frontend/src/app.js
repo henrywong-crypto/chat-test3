@@ -58,6 +58,10 @@ marked.use({
         : hljs.highlightAuto(text).value;
       return `<pre><code class="hljs language-${language ?? 'plaintext'}">${highlighted}</code></pre>`;
     };
+    r.link = ({ href, title, text }) => {
+      const titleAttr = title ? ` title="${title}"` : '';
+      return `<a href="${href}"${titleAttr} target="_blank" rel="noopener noreferrer">${text}</a>`;
+    };
     return r;
   })(),
 });
