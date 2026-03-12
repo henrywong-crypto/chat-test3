@@ -185,11 +185,11 @@ def process_agent_event(event, emitted_streaming_text: bool) -> None:
 
 
 def process_assistant_event(event, emitted_streaming_text: bool) -> None:
-    msg = getattr(event, 'message', None)
-    if not msg:
-        log(f"DBG assistant no .message; attrs={[a for a in dir(event) if not a.startswith('_')][:12]}")
-        return
-    content_blocks = getattr(msg, 'content', []) or []
+    # AssistantMessage exposes .content directly (no .message wrapper)
+    content_blocks = getattr(event, 'content', None) or []
+    if not content_blocks:
+        msg = getattr(event, 'message', None)
+        content_blocks = getattr(msg, 'content', []) or [] if msg else []
     block_types = [getattr(b, 'type', '?') for b in content_blocks]
     log(f"assistant  blocks={block_types}")
     if emitted_streaming_text:
