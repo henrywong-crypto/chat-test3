@@ -51,6 +51,7 @@ pub(crate) async fn handle_chat_stream(
     Response::builder()
         .header(header::CONTENT_TYPE, "text/event-stream")
         .header(header::CACHE_CONTROL, "no-cache")
+        .header("x-accel-buffering", "no")
         .body(body)
         .map_err(|e| anyhow!("failed to build SSE response: {e}"))
         .map_err(AppError::from)

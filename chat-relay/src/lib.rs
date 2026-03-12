@@ -49,10 +49,29 @@ async fn run_agent_relay(
     inbound: mpsc::Receiver<AgentMessage>,
     tx: mpsc::Sender<Bytes>,
 ) {
-    if let Err(e) =
+    // Keep the SSE connection alive while SSH is being established (can take up to 60s
+    // while waiting for the VM to become reachable). Without this, browsers close idle
+    // connections before the relay is ready.
+    let heartbeat_tx = tx.clone();
+    let heartbeat_task = tokio::spawn(async move {
+        let mut interval = interval(Duration::from_secs(15));
+        interval.tick().await;
+        loop {
+            interval.tick().await;
+            if heartbeat_tx
+                .send(Bytes::from_static(b": keep-alive\n\n"))
+                .await
+                .is_err()
+            {
+                break;
+            }
+        }
+    });
+    let relay_result =
         connect_agent_relay(&guest_ip, &ssh_key_path, &ssh_user, &vm_host_key_path, inbound, tx.clone())
-            .await
-    {
+            .await;
+    heartbeat_task.abort();
+    if let Err(e) = relay_result {
         let error_payload = serde_json::json!({ "message": e.to_string() });
         let error_event = format!(
             "event: error_event\ndata: {}\n\n",
