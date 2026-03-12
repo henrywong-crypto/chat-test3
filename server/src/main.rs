@@ -76,6 +76,7 @@ async fn main() -> Result<()> {
     .await?;
     deletion_task.await??;
     Ok(())
+}
 
 fn build_router(app_state: AppState, session_store: PostgresStore) -> Router {
     let session_layer = build_session_layer(session_store);
