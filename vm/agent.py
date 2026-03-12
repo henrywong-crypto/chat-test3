@@ -171,6 +171,21 @@ def _class_to_event_type(event) -> str | None:
     return None
 
 
+def _block_type(block) -> str | None:
+    """Derive content block type from class name when .type attribute is absent.
+
+    e.g. TextBlock -> 'text', ToolUseBlock -> 'tool_use', ThinkingBlock -> 'thinking'
+    """
+    name = type(block).__name__
+    if name == 'TextBlock':
+        return 'text'
+    if name == 'ToolUseBlock':
+        return 'tool_use'
+    if name == 'ThinkingBlock':
+        return 'thinking'
+    return None
+
+
 def process_agent_event(event, emitted_streaming_text: bool) -> None:
     event_type = get_field(event, 'type') or getattr(event, 'type', None) or _class_to_event_type(event)
     log(f"agent_event  type={event_type!r}  session_id={getattr(event, 'session_id', None)!r}")
@@ -190,15 +205,12 @@ def process_assistant_event(event, emitted_streaming_text: bool) -> None:
     if not content_blocks:
         msg = getattr(event, 'message', None)
         content_blocks = getattr(msg, 'content', []) or [] if msg else []
-    block_types = [getattr(b, 'type', '?') for b in content_blocks]
+    block_types = [getattr(b, 'type', type(b).__name__) for b in content_blocks]
     log(f"assistant  blocks={block_types}")
-    if content_blocks:
-        b0 = content_blocks[0]
-        log(f"DBG block0 class={type(b0).__name__} repr={repr(b0)[:120]}")
     if emitted_streaming_text:
         # Text already came via streaming deltas; only handle tool_use blocks.
         for block in content_blocks:
-            if getattr(block, 'type', None) == 'tool_use':
+            if (getattr(block, 'type', None) or _block_type(block)) == 'tool_use':
                 emit_sse('tool_start', {
                     'id': getattr(block, 'id', None),
                     'name': getattr(block, 'name', None),
@@ -207,7 +219,7 @@ def process_assistant_event(event, emitted_streaming_text: bool) -> None:
         return
     # No streaming text: emit the full message content now.
     for block in content_blocks:
-        block_type = getattr(block, 'type', None)
+        block_type = getattr(block, 'type', None) or _block_type(block)
         if block_type == 'text':
             text = getattr(block, 'text', '') or ''
             if text:
