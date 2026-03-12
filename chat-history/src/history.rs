@@ -70,7 +70,10 @@ pub(crate) fn parse_chat_history(contents: &str) -> ChatHistory {
 
 fn build_chat_message(entry: JournalEntry) -> Option<ChatMessage> {
     let role = entry.message.role.unwrap_or(entry.entry_type);
-    Some(ChatMessage { role, content: entry.message.content })
+    Some(ChatMessage {
+        role,
+        content: entry.message.content,
+    })
 }
 
 #[cfg(test)]
@@ -96,7 +99,9 @@ mod tests {
         let chat_history = parse_chat_history(FIXTURE_FIRST_USER);
         assert_eq!(chat_history.messages.len(), 1);
         assert_eq!(chat_history.messages[0].role, "user");
-        let Content::Text(ref text) = chat_history.messages[0].content else { panic!() };
+        let Content::Text(ref text) = chat_history.messages[0].content else {
+            panic!()
+        };
         assert_eq!(text, "first message");
     }
 
@@ -104,7 +109,9 @@ mod tests {
     fn test_tool_result_user_messages_are_included() {
         let chat_history = parse_chat_history(FIXTURE_TOOL_RESULT_USER);
         assert_eq!(chat_history.messages.len(), 1);
-        let Content::Blocks(ref blocks) = chat_history.messages[0].content else { panic!() };
+        let Content::Blocks(ref blocks) = chat_history.messages[0].content else {
+            panic!()
+        };
         assert_eq!(blocks[0].block_type, "tool_result");
     }
 
@@ -123,7 +130,9 @@ mod tests {
         .to_string();
         let chat_history = parse_chat_history(&jsonl);
         assert_eq!(chat_history.messages.len(), 1);
-        let Content::Blocks(ref blocks) = chat_history.messages[0].content else { panic!() };
+        let Content::Blocks(ref blocks) = chat_history.messages[0].content else {
+            panic!()
+        };
         assert_eq!(blocks.len(), 2);
         assert_eq!(blocks[0].block_type, "thinking");
         assert_eq!(blocks[1].text.as_deref(), Some("answer"));

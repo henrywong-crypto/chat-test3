@@ -4,8 +4,8 @@ mod history;
 mod project;
 mod session;
 
-pub use history::{ChatHistory, ChatMessage, fetch_chat_history};
-pub use session::{ChatSession, list_chat_sessions};
+pub use history::{fetch_chat_history, ChatHistory, ChatMessage};
+pub use session::{list_chat_sessions, ChatSession};
 
 #[derive(Deserialize, Serialize)]
 #[serde(untagged)]

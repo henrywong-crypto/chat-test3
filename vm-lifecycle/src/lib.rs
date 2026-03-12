@@ -40,7 +40,8 @@ pub struct VmBuildConfig {
 
 fn system_time_to_iso8601(t: SystemTime) -> Result<String> {
     let dt = OffsetDateTime::try_from(t).context("system time out of range")?;
-    dt.format(&Rfc3339).context("failed to format time as RFC 3339")
+    dt.format(&Rfc3339)
+        .context("failed to format time as RFC 3339")
 }
 
 pub fn build_vm_config(
@@ -53,12 +54,17 @@ pub fn build_vm_config(
         .map(|(role_name, cred)| build_mmds_with_iam(&vm_id, &role_name, &cred).map(|m| (m, true)))
         .transpose()?
         .unwrap_or_else(|| {
-            (serde_json::json!({ "latest": { "meta-data": { "instance-id": &vm_id } } }), false)
+            (
+                serde_json::json!({ "latest": { "meta-data": { "instance-id": &vm_id } } }),
+                false,
+            )
         });
     Ok(VmConfig {
         id: vm_id,
         kernel_path: vm_build_config.kernel_path.clone(),
-        rootfs_path: user_rootfs.map(|p| p.to_path_buf()).unwrap_or_else(|| vm_build_config.rootfs_path.clone()),
+        rootfs_path: user_rootfs
+            .map(|p| p.to_path_buf())
+            .unwrap_or_else(|| vm_build_config.rootfs_path.clone()),
         net_helper_path: vm_build_config.net_helper_path.clone(),
         vcpu_count: vm_build_config.vcpu_count,
         mem_size_mib: vm_build_config.mem_size_mib,

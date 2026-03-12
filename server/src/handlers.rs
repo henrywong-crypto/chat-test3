@@ -41,7 +41,10 @@ async fn get_csrf_token(session: &Session) -> Result<String> {
         .ok()
         .flatten()
         .unwrap_or_else(|| Uuid::new_v4().to_string().replace('-', ""));
-    session.insert("csrf_token", &token).await.context("failed to store CSRF token")?;
+    session
+        .insert("csrf_token", &token)
+        .await
+        .context("failed to store CSRF token")?;
     Ok(token)
 }
 
@@ -66,7 +69,9 @@ fn register_vm(vms: &VmRegistry, vm_id: String, vm_entry: VmEntry) -> Result<(),
 }
 
 fn find_user_vm_id(vms: &VmRegistry, user_id: Uuid) -> Result<Option<String>> {
-    let registry = vms.lock().map_err(|_| anyhow!("vm registry lock poisoned"))?;
+    let registry = vms
+        .lock()
+        .map_err(|_| anyhow!("vm registry lock poisoned"))?;
     Ok(registry
         .iter()
         .find(|(_, e)| e.user_id == user_id)
@@ -74,7 +79,9 @@ fn find_user_vm_id(vms: &VmRegistry, user_id: Uuid) -> Result<Option<String>> {
 }
 
 fn remove_user_vm(vms: &VmRegistry, user_id: Uuid) -> Result<()> {
-    let mut registry = vms.lock().map_err(|_| anyhow!("vm registry lock poisoned"))?;
+    let mut registry = vms
+        .lock()
+        .map_err(|_| anyhow!("vm registry lock poisoned"))?;
     let vm_ids: Vec<String> = registry
         .iter()
         .filter(|(_, e)| e.user_id == user_id)
@@ -180,7 +187,8 @@ pub(crate) async fn get_terminal_page(
         return Ok((StatusCode::NOT_FOUND, "Not found").into_response());
     }
     let db_user = upsert_user(&state.db, &user.email).await?;
-    let owned = state.vms
+    let owned = state
+        .vms
         .lock()
         .map_err(|_| anyhow!("vm registry lock poisoned"))?
         .get(&vm_id)

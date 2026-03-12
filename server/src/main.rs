@@ -217,7 +217,8 @@ async fn shutdown_signal(
     idle_vm_sweep_abort_handle: AbortHandle,
 ) {
     let ctrl_c = async {
-        signal::ctrl_c().await
+        signal::ctrl_c()
+            .await
             .unwrap_or_else(|e| tracing::error!("failed to install Ctrl+C handler: {e}"));
     };
     let terminate = async {

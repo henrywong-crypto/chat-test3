@@ -72,9 +72,15 @@ async fn run_agent_relay(
             }
         }
     });
-    let relay_result =
-        connect_agent_relay(&guest_ip, &ssh_key_path, &ssh_user, &vm_host_key_path, inbound, tx.clone())
-            .await;
+    let relay_result = connect_agent_relay(
+        &guest_ip,
+        &ssh_key_path,
+        &ssh_user,
+        &vm_host_key_path,
+        inbound,
+        tx.clone(),
+    )
+    .await;
     heartbeat_task.abort();
     if let Err(e) = relay_result {
         let error_payload = serde_json::json!({ "message": e.to_string() });
@@ -82,7 +88,11 @@ async fn run_agent_relay(
             "event: error_event\ndata: {}\n\n",
             serde_json::to_string(&error_payload).unwrap_or_default()
         );
-        let _ = timeout(Duration::from_secs(SEND_TIMEOUT_SECS), tx.send(Bytes::from(error_event))).await;
+        let _ = timeout(
+            Duration::from_secs(SEND_TIMEOUT_SECS),
+            tx.send(Bytes::from(error_event)),
+        )
+        .await;
     }
 }
 

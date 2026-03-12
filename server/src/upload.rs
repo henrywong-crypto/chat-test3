@@ -66,7 +66,12 @@ async fn extract_upload_fields(mut multipart: Multipart) -> Result<(String, Stri
     {
         let name = field.name().unwrap_or("").to_owned();
         if name == "csrf_token" {
-            csrf_token = Some(field.text().await.context("failed to read csrf_token field")?);
+            csrf_token = Some(
+                field
+                    .text()
+                    .await
+                    .context("failed to read csrf_token field")?,
+            );
         } else if name == "path" {
             remote_path = Some(field.text().await.context("failed to read path field")?);
         } else if name == "file" {

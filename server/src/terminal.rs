@@ -39,10 +39,14 @@ async fn run_terminal_session(ws: WebSocket, state: AppState, vm_id: String, use
     let Some(guest_ip) = find_vm_guest_ip_for_user(&state.vms, &vm_id, user_id)
         .inspect_err(|e| error!("vm registry error: {e}"))
         .ok()
-        .flatten() else { return };
+        .flatten()
+    else {
+        return;
+    };
     mark_vm_ws_connected(&state.vms, &vm_id)
         .unwrap_or_else(|e| error!("failed to mark VM ws connected: {e}"));
-    run_ssh_relay(&guest_ip, &state, ws).await
+    run_ssh_relay(&guest_ip, &state, ws)
+        .await
         .unwrap_or_else(|e| error!("terminal session error: {e}"));
     save_and_drop_vm(&state, &vm_id, user_id).await;
 }
@@ -72,7 +76,11 @@ async fn save_vm_rootfs_on_disconnect(
     let user_rootfs = build_user_rootfs_path(&state.user_rootfs_dir, user_id);
     let _guard = state.rootfs_lock.lock().await;
     info!("saving rootfs on disconnect");
-    vm_entry.vm.save_rootfs(&user_rootfs).await.context("failed to save rootfs")
+    vm_entry
+        .vm
+        .save_rootfs(&user_rootfs)
+        .await
+        .context("failed to save rootfs")
 }
 
 async fn run_ssh_relay(guest_ip: &str, state: &AppState, ws: WebSocket) -> Result<()> {
@@ -133,8 +141,12 @@ async fn handle_resize_message(ssh_channel: &mut Channel<Msg>, text: &str) -> Re
         return Ok(());
     };
     if json["type"] == "resize" {
-        let cols = json["cols"].as_u64().context("missing cols in resize message")? as u32;
-        let rows = json["rows"].as_u64().context("missing rows in resize message")? as u32;
+        let cols = json["cols"]
+            .as_u64()
+            .context("missing cols in resize message")? as u32;
+        let rows = json["rows"]
+            .as_u64()
+            .context("missing rows in resize message")? as u32;
         ssh_channel.window_change(cols, rows, 0, 0).await?;
     }
     Ok(())

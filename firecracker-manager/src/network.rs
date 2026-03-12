@@ -9,9 +9,7 @@ pub(crate) async fn create_tap(net_helper_path: &Path, tap_name: &str, tap_ip: &
         .status()
         .await?;
     if !status.success() {
-        bail!(
-            "net-helper tap-create failed for {tap_name}: {status}"
-        );
+        bail!("net-helper tap-create failed for {tap_name}: {status}");
     }
     Ok(())
 }

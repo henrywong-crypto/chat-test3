@@ -133,7 +133,8 @@ async fn wait_for_process_exit(pid: u32) {
 }
 
 pub async fn create_vm(vm_config: &VmConfig) -> Result<Vm> {
-    let net_idx = acquire_net_idx()?.context("no free network indices (254 VMs already running)")?;
+    let net_idx =
+        acquire_net_idx()?.context("no free network indices (254 VMs already running)")?;
     let tap_name = format_tap_name(net_idx);
     let chroot_dir = build_chroot_dir(&vm_config.jailer.chroot_base, &vm_config.id);
     let result = launch_vm(vm_config, net_idx, &tap_name, &chroot_dir).await;

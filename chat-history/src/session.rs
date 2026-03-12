@@ -71,11 +71,14 @@ async fn build_chat_sessions(
     let mut chat_sessions = Vec::new();
     for dir_entry in &dir_entries {
         let name = dir_entry.file_name();
-        let Some(session_id) = name.strip_suffix(".jsonl") else { continue };
+        let Some(session_id) = name.strip_suffix(".jsonl") else {
+            continue;
+        };
         if session_id.starts_with("agent-") {
             continue;
         }
-        chat_sessions.push(build_chat_session_with_title(sftp, dir_entry, session_id, project_dir).await?);
+        chat_sessions
+            .push(build_chat_session_with_title(sftp, dir_entry, session_id, project_dir).await?);
     }
     Ok(chat_sessions)
 }
@@ -86,12 +89,21 @@ async fn build_chat_session_with_title(
     session_id: &str,
     project_dir: &str,
 ) -> Result<ChatSession> {
-    let mtime = dir_entry.metadata().mtime.context("missing mtime on session file")?;
+    let mtime = dir_entry
+        .metadata()
+        .mtime
+        .context("missing mtime on session file")?;
     let last_active_at = DateTime::from_timestamp(mtime as i64, 0)
         .context("mtime is out of range for a timestamp")?;
     let path = format!("{project_dir}/{session_id}.jsonl");
-    let title = fetch_session_title(sftp, &path).await?.unwrap_or_else(|| session_id.to_owned());
-    Ok(ChatSession { session_id: session_id.to_owned(), title, last_active_at })
+    let title = fetch_session_title(sftp, &path)
+        .await?
+        .unwrap_or_else(|| session_id.to_owned());
+    Ok(ChatSession {
+        session_id: session_id.to_owned(),
+        title,
+        last_active_at,
+    })
 }
 
 async fn fetch_session_title(sftp: &SftpSession, path: &str) -> Result<Option<String>> {
@@ -111,14 +123,25 @@ mod tests {
 
     #[test]
     fn test_title_is_last_user_message() {
-        let jsonl = [FIXTURE_FIRST_USER, FIXTURE_TOOL_RESULT_USER, FIXTURE_LAST_USER].join("\n");
-        assert_eq!(extract_last_user_title(&jsonl).as_deref(), Some("last message"));
+        let jsonl = [
+            FIXTURE_FIRST_USER,
+            FIXTURE_TOOL_RESULT_USER,
+            FIXTURE_LAST_USER,
+        ]
+        .join("\n");
+        assert_eq!(
+            extract_last_user_title(&jsonl).as_deref(),
+            Some("last message")
+        );
     }
 
     #[test]
     fn test_title_skips_tool_result_user_entries() {
         let jsonl = [FIXTURE_FIRST_USER, FIXTURE_TOOL_RESULT_USER].join("\n");
-        assert_eq!(extract_last_user_title(&jsonl).as_deref(), Some("first message"));
+        assert_eq!(
+            extract_last_user_title(&jsonl).as_deref(),
+            Some("first message")
+        );
     }
 
     #[test]

@@ -210,8 +210,12 @@ impl<E: Into<anyhow::Error>> From<E> for AppError {
 }
 
 pub(crate) fn mark_vm_ws_connected(vms: &VmRegistry, vm_id: &str) -> Result<()> {
-    let mut registry = vms.lock().map_err(|_| anyhow!("vm registry lock poisoned"))?;
-    registry.get_mut(vm_id).map(|entry| entry.ws_connected = true);
+    let mut registry = vms
+        .lock()
+        .map_err(|_| anyhow!("vm registry lock poisoned"))?;
+    registry
+        .get_mut(vm_id)
+        .map(|entry| entry.ws_connected = true);
     Ok(())
 }
 
@@ -220,12 +224,19 @@ pub(crate) fn find_vm_guest_ip_for_user(
     vm_id: &str,
     user_id: Uuid,
 ) -> Result<Option<String>> {
-    let registry = vms.lock().map_err(|_| anyhow!("vm registry lock poisoned"))?;
-    Ok(registry.get(vm_id).filter(|e| e.user_id == user_id).map(|e| e.vm.guest_ip()))
+    let registry = vms
+        .lock()
+        .map_err(|_| anyhow!("vm registry lock poisoned"))?;
+    Ok(registry
+        .get(vm_id)
+        .filter(|e| e.user_id == user_id)
+        .map(|e| e.vm.guest_ip()))
 }
 
 pub(crate) fn find_user_vm_guest_ip(vms: &VmRegistry, user_id: Uuid) -> Result<Option<String>> {
-    let registry = vms.lock().map_err(|_| anyhow!("vm registry lock poisoned"))?;
+    let registry = vms
+        .lock()
+        .map_err(|_| anyhow!("vm registry lock poisoned"))?;
     Ok(registry
         .values()
         .find(|e| e.user_id == user_id)

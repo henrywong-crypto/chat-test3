@@ -35,7 +35,8 @@ pub(crate) async fn handle_chat_stream(
     mark_vm_ws_connected(&state.vms, &vm_id)
         .unwrap_or_else(|e| error!("failed to mark VM ws connected: {e}"));
     let (agent_tx, agent_rx) = mpsc::channel::<AgentMessage>(4);
-    state.chat_senders
+    state
+        .chat_senders
         .lock()
         .map_err(|e| anyhow!("chat senders lock poisoned: {e}"))?
         .insert(vm_id.clone(), agent_tx);

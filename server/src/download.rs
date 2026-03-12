@@ -38,7 +38,9 @@ pub(crate) async fn download_file_handler(
         Some(ip) => ip,
         None => match find_user_vm_guest_ip(&state.vms, db_user.id)? {
             Some(ip) => ip,
-            None => return Ok((StatusCode::NOT_FOUND, "Session not found or expired").into_response()),
+            None => {
+                return Ok((StatusCode::NOT_FOUND, "Session not found or expired").into_response())
+            }
         },
     };
     let mut ssh_handle = connect_ssh(
