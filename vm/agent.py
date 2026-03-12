@@ -192,6 +192,9 @@ def process_assistant_event(event, emitted_streaming_text: bool) -> None:
         content_blocks = getattr(msg, 'content', []) or [] if msg else []
     block_types = [getattr(b, 'type', '?') for b in content_blocks]
     log(f"assistant  blocks={block_types}")
+    if content_blocks:
+        b0 = content_blocks[0]
+        log(f"DBG block0 class={type(b0).__name__} repr={repr(b0)[:120]}")
     if emitted_streaming_text:
         # Text already came via streaming deltas; only handle tool_use blocks.
         for block in content_blocks:
