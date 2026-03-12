@@ -94,11 +94,7 @@ fn run_cmd(prog: &str, args: &[&str]) -> Result<()> {
         .status()
         .with_context(|| format!("failed to run {prog}"))?;
     if !status.success() {
-        bail!(
-            "{prog} {:?} failed: exit {}",
-            args,
-            status.code().unwrap_or(-1)
-        );
+        bail!("{prog} {:?} failed: {status}", args);
     }
     Ok(())
 }

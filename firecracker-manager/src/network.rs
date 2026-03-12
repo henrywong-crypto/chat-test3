@@ -1,4 +1,4 @@
-use anyhow::{bail, Result};
+use anyhow::{bail, Context, Result};
 use std::path::Path;
 use tokio::process::Command;
 use tracing::warn;
@@ -10,8 +10,7 @@ pub(crate) async fn create_tap(net_helper_path: &Path, tap_name: &str, tap_ip: &
         .await?;
     if !status.success() {
         bail!(
-            "net-helper tap-create failed for {tap_name}: exit {}",
-            status.code().unwrap_or(-1)
+            "net-helper tap-create failed for {tap_name}: {status}"
         );
     }
     Ok(())
@@ -45,18 +44,21 @@ pub async fn setup_host_networking(net_helper_path: &Path) {
         warn!("could not determine host interface, skipping NAT setup");
         return;
     };
-    match Command::new(net_helper_path)
-        .args(["setup-nat", &host_iface])
+    run_nat_setup(net_helper_path, &host_iface)
+        .await
+        .unwrap_or_else(|e| warn!("{e}"));
+}
+
+async fn run_nat_setup(net_helper_path: &Path, host_iface: &str) -> Result<()> {
+    let status = Command::new(net_helper_path)
+        .args(["setup-nat", host_iface])
         .status()
         .await
-    {
-        Ok(s) if s.success() => {}
-        Ok(s) => warn!(
-            "net-helper setup-nat failed: exit {}",
-            s.code().unwrap_or(-1)
-        ),
-        Err(e) => warn!("failed to run net-helper setup-nat: {e}"),
+        .context("failed to run net-helper setup-nat")?;
+    if !status.success() {
+        bail!("net-helper setup-nat failed: {status}");
     }
+    Ok(())
 }
 
 async fn fetch_host_iface_name() -> Option<String> {

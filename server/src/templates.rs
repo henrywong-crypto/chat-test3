@@ -43,11 +43,11 @@ fn LoginPage() -> impl IntoView {
                 <title>"WebCode"</title>
                 <link rel="stylesheet" href="/static/styles.css"/>
             </head>
-            <body class="bg-base-100 flex items-center justify-center min-h-screen">
-                <div class="card bg-base-200 w-80 shadow-xl">
+            <body class="login-bg flex items-center justify-center min-h-screen">
+                <div class="card login-card w-80 shadow-xl">
                     <div class="card-body gap-6">
-                        <h1 class="font-bold text-sm">"WebCode"</h1>
-                        <a href="/login/cognito" class="btn btn-primary">"Sign in with Cognito"</a>
+                        <h1 class="font-bold text-sm">"Web"</h1>
+                        <a href="/login/cognito" class="btn login-btn">"Sign in"</a>
                     </div>
                 </div>
             </body>
@@ -75,7 +75,7 @@ fn TerminalPage(
                 <title>"WebCode"</title>
                 <link rel="stylesheet" href=styles_css_href/>
             </head>
-            <body class="flex h-screen overflow-hidden bg-white text-gray-900">
+            <body class="flex h-screen overflow-hidden">
                 <div
                     id="app-config"
                     hidden
@@ -93,7 +93,7 @@ fn TerminalPage(
                         <FilesPanel/>
                     </div>
                     <div id="chat-view" class="flex flex-col flex-1 min-h-0">
-                        <div id="chat-scroll" class="flex-1 overflow-y-auto bg-white">
+                        <div id="chat-scroll" class="flex-1 overflow-y-auto">
                             <div id="chat-messages" class="max-w-3xl mx-auto py-4 px-4 space-y-3"/>
                         </div>
                         <ChatInputArea/>
@@ -109,28 +109,70 @@ fn TerminalPage(
 fn IconRail(csrf_token: String, has_user_rootfs: bool) -> impl IntoView {
     view! {
         <div class="icon-rail">
-            <div class="traffic-lights">
-                <div class="traffic-light" style="background:#ff5f57"/>
-                <div class="traffic-light" style="background:#febc2e"/>
-                <div class="traffic-light" style="background:#28c840"/>
-            </div>
-            <button id="tab-chat-icon" class="icon-btn icon-active" title="Chat">"💬"</button>
-            <button id="tab-shell-icon" class="icon-btn" title="Shell">"⌨"</button>
-            <button id="tab-files-icon" class="icon-btn" title="Files">"📁"</button>
+            <button id="tab-chat-icon" class="icon-btn icon-active" title="Chat">
+                <svg xmlns="http://www.w3.org/2000/svg" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                    <path d="M21 11.5a8.38 8.38 0 0 1-.9 3.8 8.5 8.5 0 0 1-7.6 4.7 8.38 8.38 0 0 1-3.8-.9L3 21l1.9-5.7a8.38 8.38 0 0 1-.9-3.8 8.5 8.5 0 0 1 4.7-7.6 8.38 8.38 0 0 1 3.8-.9h.5a8.48 8.48 0 0 1 8 8v.5z"/>
+                    <circle cx="9" cy="11" r="0.5" fill="currentColor"/>
+                    <circle cx="12" cy="11" r="0.5" fill="currentColor"/>
+                    <circle cx="15" cy="11" r="0.5" fill="currentColor"/>
+                </svg>
+            </button>
+            <button id="tab-shell-icon" class="icon-btn" title="Terminal & Files">
+                <svg xmlns="http://www.w3.org/2000/svg" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                    <rect x="3" y="3" width="18" height="18" rx="2" ry="2"/>
+                    <path d="M7 8l3 3-3 3"/>
+                    <path d="M13 14h4"/>
+                </svg>
+            </button>
             <div class="icon-rail-spacer"/>
+            <button id="theme-toggle-btn" class="icon-btn" title="Toggle theme">
+                <span class="theme-icon sun-icon">
+                    <svg xmlns="http://www.w3.org/2000/svg" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                        <circle cx="12" cy="12" r="5"/>
+                        <line x1="12" y1="1" x2="12" y2="3"/>
+                        <line x1="12" y1="21" x2="12" y2="23"/>
+                        <line x1="4.22" y1="4.22" x2="5.64" y2="5.64"/>
+                        <line x1="18.36" y1="18.36" x2="19.78" y2="19.78"/>
+                        <line x1="1" y1="12" x2="3" y2="12"/>
+                        <line x1="21" y1="12" x2="23" y2="12"/>
+                        <line x1="4.22" y1="19.78" x2="5.64" y2="18.36"/>
+                        <line x1="18.36" y1="5.64" x2="19.78" y2="4.22"/>
+                    </svg>
+                </span>
+                <span class="theme-icon moon-icon">
+                    <svg xmlns="http://www.w3.org/2000/svg" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                        <path d="M21 12.79A9 9 0 1 1 11.21 3 7 7 0 0 0 21 12.79z"/>
+                    </svg>
+                </span>
+            </button>
             {has_user_rootfs.then(|| view! {
-                <button id="reset-btn" class="icon-btn" title="Reset environment" style="color:#ef4444">"⟳"</button>
-                <dialog id="reset-dialog" class="modal">
-                    <div class="modal-box">
-                        <p class="font-semibold text-sm mb-3">"Reset to base environment?"</p>
-                        <p class="text-sm opacity-70 mb-4">"Your current session will end and a fresh VM will start from the base image."</p>
-                        <div class="modal-action mt-0">
+                <button id="reset-btn" class="icon-btn reset-icon-btn" title="Reset environment">
+                    <svg xmlns="http://www.w3.org/2000/svg" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round">
+                        <path d="M23 4v6h-6"/>
+                        <path d="M1 20v-6h6"/>
+                        <path d="M3.51 9a9 9 0 0 1 14.85-3.36L23 10"/>
+                        <path d="M20.49 15a9 9 0 0 1-14.85 3.36L1 14"/>
+                    </svg>
+                </button>
+                <dialog id="reset-dialog" class="modal reset-dialog">
+                    <div class="modal-box reset-modal-box">
+                        <div class="reset-warning-icon">
+                            <svg xmlns="http://www.w3.org/2000/svg" width="48" height="48" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                                <circle cx="12" cy="12" r="10"></circle>
+                                <line x1="12" y1="8" x2="12" y2="12"></line>
+                                <line x1="12" y1="16" x2="12.01" y2="16"></line>
+                            </svg>
+                        </div>
+                        <h3 class="reset-dialog-title">"Reset Environment?"</h3>
+                        <p class="reset-dialog-text">"This will permanently delete all your files and reset your workspace to a clean state."</p>
+                        <p class="reset-dialog-warning">"Please backup your files before proceeding. This action cannot be undone."</p>
+                        <div class="modal-action reset-modal-actions">
                             <form method="dialog">
-                                <button class="btn btn-sm btn-ghost">"Cancel"</button>
+                                <button class="btn btn-sm reset-cancel-btn">"Cancel"</button>
                             </form>
                             <form method="post" action="/rootfs/delete">
                                 <input type="hidden" name="csrf_token" value=csrf_token/>
-                                <button type="submit" class="btn btn-sm btn-error">"Reset"</button>
+                                <button type="submit" class="btn btn-sm reset-confirm-btn">"Reset Environment"</button>
                             </form>
                         </div>
                     </div>
@@ -139,7 +181,13 @@ fn IconRail(csrf_token: String, has_user_rootfs: bool) -> impl IntoView {
                     </form>
                 </dialog>
             })}
-            <a href="/logout" class="icon-btn" title="Logout">"⎋"</a>
+            <a href="/logout" class="icon-btn" title="Logout">
+                <svg xmlns="http://www.w3.org/2000/svg" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                    <path d="M9 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h4"/>
+                    <polyline points="16 17 21 12 16 7"/>
+                    <line x1="21" y1="12" x2="9" y2="12"/>
+                </svg>
+            </a>
         </div>
     }
 }
@@ -150,7 +198,11 @@ fn SessionPanel() -> impl IntoView {
         <div class="session-panel">
             <div class="session-panel-header">
                 <span>"Chats"</span>
-                <button id="chat-history-refresh-btn" class="icon-btn" style="width:24px;height:24px;font-size:12px" title="Refresh">"↺"</button>
+                <button id="chat-history-refresh-btn" class="icon-btn" style="width:28px;height:28px;" title="Refresh">
+                    <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round">
+                        <path d="M21.5 2v6h-6M2.5 22v-6h6M2 11.5a10 10 0 0 1 18.8-4.3M22 12.5a10 10 0 0 1-18.8 4.2"/>
+                    </svg>
+                </button>
             </div>
             <div id="chat-sessions-list" class="flex-1 overflow-y-auto py-1"/>
             <div class="session-panel-footer">
@@ -165,6 +217,11 @@ fn ChatHeader() -> impl IntoView {
     view! {
         <div class="chat-header">
             <div id="chat-title" class="chat-title">"New Chat"</div>
+            <button id="files-toggle-btn" class="icon-btn" style="width:32px;height:32px;display:none" title="Show files">
+                <svg xmlns="http://www.w3.org/2000/svg" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                    <path d="M22 19a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h5l2 3h9a2 2 0 0 1 2 2z"></path>
+                </svg>
+            </button>
         </div>
     }
 }
@@ -183,7 +240,14 @@ fn FilesPanel() -> impl IntoView {
             <div id="files-list" class="flex-1 overflow-y-auto"/>
             <div class="flex items-center gap-2 px-3 py-2 border-t border-base-300 shrink-0">
                 <input type="file" id="fm-file-input" class="hidden"/>
-                <label for="fm-file-input" class="btn btn-outline btn-xs flex-1">"↑ Upload here"</label>
+                <label for="fm-file-input" class="btn btn-outline btn-xs flex-1 files-upload-btn">
+                    <svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round">
+                        <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"></path>
+                        <polyline points="17 8 12 3 7 8"></polyline>
+                        <line x1="12" y1="3" x2="12" y2="15"></line>
+                    </svg>
+                    <span>"Upload"</span>
+                </label>
                 <span id="files-upload-status" class="text-xs"/>
             </div>
         </div>
@@ -196,7 +260,11 @@ fn ChatInputArea() -> impl IntoView {
         <div class="input-area">
             <div id="chat-attachments" class="hidden flex-wrap gap-1 pb-2"/>
             <div class="input-row">
-                <button id="chat-attach-btn" class="icon-btn" style="width:28px;height:28px;font-size:14px;flex-shrink:0" title="Attach file">"📎"</button>
+                <button id="chat-attach-btn" class="icon-btn" style="width:32px;height:32px;flex-shrink:0" title="Attach file">
+                    <svg xmlns="http://www.w3.org/2000/svg" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round">
+                        <path d="m21.44 11.05-9.19 9.19a6 6 0 0 1-8.49-8.49l8.57-8.57A4 4 0 1 1 18 8.84l-8.59 8.57a2 2 0 0 1-2.83-2.83l8.49-8.48"></path>
+                    </svg>
+                </button>
                 <input type="file" id="chat-attach-input" class="hidden" multiple=true/>
                 <textarea
                     id="chat-input"

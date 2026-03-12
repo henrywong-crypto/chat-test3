@@ -69,6 +69,26 @@ const fmUploadDir = config.uploadDir;
 const fmUploadAction = config.uploadAction;
 const wsBase = (location.protocol === 'https:' ? 'wss:' : 'ws:') + '//' + location.host;
 
+// ── Theme Management ──────────────────────────────────────────────────────────
+
+function initTheme() {
+  const savedTheme = localStorage.getItem('theme') || 'dark';
+  document.documentElement.setAttribute('data-theme', savedTheme);
+}
+
+function toggleTheme() {
+  const html = document.documentElement;
+  const currentTheme = html.getAttribute('data-theme') || 'dark';
+  const newTheme = currentTheme === 'dark' ? 'light' : 'dark';
+  html.setAttribute('data-theme', newTheme);
+  localStorage.setItem('theme', newTheme);
+}
+
+// Initialize theme before page loads
+initTheme();
+
+document.getElementById('theme-toggle-btn')?.addEventListener('click', toggleTheme);
+
 // ── Terminal ──────────────────────────────────────────────────────────────────
 
 const term = new Terminal({ cursorBlink: true, theme: { background: '#000000' } });
@@ -103,7 +123,9 @@ function initShell() {
 }
 
 // Default to Chat tab — shell connects lazily on first visit
-switchToChat();
+document.addEventListener('DOMContentLoaded', () => {
+  switchToChat();
+});
 
 document.getElementById('reset-btn')?.addEventListener('click', () => {
   document.getElementById('reset-dialog').showModal();
@@ -112,8 +134,9 @@ document.getElementById('reset-btn')?.addEventListener('click', () => {
 let fmCurrentPath = fmUploadDir;
 let fmOpened = false;
 
-document.getElementById('tab-files-icon').addEventListener('click', toggleFiles);
+// Files panel now integrated with terminal tab
 document.getElementById('files-close-btn').addEventListener('click', closePanel);
+document.getElementById('files-toggle-btn').addEventListener('click', toggleFiles);
 document.addEventListener('keydown', e => {
   if (e.key === 'Escape') {
     closePanel();
@@ -123,14 +146,18 @@ document.addEventListener('keydown', e => {
 
 function closePanel() {
   const panel = document.getElementById('files-panel');
+  const toggleBtn = document.getElementById('files-toggle-btn');
   panel.classList.remove('flex');
   panel.classList.add('hidden');
+  toggleBtn.style.display = 'flex';
 }
 
 function toggleFiles() {
   const panel = document.getElementById('files-panel');
+  const toggleBtn = document.getElementById('files-toggle-btn');
   const isOpen = panel.classList.toggle('flex');
   panel.classList.toggle('hidden', !isOpen);
+  toggleBtn.style.display = isOpen ? 'none' : 'flex';
   if (isOpen && !fmOpened) {
     fmOpened = true;
     loadDir(fmCurrentPath);
@@ -422,6 +449,28 @@ function switchToChat() {
   chatView.classList.add('flex');
   document.getElementById('tab-chat-icon').classList.add('icon-active');
   document.getElementById('tab-shell-icon').classList.remove('icon-active');
+  // Hide files panel when switching to chat
+  const filesPanel = document.getElementById('files-panel');
+  filesPanel.classList.remove('flex');
+  filesPanel.classList.add('hidden');
+  // Hide files toggle button in chat view
+  const toggleBtn = document.getElementById('files-toggle-btn');
+  toggleBtn.style.display = 'none';
+  // Show session panel when switching to chat
+  const sessionPanel = document.querySelector('.session-panel');
+  sessionPanel.style.display = 'flex';
+  // Restore chat title
+  if (chatSessionId) {
+    const activeItem = document.querySelector(`.session-item[data-id="${chatSessionId}"]`);
+    if (activeItem) {
+      const title = activeItem.querySelector('.session-item-title')?.textContent || 'Chat';
+      updateChatTitle(title);
+    } else {
+      updateChatTitle('New Chat');
+    }
+  } else {
+    updateChatTitle('New Chat');
+  }
   loadChatHistory();
   if (!chatEs) connectChatSse();
 }
@@ -435,8 +484,23 @@ function switchToShell() {
   shellView.classList.add('flex');
   document.getElementById('tab-shell-icon').classList.add('icon-active');
   document.getElementById('tab-chat-icon').classList.remove('icon-active');
+  // Hide session panel when switching to terminal
+  const sessionPanel = document.querySelector('.session-panel');
+  sessionPanel.style.display = 'none';
+  // Update title to Terminal
+  updateChatTitle('Terminal');
   initShell();
   fitAddon.fit();
+  // Auto-open files panel with terminal
+  const filesPanel = document.getElementById('files-panel');
+  const toggleBtn = document.getElementById('files-toggle-btn');
+  filesPanel.classList.remove('hidden');
+  filesPanel.classList.add('flex');
+  toggleBtn.style.display = 'none';
+  if (!fmOpened) {
+    fmOpened = true;
+    loadDir(fmCurrentPath);
+  }
 }
 
 function connectChatSse() {
@@ -642,12 +706,15 @@ function attachMessageCopyButton(msgEl, rawText) {
   const btn = document.createElement('button');
   btn.className = 'msg-copy-btn ml-auto text-xs';
   btn.title = 'Copy message';
-  btn.textContent = '⎘';
+  btn.innerHTML = '<svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="9" y="9" width="13" height="13" rx="2" ry="2"></rect><path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"></path></svg>';
   btn.addEventListener('click', () => {
     navigator.clipboard.writeText(rawText).then(() => {
-      btn.textContent = '✓';
+      btn.innerHTML = '<svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><polyline points="20 6 9 17 4 12"></polyline></svg>';
       btn.style.color = '#34d399';
-      setTimeout(() => { btn.textContent = '⎘'; btn.style.color = ''; }, 2000);
+      setTimeout(() => {
+        btn.innerHTML = '<svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="9" y="9" width="13" height="13" rx="2" ry="2"></rect><path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"></path></svg>';
+        btn.style.color = '';
+      }, 2000);
     });
   });
   header.appendChild(btn);
@@ -966,12 +1033,15 @@ function summarizeInput(input) {
 function buildInlineCopyBtn(text) {
   const btn = document.createElement('button');
   btn.className = 'inline-copy-btn';
-  btn.textContent = 'Copy';
+  btn.innerHTML = '<svg xmlns="http://www.w3.org/2000/svg" width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="9" y="9" width="13" height="13" rx="2" ry="2"></rect><path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"></path></svg>';
   btn.addEventListener('click', () => {
     navigator.clipboard.writeText(text).then(() => {
-      btn.textContent = '✓';
+      btn.innerHTML = '<svg xmlns="http://www.w3.org/2000/svg" width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><polyline points="20 6 9 17 4 12"></polyline></svg>';
       btn.style.color = '#34d399';
-      setTimeout(() => { btn.textContent = 'Copy'; btn.style.color = ''; }, 2000);
+      setTimeout(() => {
+        btn.innerHTML = '<svg xmlns="http://www.w3.org/2000/svg" width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="9" y="9" width="13" height="13" rx="2" ry="2"></rect><path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"></path></svg>';
+        btn.style.color = '';
+      }, 2000);
     });
   });
   return btn;
@@ -1056,14 +1126,17 @@ function injectCodeCopyButtons(container) {
     pre.style.position = 'relative';
     const btn = document.createElement('button');
     btn.className = 'code-copy-btn';
-    btn.textContent = 'Copy';
+    btn.innerHTML = '<svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="9" y="9" width="13" height="13" rx="2" ry="2"></rect><path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"></path></svg>';
     pre.appendChild(btn);
     btn.addEventListener('click', () => {
       const code = pre.querySelector('code')?.textContent ?? '';
       navigator.clipboard.writeText(code).then(() => {
-        btn.textContent = 'Copied!';
+        btn.innerHTML = '<svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><polyline points="20 6 9 17 4 12"></polyline></svg>';
         btn.style.color = '#34d399';
-        setTimeout(() => { btn.textContent = 'Copy'; btn.style.color = ''; }, 2000);
+        setTimeout(() => {
+          btn.innerHTML = '<svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="9" y="9" width="13" height="13" rx="2" ry="2"></rect><path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"></path></svg>';
+          btn.style.color = '';
+        }, 2000);
       });
     });
   });

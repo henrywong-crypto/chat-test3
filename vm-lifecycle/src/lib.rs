@@ -49,20 +49,16 @@ pub fn build_vm_config(
     user_rootfs: Option<&Path>,
 ) -> Result<VmConfig> {
     let vm_id = Uuid::new_v4().to_string();
-    let (mmds_metadata, mmds_imds_compat) = match iam_creds {
-        Some((role_name, cred)) => (build_mmds_with_iam(&vm_id, &role_name, &cred)?, true),
-        None => (
-            serde_json::json!({ "latest": { "meta-data": { "instance-id": &vm_id } } }),
-            false,
-        ),
-    };
+    let (mmds_metadata, mmds_imds_compat) = iam_creds
+        .map(|(role_name, cred)| build_mmds_with_iam(&vm_id, &role_name, &cred).map(|m| (m, true)))
+        .transpose()?
+        .unwrap_or_else(|| {
+            (serde_json::json!({ "latest": { "meta-data": { "instance-id": &vm_id } } }), false)
+        });
     Ok(VmConfig {
         id: vm_id,
         kernel_path: vm_build_config.kernel_path.clone(),
-        rootfs_path: match user_rootfs {
-            Some(p) => p.to_path_buf(),
-            None => vm_build_config.rootfs_path.clone(),
-        },
+        rootfs_path: user_rootfs.map(|p| p.to_path_buf()).unwrap_or_else(|| vm_build_config.rootfs_path.clone()),
         net_helper_path: vm_build_config.net_helper_path.clone(),
         vcpu_count: vm_build_config.vcpu_count,
         mem_size_mib: vm_build_config.mem_size_mib,
@@ -111,28 +107,29 @@ pub async fn fetch_host_iam_credentials() -> Option<(String, ImdsCredential)> {
         .await
         .map_err(|e| warn!("failed to fetch host credentials: {e}"))
         .ok()?;
-    let role_name = match std::env::var("AWS_ROLE_NAME") {
-        Ok(name) => name,
-        Err(_) => "vm-role".to_string(),
-    };
-    let expiration = match credentials.expiry() {
-        Some(t) => match system_time_to_iso8601(t) {
-            Ok(s) => s,
-            Err(e) => {
-                warn!("failed to format credential expiry: {e}");
-                "2099-01-01T00:00:00Z".to_string()
-            }
-        },
-        None => "2099-01-01T00:00:00Z".to_string(),
-    };
+    let role_name = std::env::var("AWS_ROLE_NAME").unwrap_or_else(|_| "vm-role".to_string());
+    let expiration = format_credential_expiry(&credentials);
     Some((role_name, build_imds_credential(&credentials, expiration)))
 }
 
+fn format_credential_expiry(credentials: &Credentials) -> String {
+    credentials
+        .expiry()
+        .map(|t| {
+            system_time_to_iso8601(t).unwrap_or_else(|e| {
+                warn!("failed to format credential expiry: {e}");
+                "2099-01-01T00:00:00Z".to_string()
+            })
+        })
+        .unwrap_or_else(|| "2099-01-01T00:00:00Z".to_string())
+}
+
 fn build_imds_credential(credentials: &Credentials, expiration: String) -> ImdsCredential {
+    let session_token = credentials.session_token().unwrap_or("");
     ImdsCredential::new(
         credentials.access_key_id(),
         credentials.secret_access_key(),
-        credentials.session_token().unwrap_or(""),
+        session_token,
         expiration,
     )
 }
@@ -152,17 +149,20 @@ pub async fn refresh_all_vm_mmds(vms: &VmRegistry) {
             .collect()
     };
     for (vm_id, socket_path) in vm_targets {
-        let metadata = match build_mmds_with_iam(&vm_id, &role_name, &cred) {
-            Ok(metadata) => metadata,
-            Err(e) => {
-                warn!(vm_id = %vm_id, "failed to build mmds metadata for refresh: {e}");
-                continue;
-            }
-        };
-        if let Err(e) = put_mmds(&socket_path, &metadata).await {
-            warn!(vm_id = %vm_id, "failed to refresh mmds: {e}");
-        }
+        refresh_vm_mmds(&vm_id, &socket_path, &role_name, &cred)
+            .await
+            .unwrap_or_else(|e| warn!(vm_id = %vm_id, "failed to refresh mmds: {e}"));
     }
+}
+
+async fn refresh_vm_mmds(
+    vm_id: &str,
+    socket_path: &Path,
+    role_name: &str,
+    cred: &ImdsCredential,
+) -> Result<()> {
+    let metadata = build_mmds_with_iam(vm_id, role_name, cred)?;
+    put_mmds(socket_path, &metadata).await
 }
 
 const CONNECT_TIMEOUT: Duration = Duration::from_secs(60);
@@ -205,16 +205,26 @@ pub async fn save_all_vm_rootfs(
         "saving rootfs for {} running vm(s) before shutdown",
         vm_entries.len()
     );
-    if let Err(e) = tokio::fs::create_dir_all(user_rootfs_dir).await {
-        error!("failed to create user rootfs dir on shutdown: {e}");
-        return;
-    }
+    save_vm_rootfs_to_dir(vm_entries, user_rootfs_dir, rootfs_lock)
+        .await
+        .unwrap_or_else(|e| error!("failed to save rootfs on shutdown: {e}"));
+}
+
+async fn save_vm_rootfs_to_dir(
+    vm_entries: Vec<(String, VmEntry)>,
+    user_rootfs_dir: &Path,
+    rootfs_lock: &AsyncMutex<()>,
+) -> Result<()> {
+    tokio::fs::create_dir_all(user_rootfs_dir)
+        .await
+        .context("failed to create user rootfs dir on shutdown")?;
     let _guard = rootfs_lock.lock().await;
     for (vm_id, vm_entry) in vm_entries {
         let rootfs_path = build_user_rootfs_path(user_rootfs_dir, vm_entry.user_id);
         info!(user_id = %vm_entry.user_id, vm_id = %vm_id, dest = %rootfs_path.display(), "saving rootfs on shutdown");
-        if let Err(e) = vm_entry.vm.save_rootfs(&rootfs_path).await {
-            error!(user_id = %vm_entry.user_id, vm_id = %vm_id, "failed to save rootfs on shutdown: {e}");
-        }
+        vm_entry.vm.save_rootfs(&rootfs_path)
+            .await
+            .unwrap_or_else(|e| error!(user_id = %vm_entry.user_id, vm_id = %vm_id, "failed to save rootfs on shutdown: {e}"));
     }
+    Ok(())
 }

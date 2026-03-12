@@ -1,3 +1,4 @@
+use anyhow::{Context, Result};
 use firecracker_manager::{create_vm, setup_host_networking, JailerConfig, VmConfig};
 use nix::{sys::signal::kill, unistd::Pid};
 use serde::Deserialize;
@@ -21,11 +22,11 @@ struct TestConfig {
     jailer: Option<JailerTestConfig>,
 }
 
-fn read_test_config() -> TestConfig {
+fn read_test_config() -> Result<TestConfig> {
     let config_path = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../config.toml");
     let content = std::fs::read_to_string(&config_path)
-        .unwrap_or_else(|_| panic!("could not read {}", config_path.display()));
-    toml::from_str(&content).unwrap_or_else(|e| panic!("invalid config.toml: {e}"))
+        .with_context(|| format!("could not read {}", config_path.display()))?;
+    toml::from_str(&content).context("invalid config.toml")
 }
 
 fn build_test_vm_config(test_config: &TestConfig) -> VmConfig {
@@ -46,11 +47,11 @@ fn build_test_vm_config(test_config: &TestConfig) -> VmConfig {
 
 #[tokio::test]
 #[ignore = "requires firecracker binary, kernel, rootfs, and KVM access"]
-async fn test_vm_boots() {
-    let test_config = read_test_config();
+async fn test_vm_boots() -> Result<()> {
+    let test_config = read_test_config()?;
     setup_host_networking(&test_config.net_helper_path).await;
     let vm_config = build_test_vm_config(&test_config);
-    let vm_guard = create_vm(&vm_config).await.expect("VM failed to start");
+    let vm_guard = create_vm(&vm_config).await?;
     assert!(
         kill(Pid::from_raw(vm_guard.pid as i32), None).is_ok(),
         "VM process is not running"
@@ -60,16 +61,17 @@ async fn test_vm_boots() {
         "guest IP should not be empty"
     );
     // VmGuard drops here, killing the VM and cleaning up TAP/files
+    Ok(())
 }
 
 #[tokio::test]
 #[ignore = "requires jailer binary, firecracker binary, kernel, rootfs, KVM access, and root privileges"]
-async fn test_vm_boots_with_jailer() {
-    let test_config = read_test_config();
+async fn test_vm_boots_with_jailer() -> Result<()> {
+    let test_config = read_test_config()?;
     let jailer_test_config = test_config
         .jailer
         .as_ref()
-        .expect("[jailer] section required in config.toml for this test");
+        .context("[jailer] section required in config.toml for this test")?;
 
     setup_host_networking(&test_config.net_helper_path).await;
 
@@ -100,7 +102,7 @@ async fn test_vm_boots_with_jailer() {
         }),
     };
 
-    let vm_guard = create_vm(&vm_config).await.expect("VM failed to start");
+    let vm_guard = create_vm(&vm_config).await?;
 
     assert!(
         kill(Pid::from_raw(vm_guard.pid as i32), None).is_ok(),
@@ -123,4 +125,5 @@ async fn test_vm_boots_with_jailer() {
         "chroot dir should be removed after VM drops: {}",
         chroot_dir.display()
     );
+    Ok(())
 }
