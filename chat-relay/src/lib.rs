@@ -118,7 +118,7 @@ async fn run_relay(
                         break;
                     }
                     Some(AgentMessage::Query { content, session_id }) => {
-                        info!("sending query to agent  session_id={session_id:?}  content_len={}", content.len());
+                        info!("sending query to agent  content_len={}", content.len());
                         let payload = build_query_payload(&content, session_id.as_deref())?;
                         let line = format!("{payload}\n");
                         ssh_channel.data(Bytes::from(line).as_ref()).await?;
