@@ -50,9 +50,10 @@ fn node_available() -> bool {
 }
 
 fn run_command(command: &mut Command) {
-    let status = command
-        .status()
-        .unwrap_or_else(|e| panic!("failed to run {:?}: {e}", command.get_program()));
+    let status = match command.status() {
+        Ok(status) => status,
+        Err(e) => panic!("failed to run {:?}: {e}", command.get_program()),
+    };
     if !status.success() {
         panic!("{:?} exited with {status}", command.get_program());
     }

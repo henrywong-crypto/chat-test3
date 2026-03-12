@@ -68,7 +68,7 @@ pub(crate) async fn list_files_handler(
         .read_dir(&real_path)
         .await
         .context("failed to read remote directory")?;
-    let entries = collect_file_entries(&sftp, &real_path, read_dir.collect()).await;
+    let entries = collect_file_entries(&sftp, &real_path, read_dir.collect()).await?;
     Ok(Json(ListResponse { entries }).into_response())
 }
 
@@ -76,7 +76,7 @@ async fn collect_file_entries(
     sftp: &SftpSession,
     dir_path: &str,
     raw_entries: Vec<DirEntry>,
-) -> Vec<FileEntry> {
+) -> Result<Vec<FileEntry>> {
     let mut dirs: Vec<FileEntry> = Vec::new();
     let mut files: Vec<FileEntry> = Vec::new();
     for entry in raw_entries {
@@ -92,9 +92,9 @@ async fn collect_file_entries(
             sftp.symlink_metadata(&child_path)
                 .await
                 .map(|m| m.file_type().is_dir())
-                .unwrap_or(false)
+                .context("failed to stat directory entry")?
         };
-        let size = metadata.size.unwrap_or(0);
+        let size = metadata.size.context("missing file size")?;
         let file_entry = FileEntry { name, is_dir, size };
         if is_dir {
             dirs.push(file_entry);
@@ -105,5 +105,5 @@ async fn collect_file_entries(
     dirs.sort_by(|a, b| a.name.cmp(&b.name));
     files.sort_by(|a, b| a.name.cmp(&b.name));
     dirs.extend(files);
-    dirs
+    Ok(dirs)
 }

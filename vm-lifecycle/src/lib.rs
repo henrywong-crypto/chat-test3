@@ -59,9 +59,10 @@ pub fn build_vm_config(
     Ok(VmConfig {
         id: vm_id,
         kernel_path: vm_build_config.kernel_path.clone(),
-        rootfs_path: user_rootfs
-            .map(|p| p.to_path_buf())
-            .unwrap_or_else(|| vm_build_config.rootfs_path.clone()),
+        rootfs_path: match user_rootfs {
+            Some(p) => p.to_path_buf(),
+            None => vm_build_config.rootfs_path.clone(),
+        },
         net_helper_path: vm_build_config.net_helper_path.clone(),
         vcpu_count: vm_build_config.vcpu_count,
         mem_size_mib: vm_build_config.mem_size_mib,
@@ -110,15 +111,20 @@ pub async fn fetch_host_iam_credentials() -> Option<(String, ImdsCredential)> {
         .await
         .map_err(|e| warn!("failed to fetch host credentials: {e}"))
         .ok()?;
-    let role_name = std::env::var("AWS_ROLE_NAME").unwrap_or_else(|_| "vm-role".to_string());
-    let expiration = credentials
-        .expiry()
-        .and_then(|t| {
-            system_time_to_iso8601(t)
-                .map_err(|e| warn!("failed to format credential expiry: {e}"))
-                .ok()
-        })
-        .unwrap_or_else(|| "2099-01-01T00:00:00Z".to_string());
+    let role_name = match std::env::var("AWS_ROLE_NAME") {
+        Ok(name) => name,
+        Err(_) => "vm-role".to_string(),
+    };
+    let expiration = match credentials.expiry() {
+        Some(t) => match system_time_to_iso8601(t) {
+            Ok(s) => s,
+            Err(e) => {
+                warn!("failed to format credential expiry: {e}");
+                "2099-01-01T00:00:00Z".to_string()
+            }
+        },
+        None => "2099-01-01T00:00:00Z".to_string(),
+    };
     Some((role_name, build_imds_credential(&credentials, expiration)))
 }
 

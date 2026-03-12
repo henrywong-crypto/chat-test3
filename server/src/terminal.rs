@@ -1,3 +1,4 @@
+use anyhow::Context;
 use axum::{
     extract::{
         ws::{Message, WebSocket, WebSocketUpgrade},
@@ -137,8 +138,8 @@ async fn run_ssh_relay(guest_ip: &str, state: &AppState, ws: WebSocket) -> anyho
 async fn handle_resize_message(ssh_channel: &mut Channel<Msg>, text: &str) -> anyhow::Result<()> {
     if let Ok(json) = serde_json::from_str::<serde_json::Value>(text) {
         if json["type"] == "resize" {
-            let cols = json["cols"].as_u64().unwrap_or(80) as u32;
-            let rows = json["rows"].as_u64().unwrap_or(24) as u32;
+            let cols = json["cols"].as_u64().context("missing cols in resize message")? as u32;
+            let rows = json["rows"].as_u64().context("missing rows in resize message")? as u32;
             ssh_channel.window_change(cols, rows, 0, 0).await?;
         }
     }

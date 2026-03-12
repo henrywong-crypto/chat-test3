@@ -1,8 +1,7 @@
 use anyhow::Context;
 use axum::{
     body::Body,
-    http::{header, HeaderValue, Response, StatusCode},
-    response::IntoResponse,
+    http::{header, HeaderValue, Response},
 };
 use bytes::Bytes;
 use futures::{channel::mpsc, SinkExt};
@@ -21,7 +20,7 @@ pub fn build_streaming_zip_response(
     dir_path: String,
     upload_dir: String,
     filename: &str,
-) -> Response<Body> {
+) -> anyhow::Result<Response<Body>> {
     // zip bytes → HTTP body (bounded for backpressure)
     let (zip_tx, zip_rx) = mpsc::channel::<Result<Bytes, io::Error>>(8);
     // file data → zip writer (bounded to limit SFTP read-ahead)
@@ -32,12 +31,12 @@ pub fn build_streaming_zip_response(
 
     let content_disposition =
         HeaderValue::from_str(&format!("attachment; filename=\"{filename}\""))
-            .unwrap_or_else(|_| HeaderValue::from_static("attachment"));
+            .context("failed to build content disposition header")?;
     Response::builder()
         .header(header::CONTENT_TYPE, "application/zip")
         .header(header::CONTENT_DISPOSITION, content_disposition)
         .body(Body::from_stream(zip_rx))
-        .unwrap_or_else(|_| StatusCode::INTERNAL_SERVER_ERROR.into_response())
+        .context("failed to build zip response")
 }
 
 async fn collect_zip_files(

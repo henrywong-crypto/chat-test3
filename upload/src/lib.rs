@@ -31,7 +31,10 @@ async fn resolve_upload_path(
     upload_dir: &str,
 ) -> Result<String> {
     let path = Path::new(remote_path);
-    let parent = path.parent().and_then(|p| p.to_str()).unwrap_or(".");
+    let parent = path
+        .parent()
+        .and_then(|p| p.to_str())
+        .context("upload path has no valid parent directory")?;
     let filename = path
         .file_name()
         .and_then(|f| f.to_str())

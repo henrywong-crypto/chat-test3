@@ -22,7 +22,7 @@ pub async fn build_streaming_file_response(
     let filename = path
         .file_name()
         .and_then(|name| name.to_str())
-        .unwrap_or("download");
+        .context("remote path has no filename")?;
     let file = sftp
         .open(path_str)
         .await
@@ -33,7 +33,7 @@ pub async fn build_streaming_file_response(
     };
     let content_disposition =
         HeaderValue::from_str(&format!("attachment; filename=\"{filename}\""))
-            .unwrap_or_else(|_| HeaderValue::from_static("attachment"));
+            .context("failed to build content disposition header")?;
     let response = Response::builder()
         .header(header::CONTENT_TYPE, "application/octet-stream")
         .header(header::CONTENT_DISPOSITION, content_disposition)

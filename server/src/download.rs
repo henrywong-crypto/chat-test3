@@ -62,14 +62,14 @@ pub(crate) async fn download_file_handler(
         let dirname = real_path
             .rsplit('/')
             .next()
-            .unwrap_or("download")
+            .context("path has no final component")?
             .to_owned();
         Ok(build_streaming_zip_response(
             sftp,
             real_path,
             state.upload_dir.clone(),
             &format!("{dirname}.zip"),
-        ))
+        )?)
     } else {
         Ok(
             build_streaming_file_response(sftp, std::path::Path::new(&real_path))

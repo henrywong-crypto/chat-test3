@@ -313,7 +313,10 @@ async fn extract_chat_upload_fields(mut multipart: Multipart) -> Result<(String,
                 csrf_token = Some(field.text().await.map_err(|e| anyhow!("{e}"))?);
             }
             Some("file") => {
-                let orig_name = field.file_name().unwrap_or("upload").to_owned();
+                let orig_name = field
+                    .file_name()
+                    .context("file upload missing filename")?
+                    .to_owned();
                 filename = Some(orig_name);
                 file_bytes = Some(field.bytes().await.map_err(|e| anyhow!("{e}"))?.to_vec());
             }

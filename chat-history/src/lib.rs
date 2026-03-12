@@ -1,4 +1,4 @@
-use anyhow::{anyhow, Result};
+use anyhow::{anyhow, Context, Result};
 use chrono::{DateTime, TimeZone, Utc};
 use serde::{Deserialize, Serialize};
 use sftp_client::{open_sftp_session, DirEntry, SftpSession};
@@ -99,11 +99,15 @@ async fn build_chat_sessions(
 ) -> Result<Vec<ChatSession>> {
     let mut chat_sessions = Vec::new();
     for dir_entry in &dir_entries {
-        if let Some(chat_session) =
-            build_chat_session_with_title(sftp, dir_entry, project_dir).await?
-        {
-            chat_sessions.push(chat_session);
+        let name = dir_entry.file_name();
+        let session_id = match name.strip_suffix(".jsonl") {
+            Some(id) => id.to_owned(),
+            None => continue,
+        };
+        if session_id.starts_with("agent-") {
+            continue;
         }
+        chat_sessions.push(build_chat_session_with_title(sftp, dir_entry, &session_id, project_dir).await?);
     }
     Ok(chat_sessions)
 }
@@ -111,25 +115,20 @@ async fn build_chat_sessions(
 async fn build_chat_session_with_title(
     sftp: &SftpSession,
     dir_entry: &DirEntry,
+    session_id: &str,
     project_dir: &str,
-) -> Result<Option<ChatSession>> {
-    let session_id = match dir_entry.file_name().strip_suffix(".jsonl") {
-        Some(id) => id.to_owned(),
-        None => return Ok(None),
-    };
-    if session_id.starts_with("agent-") {
-        return Ok(None);
-    }
-    let mtime = dir_entry.metadata().mtime.unwrap_or(0);
+) -> Result<ChatSession> {
+    let mtime = dir_entry.metadata().mtime.context("missing mtime on session file")?;
     let last_active_at = Utc
         .timestamp_opt(mtime as i64, 0)
         .single()
-        .unwrap_or_default();
+        .context("mtime is out of range for a timestamp")?;
     let path = format!("{project_dir}/{session_id}.jsonl");
-    let title = fetch_session_title(sftp, &path)
-        .await?
-        .unwrap_or_else(|| session_id.clone());
-    Ok(Some(ChatSession { session_id, title, last_active_at }))
+    let title = match fetch_session_title(sftp, &path).await? {
+        Some(title) => title,
+        None => session_id.to_owned(),
+    };
+    Ok(ChatSession { session_id: session_id.to_owned(), title, last_active_at })
 }
 
 async fn fetch_session_title(sftp: &SftpSession, path: &str) -> Result<Option<String>> {
