@@ -20,7 +20,7 @@ use axum::{
 };
 use firecracker_manager::{cleanup_stale_vms, setup_host_networking};
 use time::Duration;
-use tokio::{net::TcpListener, signal, sync::oneshot, task::AbortHandle, time};
+use tokio::{net::TcpListener, signal, sync::oneshot, task::AbortHandle};
 use tower_sessions::{cookie::SameSite, ExpiredDeletion, Expiry, SessionManagerLayer};
 use tower_sessions_sqlx_store::PostgresStore;
 use tracing::info;
@@ -179,7 +179,7 @@ async fn serve_router(
     )
     .await;
     let _ = shutdown_tx.send(());
-    let _ = time::timeout(time::Duration::from_secs(5), serve_task).await;
+    let _ = tokio::time::timeout(tokio::time::Duration::from_secs(5), serve_task).await;
     save_all_vm_rootfs(
         &app_state.vms,
         &app_state.user_rootfs_dir,
