@@ -10,7 +10,7 @@ use serde::Deserialize;
 use sftp_client::{open_sftp_session, SftpSession};
 use ssh_client::connect_ssh;
 use std::time::{Instant, SystemTime, UNIX_EPOCH};
-use store::upsert_user;
+use store::{upsert_user, User as DbUser};
 use tokio::io::AsyncWriteExt;
 use tower_sessions::Session;
 use tracing::{error, info};
@@ -35,19 +35,23 @@ pub(crate) struct CsrfForm {
 }
 
 async fn get_csrf_token(session: &Session) -> Result<String> {
-    if let Ok(Some(token)) = session.get::<String>("csrf_token").await {
-        return Ok(token);
-    }
-    let token = Uuid::new_v4().to_string().replace('-', "");
+    let token = session
+        .get::<String>("csrf_token")
+        .await
+        .ok()
+        .flatten()
+        .unwrap_or_else(|| Uuid::new_v4().to_string().replace('-', ""));
     session.insert("csrf_token", &token).await.context("failed to store CSRF token")?;
     Ok(token)
 }
 
 async fn validate_csrf(session: &Session, submitted: &str) -> bool {
-    match session.get::<String>("csrf_token").await {
-        Ok(Some(token)) => token == submitted,
-        _ => false,
-    }
+    session
+        .get::<String>("csrf_token")
+        .await
+        .ok()
+        .flatten()
+        .is_some_and(|token| token == submitted)
 }
 
 fn validate_vm_id(id: &str) -> bool {
@@ -91,10 +95,18 @@ pub(crate) async fn get_or_create_terminal(
 ) -> Result<Response, AppError> {
     let db_user = upsert_user(&state.db, &user.email).await?;
 
-    if let Some(vm_id) = find_user_vm_id(&state.vms, db_user.id)? {
-        return Ok(Redirect::to(&format!("/terminal/{vm_id}")).into_response());
-    }
+    let Some(vm_id) = find_user_vm_id(&state.vms, db_user.id)? else {
+        return check_vm_limit_and_create(user, session, state, db_user).await;
+    };
+    Ok(Redirect::to(&format!("/terminal/{vm_id}")).into_response())
+}
 
+async fn check_vm_limit_and_create(
+    user: User,
+    session: Session,
+    state: AppState,
+    db_user: DbUser,
+) -> Result<Response, AppError> {
     let vm_count = state
         .vms
         .lock()
@@ -164,27 +176,23 @@ pub(crate) async fn get_terminal_page(
     session: Session,
     Path(vm_id): Path<String>,
     State(state): State<AppState>,
-) -> Response {
+) -> Result<Response, AppError> {
     if !validate_vm_id(&vm_id) {
-        return (StatusCode::NOT_FOUND, "Not found").into_response();
+        return Ok((StatusCode::NOT_FOUND, "Not found").into_response());
     }
-    let db_user = match upsert_user(&state.db, &user.email).await {
-        Ok(db_user) => db_user,
-        Err(_) => return (StatusCode::INTERNAL_SERVER_ERROR, "Internal error").into_response(),
-    };
-    let owned = match state.vms.lock() {
-        Ok(registry) => registry.get(&vm_id).map(|e| e.user_id == db_user.id).unwrap_or(false),
-        Err(_) => return (StatusCode::INTERNAL_SERVER_ERROR, "Internal error").into_response(),
-    };
+    let db_user = upsert_user(&state.db, &user.email).await?;
+    let owned = state.vms
+        .lock()
+        .map_err(|_| anyhow!("vm registry lock poisoned"))?
+        .get(&vm_id)
+        .map(|e| e.user_id == db_user.id)
+        .unwrap_or(false);
     if !owned {
-        return (StatusCode::NOT_FOUND, "Not found").into_response();
+        return Ok((StatusCode::NOT_FOUND, "Not found").into_response());
     }
-    let csrf_token = match get_csrf_token(&session).await {
-        Ok(token) => token,
-        Err(_) => return (StatusCode::INTERNAL_SERVER_ERROR, "Internal error").into_response(),
-    };
+    let csrf_token = get_csrf_token(&session).await?;
     let has_user_rootfs = find_user_rootfs(&state.user_rootfs_dir, db_user.id).is_some();
-    Html(render_terminal_page(
+    Ok(Html(render_terminal_page(
         &vm_id,
         &csrf_token,
         &state.upload_dir,
@@ -192,27 +200,22 @@ pub(crate) async fn get_terminal_page(
         app_js_version(),
         styles_css_version(),
     ))
-    .into_response()
+    .into_response())
 }
 
 pub(crate) async fn list_chat_sessions_handler(
     user: User,
     Path(vm_id): Path<String>,
     State(state): State<AppState>,
-) -> impl IntoResponse {
+) -> Result<Response, AppError> {
     if !validate_vm_id(&vm_id) {
-        return (StatusCode::NOT_FOUND, "Not found").into_response();
+        return Ok((StatusCode::NOT_FOUND, "Not found").into_response());
     }
-    let db_user = match upsert_user(&state.db, &user.email).await {
-        Ok(db_user) => db_user,
-        Err(_) => return (StatusCode::INTERNAL_SERVER_ERROR, "Internal error").into_response(),
+    let db_user = upsert_user(&state.db, &user.email).await?;
+    let Some(guest_ip) = find_vm_guest_ip_for_user(&state.vms, &vm_id, db_user.id)? else {
+        return Ok((StatusCode::NOT_FOUND, "Session not found or expired").into_response());
     };
-    let guest_ip = match find_vm_guest_ip_for_user(&state.vms, &vm_id, db_user.id) {
-        Ok(Some(ip)) => ip,
-        Ok(None) => return (StatusCode::NOT_FOUND, "Session not found or expired").into_response(),
-        Err(_) => return (StatusCode::INTERNAL_SERVER_ERROR, "Internal error").into_response(),
-    };
-    match list_chat_sessions(
+    Ok(list_chat_sessions(
         &guest_ip,
         &state.ssh_key_path,
         &state.ssh_user,
@@ -220,14 +223,11 @@ pub(crate) async fn list_chat_sessions_handler(
         &state.ssh_user_home,
     )
     .await
-    {
-        Ok(chat_sessions) => Json(chat_sessions).into_response(),
-        Err(e) => {
-            error!(vm_id = %vm_id, "list_chat_sessions failed: {e}");
-            (StatusCode::INTERNAL_SERVER_ERROR, "Internal error").into_response()
-        }
-    }
-}
+    .map(|sessions| Json(sessions).into_response())
+    .unwrap_or_else(|e| {
+        error!(vm_id = %vm_id, "list_chat_sessions failed: {e}");
+        (StatusCode::INTERNAL_SERVER_ERROR, "Internal error").into_response()
+    }))
 
 #[derive(Deserialize)]
 pub(crate) struct TranscriptQuery {
@@ -239,20 +239,15 @@ pub(crate) async fn get_chat_transcript_handler(
     Path(vm_id): Path<String>,
     Query(query): Query<TranscriptQuery>,
     State(state): State<AppState>,
-) -> impl IntoResponse {
+) -> Result<Response, AppError> {
     if !validate_vm_id(&vm_id) {
-        return (StatusCode::NOT_FOUND, "Not found").into_response();
+        return Ok((StatusCode::NOT_FOUND, "Not found").into_response());
     }
-    let db_user = match upsert_user(&state.db, &user.email).await {
-        Ok(db_user) => db_user,
-        Err(_) => return (StatusCode::INTERNAL_SERVER_ERROR, "Internal error").into_response(),
+    let db_user = upsert_user(&state.db, &user.email).await?;
+    let Some(guest_ip) = find_vm_guest_ip_for_user(&state.vms, &vm_id, db_user.id)? else {
+        return Ok((StatusCode::NOT_FOUND, "Session not found or expired").into_response());
     };
-    let guest_ip = match find_vm_guest_ip_for_user(&state.vms, &vm_id, db_user.id) {
-        Ok(Some(ip)) => ip,
-        Ok(None) => return (StatusCode::NOT_FOUND, "Session not found or expired").into_response(),
-        Err(_) => return (StatusCode::INTERNAL_SERVER_ERROR, "Internal error").into_response(),
-    };
-    match fetch_chat_history(
+    Ok(fetch_chat_history(
         &guest_ip,
         &state.ssh_key_path,
         &state.ssh_user,
@@ -261,14 +256,11 @@ pub(crate) async fn get_chat_transcript_handler(
         &state.ssh_user_home,
     )
     .await
-    {
-        Ok(chat_history) => Json(chat_history).into_response(),
-        Err(e) => {
-            error!(vm_id = %vm_id, session_id = %query.session_id, "fetch_chat_history failed: {e}");
-            (StatusCode::NOT_FOUND, "Transcript not found").into_response()
-        }
-    }
-}
+    .map(|history| Json(history).into_response())
+    .unwrap_or_else(|e| {
+        error!(vm_id = %vm_id, session_id = %query.session_id, "fetch_chat_history failed: {e}");
+        (StatusCode::NOT_FOUND, "Transcript not found").into_response()
+    }))
 
 pub(crate) async fn handle_chat_upload(
     user: User,
@@ -285,9 +277,8 @@ pub(crate) async fn handle_chat_upload(
     if !validate_csrf(&session, &csrf_token).await {
         return Ok((StatusCode::FORBIDDEN, "Forbidden").into_response());
     }
-    let guest_ip = match find_vm_guest_ip_for_user(&state.vms, &vm_id, db_user.id)? {
-        Some(ip) => ip,
-        None => return Ok((StatusCode::NOT_FOUND, "Session not found or expired").into_response()),
+    let Some(guest_ip) = find_vm_guest_ip_for_user(&state.vms, &vm_id, db_user.id)? else {
+        return Ok((StatusCode::NOT_FOUND, "Session not found or expired").into_response());
     };
     let remote_path = build_chat_upload_path(&filename);
     info!("uploading chat attachment via sftp");
@@ -308,19 +299,16 @@ async fn extract_chat_upload_fields(mut multipart: Multipart) -> Result<(String,
     let mut filename: Option<String> = None;
     let mut file_bytes: Option<Vec<u8>> = None;
     while let Some(field) = multipart.next_field().await.map_err(|e| anyhow!("{e}"))? {
-        match field.name() {
-            Some("csrf_token") => {
-                csrf_token = Some(field.text().await.map_err(|e| anyhow!("{e}"))?);
-            }
-            Some("file") => {
-                let orig_name = field
-                    .file_name()
-                    .context("file upload missing filename")?
-                    .to_owned();
-                filename = Some(orig_name);
-                file_bytes = Some(field.bytes().await.map_err(|e| anyhow!("{e}"))?.to_vec());
-            }
-            _ => {}
+        let name = field.name().unwrap_or("").to_owned();
+        if name == "csrf_token" {
+            csrf_token = Some(field.text().await.map_err(|e| anyhow!("{e}"))?);
+        } else if name == "file" {
+            let orig_name = field
+                .file_name()
+                .context("file upload missing filename")?
+                .to_owned();
+            filename = Some(orig_name);
+            file_bytes = Some(field.bytes().await.map_err(|e| anyhow!("{e}"))?.to_vec());
         }
     }
     let csrf_token = csrf_token.ok_or_else(|| anyhow!("missing csrf_token field"))?;

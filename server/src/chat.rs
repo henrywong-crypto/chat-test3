@@ -1,3 +1,4 @@
+use anyhow::anyhow;
 use axum::{
     body::Body,
     extract::{Path, State},
@@ -16,77 +17,44 @@ use uuid::Uuid;
 
 use crate::{
     auth::User,
-    state::{find_vm_guest_ip_for_user, mark_vm_ws_connected, AppState},
+    state::{find_vm_guest_ip_for_user, mark_vm_ws_connected, AppError, AppState},
 };
 
 pub(crate) async fn handle_chat_stream(
     user: User,
     Path(vm_id): Path<String>,
     State(state): State<AppState>,
-) -> Response {
+) -> Result<Response, AppError> {
     if Uuid::parse_str(&vm_id).is_err() {
-        return (StatusCode::NOT_FOUND, "Not found").into_response();
+        return Ok((StatusCode::NOT_FOUND, "Not found").into_response());
     }
-    let db_user = match upsert_user(&state.db, &user.email).await {
-        Ok(db_user) => db_user,
-        Err(e) => {
-            error!("upsert_user failed: {e}");
-            return (StatusCode::INTERNAL_SERVER_ERROR, "Internal error").into_response();
-        }
+    let db_user = upsert_user(&state.db, &user.email).await?;
+    let Some(guest_ip) = find_vm_guest_ip_for_user(&state.vms, &vm_id, db_user.id)? else {
+        return Ok((StatusCode::NOT_FOUND, "VM not found").into_response());
     };
-    let guest_ip = match find_vm_guest_ip_for_user(&state.vms, &vm_id, db_user.id) {
-        Ok(Some(guest_ip)) => guest_ip,
-        Ok(None) => {
-            warn!("chat stream: vm not found");
-            return (StatusCode::NOT_FOUND, "VM not found").into_response();
-        }
-        Err(e) => {
-            error!("vm registry error: {e}");
-            return (StatusCode::INTERNAL_SERVER_ERROR, "Internal error").into_response();
-        }
-    };
-    if let Err(e) = mark_vm_ws_connected(&state.vms, &vm_id) {
-        error!("failed to mark VM ws connected: {e}");
-        return (StatusCode::INTERNAL_SERVER_ERROR, "Internal error").into_response();
-    }
+    mark_vm_ws_connected(&state.vms, &vm_id)
+        .unwrap_or_else(|e| error!("failed to mark VM ws connected: {e}"));
     let (agent_tx, agent_rx) = mpsc::channel::<AgentMessage>(4);
-    match state.chat_senders.lock() {
-        Ok(mut senders) => {
-            senders.insert(vm_id.clone(), agent_tx);
-        }
-        Err(e) => {
-            error!("chat senders lock poisoned: {e}");
-            return (StatusCode::INTERNAL_SERVER_ERROR, "Internal error").into_response();
-        }
-    }
-    let event_stream = match start_agent_relay(
+    state.chat_senders
+        .lock()
+        .map_err(|e| anyhow!("chat senders lock poisoned: {e}"))?
+        .insert(vm_id.clone(), agent_tx);
+    let event_stream = start_agent_relay(
         &guest_ip,
         &state.ssh_key_path,
         &state.ssh_user,
         &state.vm_host_key_path,
         agent_rx,
     )
-    .await
-    {
-        Ok(event_stream) => event_stream,
-        Err(e) => {
-            error!("start_agent_relay failed: {e}");
-            return (StatusCode::INTERNAL_SERVER_ERROR, "Internal error").into_response();
-        }
-    };
+    .await?;
     info!("chat sse stream opened");
     let body = Body::from_stream(event_stream.map(Ok::<_, std::convert::Infallible>));
-    match Response::builder()
+    Response::builder()
         .header(header::CONTENT_TYPE, "text/event-stream")
         .header(header::CACHE_CONTROL, "no-cache")
         .body(body)
-    {
-        Ok(response) => response,
-        Err(e) => {
-            error!("failed to build SSE response: {e}");
-            (StatusCode::INTERNAL_SERVER_ERROR, "Internal error").into_response()
-        }
-    }
+        .map_err(|e| anyhow!("failed to build SSE response: {e}"))
+        .map_err(AppError::from)
 }
 
 #[derive(Deserialize)]
@@ -109,9 +77,8 @@ pub(crate) async fn handle_chat_query(
     if !validate_csrf(&session, &body.csrf_token).await {
         return (StatusCode::FORBIDDEN, "Forbidden").into_response();
     }
-    let agent_tx = match find_agent_sender(&state, &vm_id) {
-        Some(agent_tx) => agent_tx,
-        None => return (StatusCode::NOT_FOUND, "No active chat stream").into_response(),
+    let Some(agent_tx) = find_agent_sender(&state, &vm_id) else {
+        return (StatusCode::NOT_FOUND, "No active chat stream").into_response();
     };
     let agent_message = AgentMessage::Query {
         content: body.content,
@@ -142,9 +109,8 @@ pub(crate) async fn handle_chat_abort(
     if !validate_csrf(&session, &body.csrf_token).await {
         return (StatusCode::FORBIDDEN, "Forbidden").into_response();
     }
-    let agent_tx = match find_agent_sender(&state, &vm_id) {
-        Some(agent_tx) => agent_tx,
-        None => return (StatusCode::NOT_FOUND, "No active chat stream").into_response(),
+    let Some(agent_tx) = find_agent_sender(&state, &vm_id) else {
+        return (StatusCode::NOT_FOUND, "No active chat stream").into_response();
     };
     let _ = agent_tx.send(AgentMessage::Abort).await;
     info!("abort forwarded");
@@ -156,8 +122,10 @@ fn find_agent_sender(state: &AppState, vm_id: &str) -> Option<mpsc::Sender<Agent
 }
 
 async fn validate_csrf(session: &Session, submitted: &str) -> bool {
-    match session.get::<String>("csrf_token").await {
-        Ok(Some(token)) => token == submitted,
-        _ => false,
-    }
+    session
+        .get::<String>("csrf_token")
+        .await
+        .ok()
+        .flatten()
+        .is_some_and(|token| token == submitted)
 }

@@ -1,6 +1,6 @@
 use serde::Deserialize;
 
-use crate::{ChatHistory, ChatMessage, Content, ContentBlock};
+use crate::{ChatHistory, ChatMessage, Content};
 
 #[derive(Deserialize)]
 struct JournalMessage {

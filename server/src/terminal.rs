@@ -15,11 +15,11 @@ use std::time::Duration;
 use store::upsert_user;
 use tracing::{error, info, warn};
 use uuid::Uuid;
-use vm_lifecycle::build_user_rootfs_path;
+use vm_lifecycle::{build_user_rootfs_path, VmEntry};
 
 use crate::{
     auth::User,
-    state::{find_vm_guest_ip_for_user, mark_vm_ws_connected, AppState},
+    state::{find_vm_guest_ip_for_user, mark_vm_ws_connected, AppError, AppState},
 };
 
 pub(crate) async fn handle_ws_upgrade(
@@ -27,58 +27,51 @@ pub(crate) async fn handle_ws_upgrade(
     Path(vm_id): Path<String>,
     ws: WebSocketUpgrade,
     State(state): State<AppState>,
-) -> Response {
+) -> Result<Response, AppError> {
     if Uuid::parse_str(&vm_id).is_err() {
-        return (StatusCode::NOT_FOUND, "Not found").into_response();
+        return Ok((StatusCode::NOT_FOUND, "Not found").into_response());
     }
-    let db_user = match upsert_user(&state.db, &user.email).await {
-        Ok(db_user) => db_user,
-        Err(_) => return (StatusCode::INTERNAL_SERVER_ERROR, "Internal error").into_response(),
-    };
-    ws.on_upgrade(move |socket| run_terminal_session(socket, state, vm_id, db_user.id))
+    let db_user = upsert_user(&state.db, &user.email).await?;
+    Ok(ws.on_upgrade(move |socket| run_terminal_session(socket, state, vm_id, db_user.id)))
 }
 
 async fn run_terminal_session(ws: WebSocket, state: AppState, vm_id: String, user_id: Uuid) {
-    let guest_ip = match find_vm_guest_ip_for_user(&state.vms, &vm_id, user_id) {
-        Ok(Some(guest_ip)) => guest_ip,
-        Ok(None) => return,
-        Err(e) => {
-            error!("vm registry error: {e}");
-            return;
-        }
-    };
-    if let Err(e) = mark_vm_ws_connected(&state.vms, &vm_id) {
-        error!("failed to mark VM ws connected: {e}");
-    }
-    if let Err(e) = run_ssh_relay(&guest_ip, &state, ws).await {
-        error!("terminal session error: {e}");
-    }
+    let Some(guest_ip) = find_vm_guest_ip_for_user(&state.vms, &vm_id, user_id)
+        .inspect_err(|e| error!("vm registry error: {e}"))
+        .ok()
+        .flatten() else { return };
+    mark_vm_ws_connected(&state.vms, &vm_id)
+        .unwrap_or_else(|e| error!("failed to mark VM ws connected: {e}"));
+    run_ssh_relay(&guest_ip, &state, ws).await
+        .unwrap_or_else(|e| error!("terminal session error: {e}"));
     save_and_drop_vm(&state, &vm_id, user_id).await;
 }
 
 async fn save_and_drop_vm(state: &AppState, vm_id: &str, user_id: Uuid) {
-    let vm_entry = {
-        match state.vms.lock() {
-            Ok(mut registry) => registry.remove(vm_id),
-            Err(e) => {
-                error!("vm registry lock poisoned on disconnect: {e}");
-                return;
-            }
-        }
-    };
-    let Some(vm_entry) = vm_entry else {
+    let Ok(mut registry) = state.vms.lock() else {
+        error!("vm registry lock poisoned on disconnect");
         return;
     };
-    if let Err(e) = tokio::fs::create_dir_all(&state.user_rootfs_dir).await {
-        error!(vm_id = %vm_id, "failed to create user rootfs dir on disconnect: {e}");
-        return;
-    }
+    let Some(vm_entry) = registry.remove(vm_id) else { return };
+    drop(registry);
+    save_vm_rootfs_on_disconnect(state, vm_id, user_id, vm_entry)
+        .await
+        .unwrap_or_else(|e| error!(vm_id = %vm_id, "failed to save rootfs on disconnect: {e}"));
+}
+
+async fn save_vm_rootfs_on_disconnect(
+    state: &AppState,
+    vm_id: &str,
+    user_id: Uuid,
+    vm_entry: VmEntry,
+) -> anyhow::Result<()> {
+    tokio::fs::create_dir_all(&state.user_rootfs_dir)
+        .await
+        .context("failed to create user rootfs dir on disconnect")?;
     let user_rootfs = build_user_rootfs_path(&state.user_rootfs_dir, user_id);
     let _guard = state.rootfs_lock.lock().await;
     info!("saving rootfs on disconnect");
-    if let Err(e) = vm_entry.vm.save_rootfs(&user_rootfs).await {
-        error!(vm_id = %vm_id, "failed to save rootfs on disconnect: {e}");
-    }
+    vm_entry.vm.save_rootfs(&user_rootfs).await.context("failed to save rootfs")
 }
 
 async fn run_ssh_relay(guest_ip: &str, state: &AppState, ws: WebSocket) -> anyhow::Result<()> {
@@ -114,9 +107,8 @@ async fn run_ssh_relay(guest_ip: &str, state: &AppState, ws: WebSocket) -> anyho
                         }
                     }
                     Some(Ok(Message::Text(text))) => {
-                        if let Err(e) = handle_resize_message(&mut ssh_channel, &text).await {
-                            warn!("handle_resize_message failed: {e}");
-                        }
+                        handle_resize_message(&mut ssh_channel, &text).await
+                            .unwrap_or_else(|e| warn!("handle_resize_message failed: {e}"));
                     }
                     Some(Ok(Message::Ping(data))) => {
                         let _ = ws_sender.send(Message::Pong(data)).await;
@@ -136,12 +128,13 @@ async fn run_ssh_relay(guest_ip: &str, state: &AppState, ws: WebSocket) -> anyho
 }
 
 async fn handle_resize_message(ssh_channel: &mut Channel<Msg>, text: &str) -> anyhow::Result<()> {
-    if let Ok(json) = serde_json::from_str::<serde_json::Value>(text) {
-        if json["type"] == "resize" {
-            let cols = json["cols"].as_u64().context("missing cols in resize message")? as u32;
-            let rows = json["rows"].as_u64().context("missing rows in resize message")? as u32;
-            ssh_channel.window_change(cols, rows, 0, 0).await?;
-        }
+    let Ok(json) = serde_json::from_str::<serde_json::Value>(text) else {
+        return Ok(());
+    };
+    if json["type"] == "resize" {
+        let cols = json["cols"].as_u64().context("missing cols in resize message")? as u32;
+        let rows = json["rows"].as_u64().context("missing rows in resize message")? as u32;
+        ssh_channel.window_change(cols, rows, 0, 0).await?;
     }
     Ok(())
 }

@@ -31,9 +31,8 @@ pub(crate) async fn upload_file_handler(
     if !validate_csrf(&session, &csrf_token).await {
         return Ok((StatusCode::FORBIDDEN, "Forbidden").into_response());
     }
-    let guest_ip = match find_vm_guest_ip_for_user(&state.vms, &vm_id, db_user.id) {
-        Some(ip) => ip,
-        None => return Ok((StatusCode::NOT_FOUND, "Session not found or expired").into_response()),
+    let Some(guest_ip) = find_vm_guest_ip_for_user(&state.vms, &vm_id, db_user.id)? else {
+        return Ok((StatusCode::NOT_FOUND, "Session not found or expired").into_response());
     };
     let mut ssh_handle = connect_ssh(
         &guest_ip,
@@ -48,10 +47,12 @@ pub(crate) async fn upload_file_handler(
 }
 
 async fn validate_csrf(session: &Session, submitted: &str) -> bool {
-    match session.get::<String>("csrf_token").await {
-        Ok(Some(token)) => token == submitted,
-        _ => false,
-    }
+    session
+        .get::<String>("csrf_token")
+        .await
+        .ok()
+        .flatten()
+        .is_some_and(|token| token == submitted)
 }
 
 async fn extract_upload_fields(mut multipart: Multipart) -> Result<(String, String, Bytes)> {
@@ -63,22 +64,13 @@ async fn extract_upload_fields(mut multipart: Multipart) -> Result<(String, Stri
         .await
         .context("failed to read multipart field")?
     {
-        match field.name() {
-            Some("csrf_token") => {
-                csrf_token = Some(
-                    field
-                        .text()
-                        .await
-                        .context("failed to read csrf_token field")?,
-                );
-            }
-            Some("path") => {
-                remote_path = Some(field.text().await.context("failed to read path field")?);
-            }
-            Some("file") => {
-                file_data = Some(field.bytes().await.context("failed to read file field")?);
-            }
-            _ => {}
+        let name = field.name().unwrap_or("").to_owned();
+        if name == "csrf_token" {
+            csrf_token = Some(field.text().await.context("failed to read csrf_token field")?);
+        } else if name == "path" {
+            remote_path = Some(field.text().await.context("failed to read path field")?);
+        } else if name == "file" {
+            file_data = Some(field.bytes().await.context("failed to read file field")?);
         }
     }
     let csrf_token = csrf_token.ok_or_else(|| anyhow!("missing 'csrf_token' field"))?;

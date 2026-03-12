@@ -19,10 +19,13 @@ impl<S: Send + Sync> FromRequestParts<S> for User {
         let session = Session::from_request_parts(parts, state)
             .await
             .map_err(|session_error| session_error.into_response())?;
-        match session.get::<String>("email").await {
-            Ok(Some(email)) => Ok(User { email }),
-            _ => Err(Redirect::to("/login").into_response()),
-        }
+        session
+            .get::<String>("email")
+            .await
+            .ok()
+            .flatten()
+            .map(|email| User { email })
+            .ok_or_else(|| Redirect::to("/login").into_response())
     }
 }
 
@@ -46,12 +49,9 @@ pub(crate) async fn get_cognito_login_handler(
     State(state): State<AppState>,
 ) -> Response {
     let cognito_state = build_cognito_state(&state);
-    match login(session, State(cognito_state)).await {
-        Ok(response) => response,
-        Err(login_error) => {
-            (StatusCode::INTERNAL_SERVER_ERROR, login_error.to_string()).into_response()
-        }
-    }
+    login(session, State(cognito_state))
+        .await
+        .unwrap_or_else(|e| (StatusCode::INTERNAL_SERVER_ERROR, e.to_string()).into_response())
 }
 
 pub(crate) async fn get_callback_handler(
@@ -60,14 +60,9 @@ pub(crate) async fn get_callback_handler(
     State(state): State<AppState>,
 ) -> Response {
     let cognito_state = build_cognito_state(&state);
-    match callback(query, session, State(cognito_state)).await {
-        Ok(response) => response,
-        Err(callback_error) => (
-            StatusCode::INTERNAL_SERVER_ERROR,
-            callback_error.to_string(),
-        )
-            .into_response(),
-    }
+    callback(query, session, State(cognito_state))
+        .await
+        .unwrap_or_else(|e| (StatusCode::INTERNAL_SERVER_ERROR, e.to_string()).into_response())
 }
 
 pub(crate) async fn get_logout_handler(session: Session) -> impl IntoResponse {

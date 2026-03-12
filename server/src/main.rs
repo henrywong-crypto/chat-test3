@@ -210,17 +210,15 @@ async fn shutdown_signal(
     idle_vm_sweep_abort_handle: AbortHandle,
 ) {
     let ctrl_c = async {
-        if let Err(e) = signal::ctrl_c().await {
-            tracing::error!("failed to install Ctrl+C handler: {e}");
-        }
+        signal::ctrl_c().await
+            .unwrap_or_else(|e| tracing::error!("failed to install Ctrl+C handler: {e}"));
     };
     let terminate = async {
-        match signal::unix::signal(signal::unix::SignalKind::terminate()) {
-            Ok(mut sig) => {
-                sig.recv().await;
-            }
-            Err(e) => tracing::error!("failed to install SIGTERM handler: {e}"),
-        }
+        let Ok(mut sig) = signal::unix::signal(signal::unix::SignalKind::terminate()) else {
+            tracing::error!("failed to install SIGTERM handler");
+            return;
+        };
+        sig.recv().await;
     };
     tokio::select! {
         _ = ctrl_c => {}
