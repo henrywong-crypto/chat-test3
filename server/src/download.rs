@@ -11,7 +11,8 @@ use download::{
     zip::build_streaming_zip_response,
 };
 use serde::Deserialize;
-use ssh_client::{connect_ssh, open_sftp_session};
+use sftp_client::open_sftp_session;
+use ssh_client::connect_ssh;
 use store::upsert_user;
 use uuid::Uuid;
 

@@ -4,18 +4,17 @@ use axum::{
     response::{IntoResponse, Response},
 };
 use config::{Config, Environment, File};
-use firecracker_manager::Vm;
 use serde::Deserialize;
 use std::{
     collections::HashMap,
     path::PathBuf,
     sync::{Arc, Mutex},
-    time::Instant,
 };
 use store::PgPool;
 use tokio::sync::Mutex as AsyncMutex;
 use tracing::error;
 use uuid::Uuid;
+use vm_lifecycle::{VmBuildConfig, VmEntry, VmRegistry};
 
 #[derive(Clone, Deserialize)]
 pub(crate) struct AppConfig {
@@ -130,6 +129,23 @@ pub(crate) fn load_config() -> Result<AppConfig> {
     Ok(app_config)
 }
 
+impl AppConfig {
+    pub(crate) fn vm_build_config(&self) -> VmBuildConfig {
+        VmBuildConfig {
+            kernel_path: self.kernel_path.clone(),
+            rootfs_path: self.rootfs_path.clone(),
+            net_helper_path: self.net_helper_path.clone(),
+            vcpu_count: self.vm_vcpu_count,
+            mem_size_mib: self.vm_mem_size_mib,
+            jailer_path: self.jailer_path.clone(),
+            firecracker_path: self.firecracker_path.clone(),
+            jailer_uid: self.jailer_uid,
+            jailer_gid: self.jailer_gid,
+            jailer_chroot_base: self.jailer_chroot_base.clone(),
+        }
+    }
+}
+
 #[derive(Clone)]
 pub(crate) struct AppState {
     pub(crate) config: AppConfig,
@@ -154,16 +170,6 @@ impl std::ops::Deref for AppState {
     fn deref(&self) -> &AppConfig {
         &self.config
     }
-}
-
-pub(crate) type VmRegistry = Arc<Mutex<HashMap<String, VmEntry>>>;
-
-pub(crate) struct VmEntry {
-    pub(crate) user_id: Uuid,
-    pub(crate) has_iam_creds: bool,
-    pub(crate) created_at: Instant,
-    pub(crate) ws_connected: bool,
-    pub(crate) vm: Vm,
 }
 
 pub(crate) struct AppError(pub(crate) anyhow::Error);

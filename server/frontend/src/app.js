@@ -345,8 +345,7 @@ async function uploadAttachment(file) {
     if (!res.ok) throw new Error('upload failed: ' + res.status);
     const data = await res.json();
     placeholder.path = data.path;
-  } catch (err) {
-    console.warn('[chat] attachment upload failed', file.name, err);
+  } catch (_err) {
     const idx = chatAttachments.indexOf(placeholder);
     if (idx !== -1) chatAttachments.splice(idx, 1);
   }
@@ -365,11 +364,11 @@ function renderAttachmentChips() {
   container.innerHTML = '';
   chatAttachments.forEach((att, i) => {
     const chip = document.createElement('div');
-    chip.style.cssText = 'display:flex;align-items:center;gap:4px;padding:2px 8px;border-radius:12px;font-size:11px;color:#e5e7eb;background:#374151;border:1px solid #4b5563';
+    chip.className = 'attach-chip';
     const nameEl = document.createElement('span');
     nameEl.textContent = (att.path ? '📄 ' : '⏳ ') + att.name;
     const removeBtn = document.createElement('button');
-    removeBtn.style.cssText = 'background:none;border:none;color:#9ca3af;cursor:pointer;font-size:13px;line-height:1;padding:0 0 0 2px';
+    removeBtn.className = 'attach-chip-remove';
     removeBtn.textContent = '×';
     removeBtn.addEventListener('click', () => {
       chatAttachments.splice(i, 1);
@@ -459,7 +458,6 @@ function isChatPanelOpen() {
 function connectChatWs() {
   chatWs = new WebSocket(wsBase + '/sessions/' + vmId + '/chat');
   chatWs.onopen = () => {
-    console.log('[chat] ws connected');
     if (pendingQuery) {
       const { content } = pendingQuery;
       pendingQuery = null;
@@ -467,14 +465,11 @@ function connectChatWs() {
     }
   };
   chatWs.onmessage = e => {
-    console.log('[chat] raw ws message', e.data.slice(0, 200));
     let event;
-    try { event = JSON.parse(e.data); } catch { console.warn('[chat] failed to parse ws message', e.data); return; }
-    logChatEvent(event);
+    try { event = JSON.parse(e.data); } catch { return; }
     handleChatEvent(event);
   };
   chatWs.onclose = () => {
-    console.log('[chat] ws closed');
     chatWs = null;
     chatStreaming = false;
     streamHadText = false;
@@ -489,38 +484,6 @@ function connectChatWs() {
 }
 
 
-/// Infer and inject missing `type` (and `delta.type`) into raw Anthropic streaming inner events.
-/// The old agent.py on the VM may not carry these through Pydantic model_dump().
-function normalizeStreamInnerEvent(ev) {
-  if (!ev || typeof ev !== 'object') return ev;
-  if (ev.type) {
-    // delta.type might still be missing for content_block_delta
-    if (ev.type === 'content_block_delta' && ev.delta && !ev.delta.type) {
-      const delta = { ...ev.delta };
-      if ('text' in delta) delta.type = 'text_delta';
-      else if ('thinking' in delta) delta.type = 'thinking_delta';
-      else if ('partial_json' in delta) delta.type = 'input_json_delta';
-      return { ...ev, delta };
-    }
-    return ev;
-  }
-  // Infer outer type from structure
-  let type = undefined;
-  if (ev.delta !== undefined) type = 'content_block_delta';
-  else if (ev.content_block !== undefined) type = 'content_block_start';
-  else if (ev.message !== undefined) type = 'message_start';
-  const normalized = type ? { ...ev, type } : ev;
-  // Also fix delta.type
-  if (normalized.type === 'content_block_delta' && normalized.delta && !normalized.delta.type) {
-    const delta = { ...normalized.delta };
-    if ('text' in delta) delta.type = 'text_delta';
-    else if ('thinking' in delta) delta.type = 'thinking_delta';
-    else if ('partial_json' in delta) delta.type = 'input_json_delta';
-    return { ...normalized, delta };
-  }
-  return normalized;
-}
-
 function handleChatEvent(event) {
   // Capture session_id from whichever event first carries it
   if (event.session_id && !chatSessionId) {
@@ -529,7 +492,7 @@ function handleChatEvent(event) {
   if (event.type === 'system' && event.subtype === 'init') {
     showThinkingIndicator();
   } else if (event.type === 'stream_event' && event.event) {
-    const ev = normalizeStreamInnerEvent(event.event);
+    const ev = event.event;
     if (ev.type === 'content_block_start') {
       const blockType = ev.content_block?.type;
       if (blockType === 'thinking') {
@@ -613,8 +576,7 @@ function sendQuery(content) {
   if (chatSessionId === null) {
     pendingSessionTitle = content.slice(0, 60);
   }
-  console.log('[chat] → query  session_id=', chatSessionId, ' content=', content.slice(0, 80));
-  prepareForQuery(content); // show user's typed message only (not file content)
+  prepareForQuery(content);
   if (chatWs && chatWs.readyState === WebSocket.CONNECTING) {
     pendingQuery = { content: fullContent };
     return;
@@ -629,8 +591,7 @@ function appendUserMessage(content) {
   const row = document.createElement('div');
   row.className = 'flex justify-end px-3 py-1';
   const bubble = document.createElement('div');
-  bubble.className = 'max-w-xs rounded-2xl rounded-br-sm px-3 py-2 text-sm text-white whitespace-pre-wrap break-words';
-  bubble.style.background = '#2563eb';
+  bubble.className = 'user-bubble max-w-xs rounded-2xl rounded-br-sm px-3 py-2 text-sm text-white whitespace-pre-wrap break-words';
   bubble.textContent = content;
   row.appendChild(bubble);
   messages.appendChild(row);
@@ -641,13 +602,12 @@ function ensureAssistantMessage() {
   if (currentAssistantMsgEl) return;
   const messages = document.getElementById('chat-messages');
   const row = document.createElement('div');
-  row.className = 'px-3 py-1';
+  row.className = 'chat-msg px-3 py-1';
 
   const header = document.createElement('div');
   header.className = 'flex items-center gap-2 mb-1';
   const avatar = document.createElement('div');
-  avatar.className = 'w-6 h-6 rounded-full flex items-center justify-center text-xs font-bold text-white shrink-0';
-  avatar.style.background = '#f97316';
+  avatar.className = 'claude-avatar w-6 h-6 rounded-full flex items-center justify-center text-xs font-bold text-white shrink-0';
   avatar.textContent = 'C';
   const label = document.createElement('span');
   label.className = 'text-xs font-medium';
@@ -698,20 +658,19 @@ function ensureThinkingBlock() {
   if (currentThinkingEl) return;
   const messages = document.getElementById('chat-messages');
   const details = document.createElement('details');
-  details.style.cssText = 'margin:4px 12px 0 12px;border-left:2px solid #374151;padding-left:10px';
+  details.className = 'thinking-block';
 
   const summary = document.createElement('summary');
-  summary.style.cssText = 'cursor:pointer;font-size:11px;color:#6b7280;user-select:none;list-style:none;display:flex;align-items:center;gap:4px;padding:2px 0';
+  summary.className = 'thinking-summary';
   const arrow = document.createElement('span');
-  arrow.style.cssText = 'font-size:9px;display:inline-block;transition:transform .15s';
+  arrow.className = 'thinking-arrow';
   arrow.textContent = '▸';
-  details.addEventListener('toggle', () => { arrow.style.transform = details.open ? 'rotate(90deg)' : ''; });
   summary.appendChild(arrow);
   summary.appendChild(document.createTextNode('🤔 Thinking…'));
   details.appendChild(summary);
 
   const textEl = document.createElement('div');
-  textEl.style.cssText = 'font-size:11px;color:#6b7280;white-space:pre-wrap;word-break:break-words;padding:4px 0;line-height:1.5';
+  textEl.className = 'thinking-text';
   details.appendChild(textEl);
   messages.appendChild(details);
 
@@ -732,7 +691,6 @@ function attachMessageCopyButton(msgEl, rawText) {
   if (!header || header.querySelector('.msg-copy-btn')) return;
   const btn = document.createElement('button');
   btn.className = 'msg-copy-btn ml-auto text-xs';
-  btn.style.cssText = 'color:#6b7280;background:none;border:none;cursor:pointer;padding:0 2px;opacity:0;transition:opacity .15s';
   btn.title = 'Copy message';
   btn.textContent = '⎘';
   btn.addEventListener('click', () => {
@@ -743,8 +701,6 @@ function attachMessageCopyButton(msgEl, rawText) {
     });
   });
   header.appendChild(btn);
-  msgEl.addEventListener('mouseenter', () => { btn.style.opacity = '1'; });
-  msgEl.addEventListener('mouseleave', () => { btn.style.opacity = '0'; });
 }
 
 // ── Tool category helpers ─────────────────────────────────────────────────────
@@ -803,7 +759,8 @@ function appendToolUseBlock(toolId, toolName, input) {
   wrapper.className = 'px-3 py-1 pl-8';
 
   const inner = document.createElement('div');
-  inner.style.cssText = `border-left:2px solid ${borderColor};padding-left:10px;margin:2px 0`;
+  inner.className = 'tool-inner';
+  inner.style.borderLeftColor = borderColor;
 
   if (toolName === 'Bash') {
     inner.appendChild(buildBashInput(input));
@@ -832,8 +789,7 @@ function appendToolUseBlock(toolId, toolName, input) {
   resultHeader.appendChild(resultIcon);
   resultHeader.appendChild(resultLabel);
   const resultBody = document.createElement('div');
-  resultBody.className = 'text-xs font-mono whitespace-pre-wrap';
-  resultBody.style.cssText = 'color:#9ca3af;padding-left:4px';
+  resultBody.className = 'result-body text-xs font-mono whitespace-pre-wrap';
   resultEl.appendChild(resultHeader);
   resultEl.appendChild(resultBody);
 
@@ -851,18 +807,18 @@ function buildBashInput(input) {
   row.className = 'flex items-start gap-2 my-0.5';
 
   const iconEl = document.createElement('span');
-  iconEl.style.cssText = 'color:#22c55e;font-size:11px;margin-top:3px;flex-shrink:0';
+  iconEl.className = 'bash-icon shrink-0';
   iconEl.textContent = '⬡';
 
   const pill = document.createElement('div');
-  pill.style.cssText = 'background:#0d1117;border-radius:5px;padding:4px 10px;flex:1;min-width:0;display:flex;align-items:center;gap:6px;overflow:hidden';
+  pill.className = 'bash-pill';
 
   const prompt = document.createElement('span');
-  prompt.style.cssText = 'color:#166534;font-size:11px;font-family:monospace;flex-shrink:0;user-select:none';
+  prompt.className = 'bash-prompt';
   prompt.textContent = '$';
 
   const code = document.createElement('code');
-  code.style.cssText = 'color:#4ade80;font-size:11px;font-family:monospace;white-space:pre-wrap;word-break:break-all';
+  code.className = 'bash-code';
   code.textContent = cmd;
 
   const copyBtn = buildInlineCopyBtn(cmd);
@@ -881,14 +837,14 @@ function buildReadInput(input) {
   const row = document.createElement('div');
   row.className = 'flex items-center gap-1.5 py-0.5 text-xs';
   const iconEl = document.createElement('span');
-  iconEl.style.color = '#9ca3af';
+  iconEl.className = 'tool-search-icon';
   iconEl.textContent = '⌕';
   const nameEl = document.createElement('span');
-  nameEl.style.cssText = 'font-family:monospace;color:#60a5fa;font-size:11px';
+  nameEl.className = 'tool-mono';
   nameEl.textContent = fileName;
   nameEl.title = filePath;
   const labelEl = document.createElement('span');
-  labelEl.style.color = '#4b5563';
+  labelEl.className = 'tool-dim';
   labelEl.textContent = 'Read';
   row.appendChild(iconEl);
   row.appendChild(nameEl);
@@ -902,22 +858,22 @@ function buildSearchInput(toolName, input) {
   const row = document.createElement('div');
   row.className = 'flex items-center gap-1.5 py-0.5 text-xs';
   const iconEl = document.createElement('span');
-  iconEl.style.color = '#9ca3af';
+  iconEl.className = 'tool-search-icon';
   iconEl.textContent = '⌕';
   const patternEl = document.createElement('span');
-  patternEl.style.cssText = 'font-family:monospace;color:#e5e7eb;font-size:11px';
+  patternEl.className = 'tool-pattern';
   patternEl.textContent = pattern;
   const labelEl = document.createElement('span');
-  labelEl.style.color = '#4b5563';
+  labelEl.className = 'tool-dim';
   labelEl.textContent = toolName;
   row.appendChild(iconEl);
   row.appendChild(patternEl);
   if (path) {
     const inEl = document.createElement('span');
-    inEl.style.color = '#4b5563';
+    inEl.className = 'tool-dim';
     inEl.textContent = 'in';
     const pathEl = document.createElement('span');
-    pathEl.style.cssText = 'font-family:monospace;color:#9ca3af;font-size:11px;max-width:180px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap';
+    pathEl.className = 'tool-path-text';
     pathEl.textContent = path;
     pathEl.title = path;
     row.appendChild(inEl);
@@ -934,17 +890,17 @@ function buildEditDiff(input) {
   const fileName = filePath.split('/').pop() || filePath;
 
   const container = document.createElement('div');
-  container.style.cssText = 'border:1px solid #374151;border-radius:5px;overflow:hidden;margin:2px 0;font-size:11px';
+  container.className = 'tool-file-block';
 
   // Header
   const headerEl = document.createElement('div');
-  headerEl.style.cssText = 'display:flex;align-items:center;justify-content:space-between;padding:3px 8px;background:#1f2937;border-bottom:1px solid #374151';
+  headerEl.className = 'tool-file-header';
   const fileEl = document.createElement('span');
-  fileEl.style.cssText = 'font-family:monospace;color:#60a5fa;font-size:11px';
+  fileEl.className = 'tool-file-name';
   fileEl.textContent = fileName;
   fileEl.title = filePath;
   const badge = document.createElement('span');
-  badge.style.cssText = 'font-size:10px;padding:1px 6px;border-radius:3px;background:#374151;color:#9ca3af';
+  badge.className = 'tool-badge';
   badge.textContent = 'Edit';
   headerEl.appendChild(fileEl);
   headerEl.appendChild(badge);
@@ -952,7 +908,7 @@ function buildEditDiff(input) {
 
   // Diff lines
   const diffEl = document.createElement('div');
-  diffEl.style.cssText = 'font-family:monospace;line-height:18px;max-height:300px;overflow-y:auto';
+  diffEl.className = 'diff-lines';
   const oldLines = oldStr.split('\n');
   const newLines = newStr.split('\n');
   oldLines.forEach(line => diffEl.appendChild(buildDiffLine('-', line, false)));
@@ -963,20 +919,12 @@ function buildEditDiff(input) {
 
 function buildDiffLine(sign, content, isAdd) {
   const row = document.createElement('div');
-  row.style.cssText = 'display:flex';
+  row.className = 'flex';
   const sigEl = document.createElement('span');
-  sigEl.style.cssText = `width:20px;text-align:center;flex-shrink:0;user-select:none;${
-    isAdd
-      ? 'background:#052e16;color:#4ade80'
-      : 'background:#2d0505;color:#f87171'
-  }`;
+  sigEl.className = `diff-sign ${isAdd ? 'diff-sign-add' : 'diff-sign-del'}`;
   sigEl.textContent = sign;
   const textEl = document.createElement('span');
-  textEl.style.cssText = `flex:1;white-space:pre-wrap;word-break:break-all;padding:0 8px;${
-    isAdd
-      ? 'background:#031a0e;color:#bbf7d0'
-      : 'background:#1a0505;color:#fecaca'
-  }`;
+  textEl.className = `diff-text ${isAdd ? 'diff-text-add' : 'diff-text-del'}`;
   textEl.textContent = content;
   row.appendChild(sigEl);
   row.appendChild(textEl);
@@ -991,23 +939,23 @@ function buildWritePreview(input) {
   const preview = lines.slice(0, 20).join('\n') + (lines.length > 20 ? '\n…' : '');
 
   const container = document.createElement('div');
-  container.style.cssText = 'border:1px solid #374151;border-radius:5px;overflow:hidden;margin:2px 0;font-size:11px';
+  container.className = 'tool-file-block';
 
   const headerEl = document.createElement('div');
-  headerEl.style.cssText = 'display:flex;align-items:center;justify-content:space-between;padding:3px 8px;background:#1f2937;border-bottom:1px solid #374151';
+  headerEl.className = 'tool-file-header';
   const fileEl = document.createElement('span');
-  fileEl.style.cssText = 'font-family:monospace;color:#60a5fa;font-size:11px';
+  fileEl.className = 'tool-file-name';
   fileEl.textContent = fileName;
   fileEl.title = filePath;
   const badge = document.createElement('span');
-  badge.style.cssText = 'font-size:10px;padding:1px 6px;border-radius:3px;background:#052e16;color:#4ade80';
+  badge.className = 'tool-badge tool-badge-new';
   badge.textContent = 'New file';
   headerEl.appendChild(fileEl);
   headerEl.appendChild(badge);
   container.appendChild(headerEl);
 
   const pre = document.createElement('pre');
-  pre.style.cssText = 'margin:0;padding:6px 10px;background:#0d1117;color:#e5e7eb;font-size:11px;line-height:18px;max-height:200px;overflow-y:auto;white-space:pre-wrap;word-break:break-all';
+  pre.className = 'write-preview';
   pre.textContent = preview;
   container.appendChild(pre);
   return container;
@@ -1018,31 +966,30 @@ function buildGenericInput(toolName, icon, input) {
   const summary = summarizeInput(input);
 
   const wrapper = document.createElement('div');
-  wrapper.style.cssText = 'font-size:11px';
+  wrapper.className = 'generic-tool';
 
   const headerRow = document.createElement('div');
-  headerRow.style.cssText = 'display:flex;align-items:center;gap:5px;color:#9ca3af;padding:2px 0';
+  headerRow.className = 'generic-tool-header';
   const iconEl = document.createElement('span');
   iconEl.textContent = icon;
   const nameEl = document.createElement('span');
-  nameEl.style.cssText = 'color:#e5e7eb;font-weight:500';
+  nameEl.className = 'generic-tool-name';
   nameEl.textContent = toolName;
   headerRow.appendChild(iconEl);
   headerRow.appendChild(nameEl);
   if (summary) {
     const sumEl = document.createElement('span');
-    sumEl.style.cssText = 'color:#6b7280;font-family:monospace;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;max-width:200px';
+    sumEl.className = 'generic-tool-summary';
     sumEl.textContent = summary;
     headerRow.appendChild(sumEl);
   }
 
   const details = document.createElement('details');
-  details.style.cssText = 'margin-top:2px';
   const detailSummary = document.createElement('summary');
-  detailSummary.style.cssText = 'font-size:10px;color:#4b5563;cursor:pointer;list-style:none;user-select:none';
+  detailSummary.className = 'generic-tool-detail-label';
   detailSummary.textContent = 'view params';
   const pre = document.createElement('pre');
-  pre.style.cssText = 'margin:4px 0 0;padding:6px 8px;background:#111827;color:#d1fae5;font-size:11px;border-radius:4px;overflow-x:auto;white-space:pre-wrap;word-break:break-all';
+  pre.className = 'generic-tool-params';
   pre.textContent = typeof input === 'object' ? JSON.stringify(input, null, 2) : String(input);
   details.appendChild(detailSummary);
   details.appendChild(pre);
@@ -1068,18 +1015,15 @@ function summarizeInput(input) {
 
 function buildInlineCopyBtn(text) {
   const btn = document.createElement('button');
-  btn.style.cssText = 'margin-left:auto;flex-shrink:0;font-size:10px;padding:1px 6px;border-radius:3px;border:1px solid #374151;background:#1f2937;color:#6b7280;cursor:pointer;opacity:0;transition:opacity .15s';
+  btn.className = 'inline-copy-btn';
   btn.textContent = 'Copy';
   btn.addEventListener('click', () => {
     navigator.clipboard.writeText(text).then(() => {
       btn.textContent = '✓';
       btn.style.color = '#34d399';
-      setTimeout(() => { btn.textContent = 'Copy'; btn.style.color = '#6b7280'; }, 2000);
+      setTimeout(() => { btn.textContent = 'Copy'; btn.style.color = ''; }, 2000);
     });
   });
-  // Show on hover of parent pill
-  btn.closest?.('div')?.addEventListener('mouseenter', () => { btn.style.opacity = '1'; });
-  btn.closest?.('div')?.addEventListener('mouseleave', () => { btn.style.opacity = '0'; });
   return btn;
 }
 
@@ -1105,12 +1049,12 @@ function fillToolResult(toolId, content, isError) {
   if (isError) {
     // Red error box
     const errorBox = document.createElement('div');
-    errorBox.style.cssText = 'margin-top:4px;padding:6px 10px;border:1px solid #7f1d1d;border-radius:5px;background:#450a0a;font-size:11px';
+    errorBox.className = 'tool-error-box';
     const errHeader = document.createElement('div');
-    errHeader.style.cssText = 'display:flex;align-items:center;gap:4px;color:#f87171;margin-bottom:2px;font-weight:500';
+    errHeader.className = 'tool-error-header';
     errHeader.innerHTML = '✗ Error';
     const errBody = document.createElement('div');
-    errBody.style.cssText = 'color:#fecaca;white-space:pre-wrap;word-break:break-all;font-family:monospace';
+    errBody.className = 'tool-error-body';
     errBody.textContent = text;
     errorBox.appendChild(errHeader);
     errorBox.appendChild(errBody);
@@ -1122,11 +1066,11 @@ function fillToolResult(toolId, content, isError) {
   if (category === 'bash') {
     if (!text) return;
     const pre = document.createElement('pre');
-    pre.style.cssText = 'margin-top:4px;padding:6px 10px;background:#0d1117;border:1px solid #374151;border-radius:5px;font-size:11px;font-family:monospace;color:#e5e7eb;white-space:pre-wrap;word-break:break-all;max-height:300px;overflow-y:auto';
+    pre.className = 'bash-result';
     if (text.length > 400) {
       pre.textContent = text.slice(0, 400) + '…';
       const showMoreBtn = document.createElement('button');
-      showMoreBtn.style.cssText = 'display:block;margin-top:4px;color:#60a5fa;background:none;border:none;cursor:pointer;font-size:11px;padding:0';
+      showMoreBtn.className = 'show-more-btn';
       showMoreBtn.textContent = 'show more';
       showMoreBtn.addEventListener('click', () => { pre.textContent = text; showMoreBtn.remove(); });
       inner.appendChild(pre);
@@ -1146,7 +1090,7 @@ function fillToolResult(toolId, content, isError) {
   if (text.length > 300) {
     resultBody.textContent = text.slice(0, 300) + '…';
     const showMoreBtn = document.createElement('button');
-    showMoreBtn.style.cssText = 'display:block;margin-top:2px;color:#60a5fa;background:none;border:none;cursor:pointer;font-size:11px;padding:0';
+    showMoreBtn.className = 'show-more-btn';
     showMoreBtn.textContent = 'show more';
     showMoreBtn.addEventListener('click', () => { resultBody.textContent = text; showMoreBtn.remove(); });
     resultEl.appendChild(showMoreBtn);
@@ -1163,16 +1107,13 @@ function injectCodeCopyButtons(container) {
     const btn = document.createElement('button');
     btn.className = 'code-copy-btn';
     btn.textContent = 'Copy';
-    btn.style.cssText = 'position:absolute;top:6px;right:8px;font-size:11px;padding:2px 8px;border-radius:4px;border:1px solid #374151;background:#1f2937;color:#9ca3af;cursor:pointer;opacity:0;transition:opacity .15s';
     pre.appendChild(btn);
-    pre.addEventListener('mouseenter', () => { btn.style.opacity = '1'; });
-    pre.addEventListener('mouseleave', () => { btn.style.opacity = '0'; });
     btn.addEventListener('click', () => {
       const code = pre.querySelector('code')?.textContent ?? '';
       navigator.clipboard.writeText(code).then(() => {
         btn.textContent = 'Copied!';
         btn.style.color = '#34d399';
-        setTimeout(() => { btn.textContent = 'Copy'; btn.style.color = '#9ca3af'; }, 2000);
+        setTimeout(() => { btn.textContent = 'Copy'; btn.style.color = ''; }, 2000);
       });
     });
   });
@@ -1181,8 +1122,7 @@ function injectCodeCopyButtons(container) {
 function appendErrorMessage(msg) {
   const messages = document.getElementById('chat-messages');
   const row = document.createElement('div');
-  row.className = 'px-3 py-1 text-sm rounded-lg mx-3';
-  row.style.cssText = 'color:#fca5a5;background:#450a0a;border:1px solid #7f1d1d';
+  row.className = 'chat-error px-3 py-1 text-sm rounded-lg mx-3';
   row.textContent = 'Error: ' + msg;
   messages.appendChild(row);
 }
@@ -1199,21 +1139,19 @@ function showThinkingIndicator() {
   row.id = 'chat-thinking';
   row.className = 'flex items-center gap-2 px-3 py-1';
   const avatar = document.createElement('div');
-  avatar.className = 'w-6 h-6 rounded-full flex items-center justify-center text-xs font-bold text-white shrink-0';
-  avatar.style.background = '#f97316';
+  avatar.className = 'claude-avatar w-6 h-6 rounded-full flex items-center justify-center text-xs font-bold text-white shrink-0';
   avatar.textContent = 'C';
   const dots = document.createElement('div');
   dots.className = 'flex gap-1';
   for (let i = 0; i < 3; i++) {
     const d = document.createElement('div');
-    d.className = 'w-1.5 h-1.5 rounded-full';
-    d.style.cssText = 'background:#6b7280;animation:chatDot 1.2s ease-in-out infinite;animation-delay:' + (i * 0.2) + 's';
+    d.className = 'thinking-dot w-1.5 h-1.5 rounded-full';
+    d.style.animationDelay = (i * 0.2) + 's';
     dots.appendChild(d);
   }
   const timerEl = document.createElement('span');
   timerEl.id = 'chat-thinking-timer';
-  timerEl.className = 'text-xs';
-  timerEl.style.color = '#6b7280';
+  timerEl.className = 'thinking-timer text-xs';
   timerEl.textContent = '0s';
   row.appendChild(avatar);
   row.appendChild(dots);
@@ -1240,37 +1178,6 @@ function extractContentBlocks(event) {
   const content = event.message?.content ?? event.content;
   if (Array.isArray(content)) return content;
   return [];
-}
-
-function logChatEvent(event) {
-  const t = event.type;
-  if (t === 'stream_event') {
-    const inner = event.event;
-    const innerType = inner?.type ?? '(no type)';
-    if (innerType === 'content_block_delta') {
-      const delta = inner?.delta;
-      const preview = delta?.text ?? delta?.thinking ?? delta?.partial_json ?? '';
-      console.log('[chat] ← stream_event  content_block_delta  delta.type=', delta?.type, ' text=', JSON.stringify(preview.slice(0, 40)));
-    } else if (innerType === 'message_delta') {
-      console.log('[chat] ← stream_event  message_delta', inner?.delta);
-    } else {
-      console.log('[chat] ← stream_event', innerType, inner);
-    }
-  } else if (t === 'assistant') {
-    const blocks = extractContentBlocks(event).map(b => b.type);
-    console.log('[chat] ← assistant  blocks=', blocks, ' session_id=', event.session_id);
-  } else if (t === 'user') {
-    const ids = extractContentBlocks(event)
-      .filter(b => b.type === 'tool_result')
-      .map(b => b.tool_use_id);
-    console.log('[chat] ← user  tool_result_ids=', ids);
-  } else if (t === 'result' || t === 'done') {
-    console.log('[chat] ←', t, ' session_id=', event.session_id, ' result=', typeof event.result === 'string' ? JSON.stringify(event.result.slice(0, 80)) : event.result);
-  } else if (t === 'error') {
-    console.error('[chat] ← error', event.message, event);
-  } else {
-    console.log('[chat] ←', t, event.subtype ?? '', event);
-  }
 }
 
 function scrollChatToBottom() {

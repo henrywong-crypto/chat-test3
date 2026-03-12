@@ -1,11 +1,12 @@
 use anyhow::{anyhow, Result};
 use chrono::{DateTime, TimeZone, Utc};
-use russh_sftp::client::{fs::DirEntry, SftpSession};
+use sftp_client::{DirEntry, SftpSession};
 use serde::Serialize;
 use std::path::PathBuf;
 use tokio::io::{AsyncBufReadExt, AsyncReadExt, BufReader};
 
-use ssh_client::{connect_ssh, open_sftp_session};
+use sftp_client::open_sftp_session;
+use ssh_client::connect_ssh;
 
 #[derive(Serialize)]
 pub struct SessionEntry {

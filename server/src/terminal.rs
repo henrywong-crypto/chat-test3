@@ -14,11 +14,11 @@ use store::upsert_user;
 use ssh_client::{connect_ssh, open_terminal_channel};
 use tracing::{error, info};
 use uuid::Uuid;
+use vm_lifecycle::build_user_rootfs_path;
 
 use crate::{
     auth::User,
     state::{find_vm_guest_ip_for_user, mark_vm_ws_connected, AppState},
-    vm::build_user_rootfs_path,
 };
 
 pub(crate) async fn handle_ws_upgrade(

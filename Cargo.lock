@@ -844,9 +844,9 @@ dependencies = [
  "chrono",
  "futures",
  "russh",
- "russh-sftp",
  "serde",
  "serde_json",
+ "sftp-client",
  "ssh-client",
  "tokio",
  "tracing",
@@ -4462,8 +4462,6 @@ name = "server"
 version = "0.1.0"
 dependencies = [
  "anyhow",
- "aws-config",
- "aws-credential-types",
  "axum",
  "bytes",
  "chat-relay",
@@ -4475,9 +4473,9 @@ dependencies = [
  "handlers",
  "leptos",
  "russh",
- "russh-sftp",
  "serde",
  "serde_json",
+ "sftp-client",
  "ssh-client",
  "store",
  "time",
@@ -4489,6 +4487,7 @@ dependencies = [
  "tracing-subscriber",
  "upload",
  "uuid",
+ "vm-lifecycle",
  "zip",
 ]
 
@@ -4545,6 +4544,17 @@ checksum = "eb8b274f568c94226a8045668554aace8142a59b8bca5414ac5a79627c825568"
 dependencies = [
  "server_fn_macro",
  "syn",
+]
+
+[[package]]
+name = "sftp-client"
+version = "0.1.0"
+dependencies = [
+ "anyhow",
+ "russh",
+ "russh-sftp",
+ "ssh-client",
+ "tokio",
 ]
 
 [[package]]
@@ -4940,7 +4950,6 @@ version = "0.1.0"
 dependencies = [
  "anyhow",
  "russh",
- "russh-sftp",
  "tokio",
 ]
 
@@ -5784,6 +5793,21 @@ name = "version_check"
 version = "0.9.5"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "0b928f33d975fc6ad9f86c8f283853ad26bdd5b10b7f1542aa2fa15e2289105a"
+
+[[package]]
+name = "vm-lifecycle"
+version = "0.1.0"
+dependencies = [
+ "anyhow",
+ "aws-config",
+ "aws-credential-types",
+ "firecracker-manager",
+ "serde_json",
+ "time",
+ "tokio",
+ "tracing",
+ "uuid",
+]
 
 [[package]]
 name = "vsimd"

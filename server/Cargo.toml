@@ -11,8 +11,6 @@ path = "src/main.rs"
 [dependencies]
 anyhow = "1.0.102"
 axum = { version = "0.8.8", features = ["multipart", "ws"] }
-aws-config = "1.8.15"
-aws-credential-types = "1.2.14"
 bytes = "1.11.1"
 chat-relay = { path = "../chat-relay" }
 chrono = { version = "0.4", features = ["serde"] }
@@ -23,9 +21,9 @@ futures = "0.3.32"
 leptos = { version = "0.7.0", features = ["ssr"] }
 handlers = { git = "https://github.com/llm-proxy-rs/cognito.git", version = "0.1.0" }
 russh = "0.57.1"
-russh-sftp = "2.1.1"
 serde = { version = "1.0.228", features = ["derive"] }
 serde_json = "1.0.149"
+sftp-client = { path = "../sftp-client" }
 ssh-client = { path = "../ssh-client" }
 store = { path = "../store" }
 time = { version = "0.3.47", features = ["formatting"] }
@@ -37,4 +35,5 @@ tower-sessions = "0.15.0"
 tower-sessions-sqlx-store = { git = "https://github.com/llm-proxy-rs/tower-sessions-stores.git", version = "0.15.0", features = ["postgres"] }
 upload = { path = "../upload" }
 uuid = { version = "1.22.0", features = ["v4"] }
+vm-lifecycle = { path = "../vm-lifecycle" }
 zip = "2"

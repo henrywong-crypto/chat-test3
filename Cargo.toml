@@ -6,8 +6,10 @@ members = [
     "firecracker-manager",
     "net-helper",
     "server",
+    "sftp-client",
     "ssh-client",
     "store",
     "upload",
+    "vm-lifecycle",
 ]
 resolver = "2"

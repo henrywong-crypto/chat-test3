@@ -6,9 +6,7 @@
   themes: dark;
 }
 
-.xterm {
-  height: 100%;
-}
+.xterm { height: 100%; }
 
 @keyframes chatDot {
   0%, 60%, 100% { transform: translateY(0); opacity: .4; }
@@ -35,10 +33,7 @@
 .markdown-body h1 { font-size: 1.25em; }
 .markdown-body h2 { font-size: 1.125em; }
 .markdown-body h3 { font-size: 1em; }
-.markdown-body ul, .markdown-body ol {
-  padding-left: 1.5em;
-  margin: 0.5em 0;
-}
+.markdown-body ul, .markdown-body ol { padding-left: 1.5em; margin: 0.5em 0; }
 .markdown-body li { margin: 0.2em 0; }
 .markdown-body ul { list-style-type: disc; }
 .markdown-body ol { list-style-type: decimal; }
@@ -70,19 +65,115 @@
   font-family: ui-monospace, monospace;
   background: transparent;
 }
-.markdown-body table {
-  border-collapse: collapse;
-  width: 100%;
-  margin: 0.5em 0;
-  font-size: 0.875em;
-}
-.markdown-body th, .markdown-body td {
-  border: 1px solid #374151;
-  padding: 0.4em 0.75em;
-  text-align: left;
-}
+.markdown-body table { border-collapse: collapse; width: 100%; margin: 0.5em 0; font-size: 0.875em; }
+.markdown-body th, .markdown-body td { border: 1px solid #374151; padding: 0.4em 0.75em; text-align: left; }
 .markdown-body th { background: #1f2937; color: #f3f4f6; font-weight: 600; }
 .markdown-body a { color: #60a5fa; text-decoration: underline; }
 .markdown-body hr { border: none; border-top: 1px solid #374151; margin: 0.75em 0; }
 .markdown-body strong { font-weight: 600; color: #f3f4f6; }
 .markdown-body em { font-style: italic; }
+
+/* Chat bubbles */
+.user-bubble { background: #2563eb; }
+.claude-avatar { background: #f97316; }
+
+/* Attachment chips */
+.attach-chip {
+  display: flex; align-items: center; gap: 4px;
+  padding: 2px 8px; border-radius: 12px;
+  font-size: 11px; color: #e5e7eb; background: #374151; border: 1px solid #4b5563;
+}
+.attach-chip-remove {
+  background: none; border: none; color: #9ca3af;
+  cursor: pointer; font-size: 13px; line-height: 1; padding: 0 0 0 2px;
+}
+
+/* Thinking block */
+.thinking-block { margin: 4px 12px 0 12px; border-left: 2px solid #374151; padding-left: 10px; }
+.thinking-summary {
+  cursor: pointer; font-size: 11px; color: #6b7280; user-select: none;
+  list-style: none; display: flex; align-items: center; gap: 4px; padding: 2px 0;
+}
+.thinking-arrow { font-size: 9px; display: inline-block; transition: transform .15s; }
+.thinking-block[open] .thinking-arrow { transform: rotate(90deg); }
+.thinking-text { font-size: 11px; color: #6b7280; white-space: pre-wrap; word-break: break-words; padding: 4px 0; line-height: 1.5; }
+.thinking-dot { background: #6b7280; animation: chatDot 1.2s ease-in-out infinite; }
+.thinking-timer { color: #6b7280; }
+
+/* Tool file blocks (Edit / Write) */
+.tool-file-block { border: 1px solid #374151; border-radius: 5px; overflow: hidden; margin: 2px 0; font-size: 11px; }
+.tool-file-header {
+  display: flex; align-items: center; justify-content: space-between;
+  padding: 3px 8px; background: #1f2937; border-bottom: 1px solid #374151;
+}
+.tool-file-name { font-family: monospace; color: #60a5fa; font-size: 11px; }
+.tool-badge { font-size: 10px; padding: 1px 6px; border-radius: 3px; background: #374151; color: #9ca3af; }
+.tool-badge-new { background: #052e16; color: #4ade80; }
+
+/* Bash tool */
+.bash-icon { color: #22c55e; font-size: 11px; margin-top: 3px; flex-shrink: 0; }
+.bash-pill {
+  background: #0d1117; border-radius: 5px; padding: 4px 10px;
+  flex: 1; min-width: 0; display: flex; align-items: center; gap: 6px; overflow: hidden;
+}
+.bash-prompt { color: #166534; font-size: 11px; font-family: monospace; flex-shrink: 0; user-select: none; }
+.bash-code { color: #4ade80; font-size: 11px; font-family: monospace; white-space: pre-wrap; word-break: break-all; }
+.bash-result {
+  margin-top: 4px; padding: 6px 10px; background: #0d1117;
+  border: 1px solid #374151; border-radius: 5px;
+  font-size: 11px; font-family: monospace; color: #e5e7eb;
+  white-space: pre-wrap; word-break: break-all; max-height: 300px; overflow-y: auto;
+}
+
+/* Diff */
+.diff-lines { font-family: monospace; line-height: 18px; max-height: 300px; overflow-y: auto; }
+.diff-sign { width: 20px; text-align: center; flex-shrink: 0; user-select: none; }
+.diff-sign-add { background: #052e16; color: #4ade80; }
+.diff-sign-del { background: #2d0505; color: #f87171; }
+.diff-text { flex: 1; white-space: pre-wrap; word-break: break-all; padding: 0 8px; }
+.diff-text-add { background: #031a0e; color: #bbf7d0; }
+.diff-text-del { background: #1a0505; color: #fecaca; }
+
+/* Write preview */
+.write-preview {
+  margin: 0; padding: 6px 10px; background: #0d1117; color: #e5e7eb;
+  font-size: 11px; line-height: 18px; max-height: 200px; overflow-y: auto;
+  white-space: pre-wrap; word-break: break-all;
+}
+
+/* Generic tool */
+.generic-tool { font-size: 11px; }
+.generic-tool-header { display: flex; align-items: center; gap: 5px; color: #9ca3af; padding: 2px 0; }
+.generic-tool-name { color: #e5e7eb; font-weight: 500; }
+.generic-tool-summary { color: #6b7280; font-family: monospace; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; max-width: 200px; }
+.generic-tool-detail-label { font-size: 10px; color: #4b5563; cursor: pointer; list-style: none; user-select: none; }
+.generic-tool-params {
+  margin: 4px 0 0; padding: 6px 8px; background: #111827; color: #d1fae5;
+  font-size: 11px; border-radius: 4px; overflow-x: auto; white-space: pre-wrap; word-break: break-all;
+}
+
+/* Search / Read inline */
+.tool-mono { font-family: monospace; color: #60a5fa; font-size: 11px; }
+.tool-pattern { font-family: monospace; color: #e5e7eb; font-size: 11px; }
+.tool-path-text { font-family: monospace; color: #9ca3af; font-size: 11px; max-width: 180px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.tool-dim { color: #4b5563; }
+.tool-search-icon { color: #9ca3af; }
+
+/* Tool inner border (color set per-tool via inline style) */
+.tool-inner { padding-left: 10px; margin: 2px 0; border-left-width: 2px; border-left-style: solid; }
+
+/* Tool results */
+.result-body { color: #9ca3af; padding-left: 4px; }
+.show-more-btn { display: block; color: #60a5fa; background: none; border: none; cursor: pointer; font-size: 11px; padding: 0; }
+.tool-error-box { margin-top: 4px; padding: 6px 10px; border: 1px solid #7f1d1d; border-radius: 5px; background: #450a0a; font-size: 11px; }
+.tool-error-header { display: flex; align-items: center; gap: 4px; color: #f87171; margin-bottom: 2px; font-weight: 500; }
+.tool-error-body { color: #fecaca; white-space: pre-wrap; word-break: break-all; font-family: monospace; }
+.chat-error { color: #fca5a5; background: #450a0a; border: 1px solid #7f1d1d; }
+
+/* Copy buttons — shown on parent hover via CSS */
+.msg-copy-btn { color: #6b7280; background: none; border: none; cursor: pointer; padding: 0 2px; opacity: 0; transition: opacity .15s; }
+.inline-copy-btn { margin-left: auto; flex-shrink: 0; font-size: 10px; padding: 1px 6px; border-radius: 3px; border: 1px solid #374151; background: #1f2937; color: #6b7280; cursor: pointer; opacity: 0; transition: opacity .15s; }
+.code-copy-btn { position: absolute; top: 6px; right: 8px; font-size: 11px; padding: 2px 8px; border-radius: 4px; border: 1px solid #374151; background: #1f2937; color: #9ca3af; cursor: pointer; opacity: 0; transition: opacity .15s; }
+.chat-msg:hover .msg-copy-btn,
+.bash-pill:hover .inline-copy-btn,
+pre:hover .code-copy-btn { opacity: 1; }

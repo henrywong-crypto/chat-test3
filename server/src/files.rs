@@ -6,9 +6,9 @@ use axum::{
     Json,
 };
 use download::validate_within_dir;
-use russh_sftp::client::{fs::DirEntry, SftpSession};
+use sftp_client::{open_sftp_session, DirEntry, SftpSession};
 use serde::{Deserialize, Serialize};
-use ssh_client::{connect_ssh, open_sftp_session};
+use ssh_client::connect_ssh;
 use store::upsert_user;
 use uuid::Uuid;
 

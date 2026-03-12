@@ -8,7 +8,6 @@ mod static_files;
 mod templates;
 mod terminal;
 mod upload;
-mod vm;
 
 use anyhow::{Context, Result};
 use axum::{
@@ -25,6 +24,7 @@ use tokio::{net::TcpListener, signal, task::AbortHandle};
 use tower_sessions::{cookie::SameSite, ExpiredDeletion, Expiry, SessionManagerLayer};
 use tower_sessions_sqlx_store::PostgresStore;
 use tracing::info;
+use vm_lifecycle::{refresh_all_vm_mmds, save_all_vm_rootfs, sweep_idle_vms};
 
 use crate::{
     auth::{
@@ -38,7 +38,6 @@ use crate::{
     static_files::{serve_app_js, serve_styles_css},
     terminal::handle_ws_upgrade,
     upload::upload_file_handler,
-    vm::{refresh_all_vm_mmds, save_all_vm_rootfs, sweep_idle_vms},
 };
 
 #[tokio::main]
@@ -77,7 +76,6 @@ async fn main() -> Result<()> {
     .await?;
     deletion_task.await??;
     Ok(())
-}
 
 fn build_router(app_state: AppState, session_store: PostgresStore) -> Router {
     let session_layer = build_session_layer(session_store);
@@ -157,7 +155,7 @@ async fn serve_router(
         ))
         .await
         .context("server error")?;
-    save_all_vm_rootfs(&app_state).await;
+    save_all_vm_rootfs(&app_state.vms, &app_state.user_rootfs_dir, &app_state.rootfs_lock).await;
     Ok(())
 }
 
@@ -167,7 +165,7 @@ fn spawn_idle_vm_sweep_task(app_state: AppState) -> tokio::task::JoinHandle<()> 
         interval.tick().await;
         loop {
             interval.tick().await;
-            sweep_idle_vms(&app_state).await;
+            sweep_idle_vms(&app_state.vms).await;
         }
     })
 }
@@ -178,7 +176,7 @@ fn spawn_mmds_refresh_task(app_state: AppState) -> tokio::task::JoinHandle<()> {
         interval.tick().await;
         loop {
             interval.tick().await;
-            refresh_all_vm_mmds(&app_state).await;
+            refresh_all_vm_mmds(&app_state.vms).await;
         }
     })
 }

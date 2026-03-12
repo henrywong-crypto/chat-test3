@@ -7,26 +7,26 @@ use axum::{
     Json,
 };
 use firecracker_manager::create_vm;
-use russh_sftp::client::SftpSession;
+use sftp_client::{open_sftp_session, SftpSession};
 use serde::Deserialize;
-use ssh_client::{connect_ssh, open_sftp_session};
+use ssh_client::connect_ssh;
 use store::upsert_user;
 use tokio::io::AsyncWriteExt;
 use tower_sessions::Session;
 use tracing::{error, info};
 use uuid::Uuid;
+use vm_lifecycle::{
+    build_user_rootfs_path, build_vm_config, ensure_user_rootfs, fetch_host_iam_credentials,
+    find_user_rootfs, VmEntry, VmRegistry,
+};
 
 use chat_relay::{fetch_transcript, list_sessions};
 
 use crate::{
     auth::User,
-    state::{find_vm_guest_ip_for_user, AppError, AppState, VmEntry, VmRegistry},
+    state::{find_vm_guest_ip_for_user, AppError, AppState},
     static_files::{app_js_version, styles_css_version},
     templates::render_terminal_page,
-    vm::{
-        build_user_rootfs_path, build_vm_config, ensure_user_rootfs, fetch_host_iam_credentials,
-        find_user_rootfs,
-    },
 };
 
 #[derive(Deserialize)]
@@ -108,7 +108,7 @@ pub(crate) async fn get_or_create_terminal(
     )
     .await?;
     info!("using rootfs");
-    let vm_config = build_vm_config(&state, iam_creds, Some(&user_rootfs))?;
+    let vm_config = build_vm_config(&state.vm_build_config(), iam_creds, Some(&user_rootfs))?;
     let vm = create_vm(&vm_config).await?;
     info!("vm started");
     let vm_id = vm.id.clone();

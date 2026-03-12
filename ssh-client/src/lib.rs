@@ -4,7 +4,6 @@ use russh::{
     keys::{load_public_key, load_secret_key, PrivateKey, PrivateKeyWithHashAlg, PublicKey},
     Channel,
 };
-use russh_sftp::client::SftpSession;
 use std::{path::PathBuf, sync::Arc, time::Duration};
 
 pub struct SshClient {
@@ -100,11 +99,4 @@ pub async fn open_exec_channel(
     let ssh_channel = ssh_handle.channel_open_session().await?;
     ssh_channel.exec(false, command).await?;
     Ok(ssh_channel)
-}
-
-pub async fn open_sftp_session(ssh_handle: &mut Handle<SshClient>) -> Result<SftpSession> {
-    let ssh_channel = ssh_handle.channel_open_session().await?;
-    ssh_channel.request_subsystem(true, "sftp").await?;
-    let sftp_session = SftpSession::new(ssh_channel.into_stream()).await?;
-    Ok(sftp_session)
 }

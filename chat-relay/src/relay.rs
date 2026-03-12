@@ -18,7 +18,7 @@ pub async fn run_agent_relay(
 ) -> Result<()> {
     let mut ssh_handle = connect_ssh(guest_ip, ssh_key_path, ssh_user, vm_host_key_path).await?;
     info!("agent ssh channel opened");
-    let mut ssh_channel = open_exec_channel(&mut ssh_handle, "bash -lc '/usr/local/bin/uv run /opt/agent.py 2> >(tee -a /home/ubuntu/agent.log >&2)'").await?;
+    let mut ssh_channel = open_exec_channel(&mut ssh_handle, "bash -lc 'PYTHONUNBUFFERED=1 /usr/local/bin/uv run /opt/agent.py 2> >(tee -a \"$HOME/agent.log\" >&2)'").await?;
     let (mut ws_sender, mut ws_receiver) = socket.split();
     let mut line_buf = String::new();
     loop {
