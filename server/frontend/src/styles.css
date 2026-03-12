@@ -739,7 +739,7 @@ body::before {
   background: var(--gradient-avatar);
   box-shadow: var(--avatar-shadow);
 }
-.chat-msg {
+.assistant-turn {
   background: linear-gradient(135deg, var(--code-bg) 0%, var(--bg-elevated) 100%);
   border-radius: 12px;
   margin: 8px 16px;
@@ -789,7 +789,7 @@ body::before {
 
 /* Thinking block */
 .thinking-block {
-  margin: 6px 16px;
+  margin: 6px 0;
   border-left: 3px solid var(--border-default);
   padding-left: 12px;
   background: linear-gradient(90deg, var(--border-subtle) 0%, transparent 100%);
@@ -1160,7 +1160,7 @@ body::before {
   color: var(--accent-secondary);
   transform: scale(1.08);
 }
-.chat-msg:hover .msg-copy-btn,
+.assistant-turn:hover .msg-copy-btn,
 .bash-pill:hover .inline-copy-btn,
 pre:hover .code-copy-btn { opacity: 1; }
 

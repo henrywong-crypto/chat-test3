@@ -328,6 +328,8 @@ let streamHadText = false;
 let pendingSessionTitle = null;
 
 // Current assistant message container (text node inside it)
+let currentAssistantTurnEl = null;
+let currentAssistantTurnRawText = '';
 let currentAssistantMsgEl = null;
 let currentAssistantTextEl = null;
 let currentAssistantRawText = '';
@@ -557,7 +559,7 @@ function connectChatSse() {
     console.log('[chat] event: done  session_id=' + payload.session_id);
     if (payload.session_id) chatSessionId = payload.session_id;
     streamHadText = false;
-    sealAssistantMessage();
+    sealAssistantTurn();
     removeThinkingIndicator();
     chatStreaming = false;
     unlockChatInput();
@@ -579,7 +581,7 @@ function connectChatSse() {
 
 function prepareForQuery(content) {
   appendUserMessage(content);
-  sealAssistantMessage();
+  sealAssistantTurn();
   streamHadText = false;
   chatStreaming = true;
   lockChatInput();
@@ -644,14 +646,14 @@ function appendUserMessage(content) {
   scrollChatToBottom();
 }
 
-function ensureAssistantMessage() {
-  if (currentAssistantMsgEl) return;
+function ensureAssistantTurn() {
+  if (currentAssistantTurnEl) return;
   const messages = document.getElementById('chat-messages');
-  const row = document.createElement('div');
-  row.className = 'chat-msg px-3 py-1';
+  const turn = document.createElement('div');
+  turn.className = 'assistant-turn';
 
   const header = document.createElement('div');
-  header.className = 'flex items-center gap-2 mb-1';
+  header.className = 'flex items-center gap-2 mb-2';
   const avatar = document.createElement('div');
   avatar.className = 'claude-avatar w-6 h-6 rounded-full flex items-center justify-center text-xs font-bold text-white shrink-0';
   avatar.textContent = 'C';
@@ -660,15 +662,20 @@ function ensureAssistantMessage() {
   label.textContent = 'Claude';
   header.appendChild(avatar);
   header.appendChild(label);
+  turn.appendChild(header);
 
+  messages.appendChild(turn);
+  currentAssistantTurnEl = turn;
+  currentAssistantTurnRawText = '';
+}
+
+function ensureAssistantMessage() {
+  if (currentAssistantMsgEl) return;
+  ensureAssistantTurn();
   const textEl = document.createElement('div');
   textEl.className = 'text-sm pl-8 whitespace-pre-wrap break-words';
-
-  row.appendChild(header);
-  row.appendChild(textEl);
-  messages.appendChild(row);
-
-  currentAssistantMsgEl = row;
+  currentAssistantTurnEl.appendChild(textEl);
+  currentAssistantMsgEl = textEl;
   currentAssistantTextEl = textEl;
 }
 
@@ -676,6 +683,7 @@ function appendToAssistantMessage(text) {
   if (!text) return;
   ensureAssistantMessage();
   currentAssistantRawText += text;
+  currentAssistantTurnRawText += text;
   currentAssistantTextEl.className = 'markdown-body text-sm pl-8';
   currentAssistantTextEl.innerHTML = marked.parse(currentAssistantRawText);
   injectCodeCopyButtons(currentAssistantTextEl);
@@ -683,13 +691,20 @@ function appendToAssistantMessage(text) {
 }
 
 function sealAssistantMessage() {
-  if (currentAssistantMsgEl && currentAssistantRawText) {
-    attachMessageCopyButton(currentAssistantMsgEl, currentAssistantRawText);
-  }
   currentAssistantMsgEl = null;
   currentAssistantTextEl = null;
   currentAssistantRawText = '';
   sealThinkingBlock();
+}
+
+function sealAssistantTurn() {
+  const rawText = currentAssistantTurnRawText;
+  sealAssistantMessage();
+  if (currentAssistantTurnEl && rawText) {
+    attachMessageCopyButton(currentAssistantTurnEl, rawText);
+  }
+  currentAssistantTurnEl = null;
+  currentAssistantTurnRawText = '';
 }
 
 function sealThinkingBlock() {
@@ -700,7 +715,7 @@ function sealThinkingBlock() {
 
 function ensureThinkingBlock() {
   if (currentThinkingEl) return;
-  const messages = document.getElementById('chat-messages');
+  ensureAssistantTurn();
   const details = document.createElement('details');
   details.className = 'thinking-block';
 
@@ -710,13 +725,13 @@ function ensureThinkingBlock() {
   arrow.className = 'thinking-arrow';
   arrow.textContent = '▸';
   summary.appendChild(arrow);
-  summary.appendChild(document.createTextNode('Thinking…'));
+  summary.appendChild(document.createTextNode('Thinking'));
   details.appendChild(summary);
 
   const textEl = document.createElement('div');
   textEl.className = 'thinking-text';
   details.appendChild(textEl);
-  messages.appendChild(details);
+  currentAssistantTurnEl.appendChild(details);
 
   currentThinkingEl = details;
   currentThinkingTextEl = textEl;
@@ -730,8 +745,8 @@ function appendToThinkingBlock(text) {
   currentThinkingTextEl.textContent = currentThinkingRawText;
 }
 
-function attachMessageCopyButton(msgEl, rawText) {
-  const header = msgEl.querySelector('.flex.items-center.gap-2.mb-1');
+function attachMessageCopyButton(turnEl, rawText) {
+  const header = turnEl.querySelector('.flex.items-center.gap-2.mb-2');
   if (!header || header.querySelector('.msg-copy-btn')) return;
   const btn = document.createElement('button');
   btn.className = 'msg-copy-btn ml-auto text-xs';
@@ -797,13 +812,13 @@ function getToolCategory(toolName) {
 // ── Tool input rendering ──────────────────────────────────────────────────────
 
 function appendToolUseBlock(toolId, toolName, input) {
-  const messages = document.getElementById('chat-messages');
+  ensureAssistantTurn();
   const category = getToolCategory(toolName);
   const borderColor = TOOL_CATEGORY_COLORS[category];
   const icon = TOOL_ICONS[category];
 
   const wrapper = document.createElement('div');
-  wrapper.className = 'px-3 py-1 pl-8';
+  wrapper.className = 'py-1 pl-8';
 
   const inner = document.createElement('div');
   inner.className = 'tool-inner';
@@ -842,7 +857,7 @@ function appendToolUseBlock(toolId, toolName, input) {
 
   wrapper.appendChild(inner);
   wrapper.appendChild(resultEl);
-  messages.appendChild(wrapper);
+  currentAssistantTurnEl.appendChild(wrapper);
 
   pendingToolUses.set(toolId, { resultEl, inner, resultHeader, resultIcon, resultLabel, resultBody, toolName });
   scrollChatToBottom();
@@ -1377,7 +1392,7 @@ function renderTranscriptMessages(messages) {
           appendToolUseBlock(block.id, block.name, block.input);
         }
       }
-      sealAssistantMessage();
+      sealAssistantTurn();
     }
   }
 }
