@@ -1,10 +1,11 @@
+use std::{path::PathBuf, time::Duration};
+
 use anyhow::Result;
 use axum::response::sse::Event;
 use bytes::Bytes;
 use futures::stream::Stream;
 use russh::{client, Channel, ChannelMsg};
-use std::path::PathBuf;
-use tokio::sync::mpsc;
+use tokio::{sync::mpsc, time::timeout};
 use tokio_stream::wrappers::ReceiverStream;
 use tracing::info;
 
@@ -49,7 +50,6 @@ async fn run_relay(
                 match msg {
                     None | Some(AgentMessage::Abort) => break,
                     Some(AgentMessage::Query { content, session_id }) => {
-                        info!(vm_id = %format_short_id(&vm_id), "query");
                         let payload = build_query_payload(&content, session_id.as_deref());
                         let line = format!("{payload}\n");
                         if ssh_channel.data(Bytes::from(line).as_ref()).await.is_err() {
@@ -62,7 +62,7 @@ async fn run_relay(
                 if let Some(pos) = line_buf.find('\n') {
                     let line = line_buf[..pos].trim_end_matches('\r').to_owned();
                     line_buf.drain(..=pos);
-                    if !forward_sse_line(line, &mut pending_event_name, &event_tx, &vm_id).await {
+                    if forward_sse_line(line, &mut pending_event_name, &event_tx).await.is_err() {
                         break;
                     }
                 }
@@ -82,7 +82,7 @@ async fn run_relay(
                         }
                     }
                     Some(ChannelMsg::ExitStatus { exit_status }) => {
-                        info!(vm_id = %format_short_id(&vm_id), "agent exited  status={exit_status}");
+                        info!(vm_id = %vm_id, "agent exited  status={exit_status}");
                         break;
                     }
                     None => break,
@@ -91,28 +91,27 @@ async fn run_relay(
             }
         }
     }
-    info!(vm_id = %format_short_id(&vm_id), "agent relay ended");
+    info!(vm_id = %vm_id, "agent relay ended");
 }
 
 /// Parses one SSE line and forwards a data event if applicable.
-/// Returns false when the SSE client has disconnected (event_tx closed).
+/// Returns `Err` when the SSE client has disconnected or the send timed out.
 async fn forward_sse_line(
     line: String,
     pending_event_name: &mut Option<String>,
     event_tx: &mpsc::Sender<anyhow::Result<Event>>,
-    vm_id: &str,
-) -> bool {
+) -> Result<()> {
     if let Some(name) = line.strip_prefix("event: ") {
         *pending_event_name = Some(name.to_owned());
-        true
     } else if let Some(payload) = line.strip_prefix("data: ") {
         let name = pending_event_name.take().unwrap_or_else(|| "message".to_owned());
-        log_agent_event(vm_id, &name);
         let event = Event::default().event(name).data(payload.to_owned());
-        event_tx.send(Ok(event)).await.is_ok()
-    } else {
-        true // blank line or : comment
+        timeout(Duration::from_secs(5), event_tx.send(Ok(event)))
+            .await
+            .map_err(|_| anyhow::anyhow!("sse send timeout"))?
+            .map_err(|_| anyhow::anyhow!("sse client disconnected"))?;
     }
+    Ok(())
 }
 
 fn build_query_payload(content: &str, session_id: Option<&str>) -> String {
@@ -121,18 +120,4 @@ fn build_query_payload(content: &str, session_id: Option<&str>) -> String {
         None => serde_json::json!({"type": "query", "content": content}),
     };
     serde_json::to_string(&v).unwrap_or_default()
-}
-
-fn log_agent_event(vm_id: &str, event_name: &str) {
-    match event_name {
-        "text_delta" | "thinking_delta" => {}
-        other => info!(vm_id = %format_short_id(vm_id), "agent  {other}"),
-    }
-}
-
-fn format_short_id(id: &str) -> &str {
-    match id.char_indices().nth(8) {
-        Some((i, _)) => &id[..i],
-        None => id,
-    }
 }

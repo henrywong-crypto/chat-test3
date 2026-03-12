@@ -68,8 +68,7 @@ pub(crate) async fn download_file_handler(
             &format!("{dirname}.zip"),
         ))
     } else {
-        let filename = real_path.rsplit('/').next().unwrap_or("download").to_owned();
-        Ok(build_streaming_file_response(sftp, &real_path, &filename)
+        Ok(build_streaming_file_response(sftp, std::path::Path::new(&real_path))
             .await
             .context("failed to build file response")?)
     }

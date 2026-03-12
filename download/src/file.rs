@@ -8,6 +8,7 @@ use futures::Stream;
 use russh_sftp::client::{fs::File as SftpFile, SftpSession};
 use std::{
     io,
+    path::Path,
     pin::Pin,
     task::{Context as TaskContext, Poll},
 };
@@ -15,11 +16,17 @@ use tokio_util::io::ReaderStream;
 
 pub async fn build_streaming_file_response(
     sftp: SftpSession,
-    path: &str,
-    filename: &str,
+    path: &Path,
 ) -> anyhow::Result<Response<Body>> {
+    let path_str = path
+        .to_str()
+        .context("remote path must be valid UTF-8")?;
+    let filename = path
+        .file_name()
+        .and_then(|name| name.to_str())
+        .unwrap_or("download");
     let file = sftp
-        .open(path)
+        .open(path_str)
         .await
         .context("failed to open remote file")?;
     let stream = SftpFileStream {
