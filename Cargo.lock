@@ -839,7 +839,6 @@ name = "chat-relay"
 version = "0.1.0"
 dependencies = [
  "anyhow",
- "axum",
  "bytes",
  "chrono",
  "futures",

@@ -3,7 +3,7 @@ use chrono::{DateTime, TimeZone, Utc};
 use serde::Serialize;
 use sftp_client::{DirEntry, SftpSession};
 use std::path::PathBuf;
-use tokio::io::{AsyncBufReadExt, AsyncReadExt, BufReader};
+use tokio::io::AsyncReadExt;
 
 use sftp_client::open_sftp_session;
 use ssh_client::connect_ssh;
@@ -17,7 +17,6 @@ pub struct SessionEntry {
 
 #[derive(Serialize)]
 pub struct TranscriptResponse {
-    pub title: Option<String>,
     pub messages: Vec<TranscriptMessage>,
 }
 
@@ -123,47 +122,28 @@ async fn build_session_entry_with_title(
 }
 
 async fn fetch_session_title(sftp: &SftpSession, path: &str) -> Option<String> {
-    let file = sftp.open(path).await.ok()?;
-    let mut lines = BufReader::new(file).lines();
-    while let Ok(Some(line)) = lines.next_line().await {
-        let Ok(entry) = serde_json::from_str::<serde_json::Value>(&line) else {
-            continue;
-        };
-        match entry["type"].as_str().unwrap_or("") {
-            "summary" => return entry["summary"].as_str().map(|s| s.to_owned()),
-            "user" => {
-                if let Some(msg) = extract_transcript_message(&entry, "user") {
-                    if let Some(title) = extract_title_from_message(&msg) {
-                        return Some(title);
-                    }
-                }
-            }
-            _ => {}
-        }
-    }
-    None
+    let mut file = sftp.open(path).await.ok()?;
+    let mut contents = String::new();
+    file.read_to_string(&mut contents).await.ok()?;
+    extract_last_user_title(&contents)
 }
 
-#[cfg(test)]
-fn extract_title_from_jsonl(chunk: &str) -> Option<String> {
-    let mut first_user_title = None;
-    for line in chunk.lines() {
+fn extract_last_user_title(contents: &str) -> Option<String> {
+    let mut title = None;
+    for line in contents.lines() {
         let Ok(entry) = serde_json::from_str::<serde_json::Value>(line) else {
             continue;
         };
-        match entry["type"].as_str().unwrap_or("") {
-            "summary" => return entry["summary"].as_str().map(|s| s.to_owned()),
-            "user" => {
-                if first_user_title.is_none() {
-                    if let Some(msg) = extract_transcript_message(&entry, "user") {
-                        first_user_title = extract_title_from_message(&msg);
-                    }
-                }
+        if entry["type"].as_str() != Some("user") {
+            continue;
+        }
+        if let Some(msg) = extract_transcript_message(&entry, "user") {
+            if let Some(text) = msg.content.iter().find_map(|b| b["text"].as_str()) {
+                title = Some(text.to_owned());
             }
-            _ => {}
         }
     }
-    first_user_title
+    title
 }
 
 pub async fn fetch_transcript(
@@ -200,39 +180,19 @@ async fn find_session_path(
 }
 
 fn parse_transcript(contents: &str) -> Result<TranscriptResponse> {
-    let mut title = None;
     let mut messages = Vec::new();
     for line in contents.lines() {
         let Ok(entry) = serde_json::from_str::<serde_json::Value>(line) else {
             continue;
         };
         let type_str = entry["type"].as_str().unwrap_or("");
-        match type_str {
-            "summary" => {
-                title = entry["summary"].as_str().map(|s| s.to_owned());
+        if matches!(type_str, "user" | "assistant") {
+            if let Some(transcript_message) = extract_transcript_message(&entry, type_str) {
+                messages.push(transcript_message);
             }
-            "user" | "assistant" => {
-                if let Some(transcript_message) = extract_transcript_message(&entry, type_str) {
-                    if title.is_none() && type_str == "user" {
-                        title = extract_title_from_message(&transcript_message);
-                    }
-                    messages.push(transcript_message);
-                }
-            }
-            _ => {}
         }
     }
-    Ok(TranscriptResponse { title, messages })
-}
-
-fn extract_title_from_message(message: &TranscriptMessage) -> Option<String> {
-    let text = message.content.iter().find_map(|b| b["text"].as_str())?;
-    let title: String = text.chars().take(60).collect();
-    if title.is_empty() {
-        None
-    } else {
-        Some(title)
-    }
+    Ok(TranscriptResponse { messages })
 }
 
 fn extract_transcript_message(
@@ -273,23 +233,11 @@ fn normalize_content(raw: &serde_json::Value) -> Vec<serde_json::Value> {
 mod tests {
     use super::*;
 
-    fn user_text(text: &str) -> String {
-        serde_json::json!({
-            "type": "user",
-            "message": { "role": "user", "content": text }
-        })
-        .to_string()
-    }
+    const FIXTURE_FIRST_USER: &str = r#"{"parentUuid":null,"isSidechain":false,"userType":"external","cwd":"/home/user/project","sessionId":"00000000-0000-0000-0000-000000000001","version":"0.0.0","gitBranch":"main","type":"user","message":{"role":"user","content":"convert to argo cd"},"uuid":"00000000-0000-0000-0000-000000000002","timestamp":"2020-01-01T00:00:00.000Z","todos":[],"permissionMode":"default"}"#;
+    const FIXTURE_TOOL_RESULT_USER: &str = r#"{"parentUuid":"00000000-0000-0000-0000-000000000003","isSidechain":false,"userType":"external","cwd":"/home/user/project","sessionId":"00000000-0000-0000-0000-000000000001","version":"0.0.0","gitBranch":"main","slug":"dummy-slug","type":"user","message":{"role":"user","content":[{"type":"tool_result","content":"some error","is_error":true,"tool_use_id":"tooluse_dummy"}]},"uuid":"00000000-0000-0000-0000-000000000004","timestamp":"2020-01-01T00:00:01.000Z","toolUseResult":"some error","sourceToolAssistantUUID":"00000000-0000-0000-0000-000000000003"}"#;
+    const FIXTURE_LAST_USER: &str = r#"{"parentUuid":"00000000-0000-0000-0000-000000000005","isSidechain":false,"userType":"external","cwd":"/home/user/project","sessionId":"00000000-0000-0000-0000-000000000001","version":"0.0.0","gitBranch":"main","slug":"dummy-slug","type":"user","message":{"role":"user","content":"not plan first?"},"uuid":"00000000-0000-0000-0000-000000000006","timestamp":"2020-01-01T00:00:02.000Z","todos":[],"permissionMode":"plan"}"#;
 
-    fn user_array(blocks: serde_json::Value) -> String {
-        serde_json::json!({
-            "type": "user",
-            "message": { "role": "user", "content": blocks }
-        })
-        .to_string()
-    }
-
-    fn assistant_text(text: &str) -> String {
+    fn make_assistant_line(text: &str) -> String {
         serde_json::json!({
             "type": "assistant",
             "message": {
@@ -300,61 +248,47 @@ mod tests {
         .to_string()
     }
 
-    fn summary_entry(text: &str) -> String {
-        serde_json::json!({ "type": "summary", "summary": text }).to_string()
-    }
-
     #[test]
-    fn test_title_from_summary_entry() {
+    fn test_title_is_last_user_message() {
         let jsonl = [
-            user_text("hello there"),
-            summary_entry("A chat about greetings"),
-            assistant_text("Hi!"),
+            FIXTURE_FIRST_USER,
+            FIXTURE_TOOL_RESULT_USER,
+            &make_assistant_line("Sure!"),
+            FIXTURE_LAST_USER,
         ]
         .join("\n");
-        let resp = parse_transcript(&jsonl).unwrap();
-        assert_eq!(resp.title.as_deref(), Some("A chat about greetings"));
+        assert_eq!(
+            extract_last_user_title(&jsonl).as_deref(),
+            Some("not plan first?")
+        );
     }
 
     #[test]
-    fn test_title_falls_back_to_first_user_message() {
-        let jsonl = [user_text("explain recursion"), assistant_text("Sure!")].join("\n");
-        let resp = parse_transcript(&jsonl).unwrap();
-        assert_eq!(resp.title.as_deref(), Some("explain recursion"));
+    fn test_title_skips_tool_result_only_user_entries() {
+        let jsonl = [FIXTURE_FIRST_USER, FIXTURE_TOOL_RESULT_USER].join("\n");
+        assert_eq!(
+            extract_last_user_title(&jsonl).as_deref(),
+            Some("convert to argo cd")
+        );
     }
 
     #[test]
-    fn test_title_truncated_to_60_chars() {
-        let long = "a".repeat(80);
-        let jsonl = user_text(&long);
-        let resp = parse_transcript(&jsonl).unwrap();
-        assert_eq!(resp.title.as_deref().map(|t| t.len()), Some(60));
+    fn test_title_returns_none_for_empty_transcript() {
+        assert_eq!(extract_last_user_title(""), None);
     }
 
     #[test]
     fn test_user_string_content_is_rendered() {
-        let jsonl = user_text("hello");
-        let resp = parse_transcript(&jsonl).unwrap();
+        let resp = parse_transcript(FIXTURE_FIRST_USER).unwrap();
         assert_eq!(resp.messages.len(), 1);
         assert_eq!(resp.messages[0].role, "user");
         assert_eq!(resp.messages[0].content[0]["type"], "text");
-        assert_eq!(resp.messages[0].content[0]["text"], "hello");
-    }
-
-    #[test]
-    fn test_user_array_content_is_rendered() {
-        let jsonl = user_array(serde_json::json!([{ "type": "text", "text": "hi" }]));
-        let resp = parse_transcript(&jsonl).unwrap();
-        assert_eq!(resp.messages.len(), 1);
-        assert_eq!(resp.messages[0].content[0]["text"], "hi");
+        assert_eq!(resp.messages[0].content[0]["text"], "convert to argo cd");
     }
 
     #[test]
     fn test_tool_result_only_user_messages_are_filtered() {
-        let jsonl = user_array(
-            serde_json::json!([{ "type": "tool_result", "tool_use_id": "x", "content": "ok" }]),
-        );
-        let resp = parse_transcript(&jsonl).unwrap();
+        let resp = parse_transcript(FIXTURE_TOOL_RESULT_USER).unwrap();
         assert_eq!(resp.messages.len(), 0);
     }
 
@@ -379,7 +313,7 @@ mod tests {
 
     #[test]
     fn test_invalid_lines_are_skipped() {
-        let jsonl = ["not json", &user_text("valid"), "also not json"].join("\n");
+        let jsonl = ["not json", FIXTURE_FIRST_USER, "also not json"].join("\n");
         let resp = parse_transcript(&jsonl).unwrap();
         assert_eq!(resp.messages.len(), 1);
     }
@@ -387,25 +321,6 @@ mod tests {
     #[test]
     fn test_empty_transcript() {
         let resp = parse_transcript("").unwrap();
-        assert!(resp.title.is_none());
         assert!(resp.messages.is_empty());
-    }
-
-    #[test]
-    fn test_extract_title_from_jsonl_uses_summary() {
-        let chunk = [summary_entry("My session"), user_text("first msg")].join("\n");
-        assert_eq!(
-            extract_title_from_jsonl(&chunk).as_deref(),
-            Some("My session")
-        );
-    }
-
-    #[test]
-    fn test_extract_title_from_jsonl_falls_back_to_user() {
-        let chunk = user_text("what is rust?");
-        assert_eq!(
-            extract_title_from_jsonl(&chunk).as_deref(),
-            Some("what is rust?")
-        );
     }
 }
