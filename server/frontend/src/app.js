@@ -112,7 +112,7 @@ document.getElementById('reset-btn')?.addEventListener('click', () => {
 let fmCurrentPath = fmUploadDir;
 let fmOpened = false;
 
-document.getElementById('files-toggle-btn').addEventListener('click', toggleFiles);
+document.getElementById('tab-files-icon').addEventListener('click', toggleFiles);
 document.getElementById('files-close-btn').addEventListener('click', closePanel);
 document.addEventListener('keydown', e => {
   if (e.key === 'Escape') {
@@ -387,20 +387,10 @@ function buildQueryWithAttachments(userMessage) {
   return `${userMessage}\n\n[Files provided at the following paths:]\n${pathList}`;
 }
 
-document.getElementById('tab-shell-btn').addEventListener('click', switchToShell);
-document.getElementById('tab-chat-btn').addEventListener('click', switchToChat);
+document.getElementById('tab-shell-icon').addEventListener('click', switchToShell);
+document.getElementById('tab-chat-icon').addEventListener('click', switchToChat);
 document.getElementById('chat-new-btn').addEventListener('click', startNewSession);
-document.getElementById('chat-history-btn').addEventListener('click', () => {
-  const panel = document.getElementById('chat-sessions-panel');
-  const nowHidden = panel.classList.toggle('hidden');
-  if (!nowHidden) {
-    panel.classList.add('flex');
-    loadChatHistory();
-  } else {
-    panel.classList.remove('flex');
-  }
-});
-document.getElementById('chat-history-refresh-btn').addEventListener('click', loadChatHistory);
+document.getElementById('chat-history-refresh-btn')?.addEventListener('click', loadChatHistory);
 document.getElementById('chat-stop-btn').addEventListener('click', stopGeneration);
 document.getElementById('chat-send-btn').addEventListener('click', () => {
   const input = document.getElementById('chat-input');
@@ -431,9 +421,9 @@ function switchToChat() {
   shellView.classList.remove('flex');
   chatView.classList.remove('hidden');
   chatView.classList.add('flex');
-  document.getElementById('tab-shell-btn').classList.replace('btn-primary', 'btn-ghost');
-  document.getElementById('tab-chat-btn').classList.replace('btn-ghost', 'btn-primary');
-  document.getElementById('files-toggle-btn').classList.add('hidden');
+  document.getElementById('tab-chat-icon').classList.add('icon-active');
+  document.getElementById('tab-shell-icon').classList.remove('icon-active');
+  loadChatHistory();
   if (!chatWs) connectChatWs();
 }
 
@@ -444,9 +434,8 @@ function switchToShell() {
   chatView.classList.remove('flex');
   shellView.classList.remove('hidden');
   shellView.classList.add('flex');
-  document.getElementById('tab-chat-btn').classList.replace('btn-primary', 'btn-ghost');
-  document.getElementById('tab-shell-btn').classList.replace('btn-ghost', 'btn-primary');
-  document.getElementById('files-toggle-btn').classList.remove('hidden');
+  document.getElementById('tab-shell-icon').classList.add('icon-active');
+  document.getElementById('tab-chat-icon').classList.remove('icon-active');
   initShell();
   fitAddon.fit();
 }
@@ -611,14 +600,12 @@ function ensureAssistantMessage() {
   avatar.textContent = 'C';
   const label = document.createElement('span');
   label.className = 'text-xs font-medium';
-  label.style.color = '#9ca3af';
   label.textContent = 'Claude';
   header.appendChild(avatar);
   header.appendChild(label);
 
   const textEl = document.createElement('div');
   textEl.className = 'text-sm pl-8 whitespace-pre-wrap break-words';
-  textEl.style.color = '#e5e7eb';
 
   row.appendChild(header);
   row.appendChild(textEl);
@@ -697,7 +684,7 @@ function attachMessageCopyButton(msgEl, rawText) {
     navigator.clipboard.writeText(rawText).then(() => {
       btn.textContent = '✓';
       btn.style.color = '#34d399';
-      setTimeout(() => { btn.textContent = '⎘'; btn.style.color = '#6b7280'; }, 2000);
+      setTimeout(() => { btn.textContent = '⎘'; btn.style.color = ''; }, 2000);
     });
   });
   header.appendChild(btn);
@@ -1234,39 +1221,26 @@ function renderChatHistory(chatSessions) {
 
 function buildChatSessionItem(chatSession) {
   const isActive = chatSession.session_id === chatSessionId;
-  const btn = document.createElement('button');
-  btn.type = 'button';
-  btn.className = 'w-full text-left flex items-start gap-2.5 px-3 py-2.5 rounded-lg transition-colors duration-150 '
-    + (isActive ? 'bg-base-300' : 'hover:bg-base-300/50');
-  btn.onclick = () => resumeSession(chatSession.session_id, chatSession.title);
+  const item = document.createElement('div');
+  item.className = 'session-item' + (isActive ? ' active' : '');
+  item.dataset.id = chatSession.session_id;
+  item.onclick = () => resumeSession(chatSession.session_id, chatSession.title);
 
-  const icon = document.createElement('div');
-  icon.className = 'shrink-0 mt-0.5 opacity-30';
-  icon.innerHTML = '<svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z"/></svg>';
-
-  const content = document.createElement('div');
-  content.className = 'flex-1 min-w-0';
+  const contentEl = document.createElement('div');
+  contentEl.className = 'flex-1 min-w-0';
 
   const titleEl = document.createElement('div');
-  titleEl.className = 'text-sm font-medium truncate text-base-content';
+  titleEl.className = 'session-item-title';
   titleEl.textContent = chatSession.title;
 
-  const timeEl = document.createElement('div');
-  timeEl.className = 'text-xs mt-0.5 opacity-40';
-  timeEl.textContent = formatRelativeTime(chatSession.last_active_at);
+  const statusEl = document.createElement('div');
+  statusEl.className = 'session-item-status';
+  statusEl.textContent = formatRelativeTime(chatSession.last_active_at);
 
-  content.appendChild(titleEl);
-  content.appendChild(timeEl);
-  btn.appendChild(icon);
-  btn.appendChild(content);
-
-  if (isActive) {
-    const dot = document.createElement('div');
-    dot.className = 'w-1.5 h-1.5 rounded-full bg-success shrink-0 mt-1.5 animate-pulse';
-    btn.appendChild(dot);
-  }
-
-  return btn;
+  contentEl.appendChild(titleEl);
+  contentEl.appendChild(statusEl);
+  item.appendChild(contentEl);
+  return item;
 }
 
 function formatRelativeTime(isoString) {
@@ -1285,12 +1259,16 @@ function startNewSession() {
   chatAttachments = [];
   renderAttachmentChips();
   document.getElementById('chat-messages').innerHTML = '';
-  const panel = document.getElementById('chat-sessions-panel');
-  panel.classList.add('hidden');
-  panel.classList.remove('flex');
+  document.querySelectorAll('.session-item.active').forEach(el => el.classList.remove('active'));
+  updateChatTitle(null);
 }
 
-function resumeSession(sessionId) {
+function updateChatTitle(title) {
+  const el = document.getElementById('chat-title');
+  if (el) el.textContent = title ?? 'New Chat';
+}
+
+function resumeSession(sessionId, title) {
   chatSessionId = sessionId;
   pendingToolUses.clear();
   streamInThinkingBlock = false;
@@ -1298,9 +1276,10 @@ function resumeSession(sessionId) {
   chatAttachments = [];
   renderAttachmentChips();
   document.getElementById('chat-messages').innerHTML = '';
-  const panel = document.getElementById('chat-sessions-panel');
-  panel.classList.add('hidden');
-  panel.classList.remove('flex');
+  document.querySelectorAll('.session-item.active').forEach(el => el.classList.remove('active'));
+  const activeItem = document.querySelector(`.session-item[data-id="${sessionId}"]`);
+  if (activeItem) activeItem.classList.add('active');
+  updateChatTitle(title);
   loadAndRenderTranscript(sessionId);
 }
 
