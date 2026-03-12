@@ -8,6 +8,8 @@ use tracing::{info, warn};
 
 use ssh_client::{connect_ssh, open_exec_channel};
 
+const AGENT_CMD: &str = "bash -lc 'PYTHONUNBUFFERED=1 /usr/local/bin/uv run /opt/agent.py 2> >(tee -a \"$HOME/agent.log\" >&2)'";
+
 pub async fn run_agent_relay(
     guest_ip: &str,
     ssh_key_path: &PathBuf,
@@ -18,44 +20,13 @@ pub async fn run_agent_relay(
 ) -> Result<()> {
     let mut ssh_handle = connect_ssh(guest_ip, ssh_key_path, ssh_user, vm_host_key_path).await?;
     info!("agent ssh channel opened");
-    let mut ssh_channel = open_exec_channel(&mut ssh_handle, "bash -lc 'PYTHONUNBUFFERED=1 /usr/local/bin/uv run /opt/agent.py 2> >(tee -a \"$HOME/agent.log\" >&2)'").await?;
+    let mut ssh_channel = open_exec_channel(&mut ssh_handle, AGENT_CMD).await?;
     let (mut ws_sender, mut ws_receiver) = socket.split();
     let mut line_buf = String::new();
     loop {
         tokio::select! {
-            msg = ssh_channel.wait() => {
-                match msg {
-                    Some(ChannelMsg::Data { ref data }) => {
-                        let chunk = std::str::from_utf8(data).unwrap_or("");
-                        line_buf.push_str(chunk);
-                        while let Some(newline_pos) = line_buf.find('\n') {
-                            let line = line_buf[..newline_pos].trim_end_matches('\r').to_owned();
-                            line_buf.drain(..=newline_pos);
-                            let line = normalize_event_line(line);
-                            log_agent_event(vm_id, &line);
-                            if ws_sender.send(Message::Text(line.into())).await.is_err() {
-                                return Ok(());
-                            }
-                        }
-                    }
-                    Some(ChannelMsg::ExtendedData { ref data, .. }) => {
-                        // agent.py stderr lands here — forward to server logs
-                        if let Ok(text) = std::str::from_utf8(data) {
-                            for stderr_line in text.lines() {
-                                if !stderr_line.is_empty() {
-                                    info!(vm_id = %vm_id, "{stderr_line}");
-                                }
-                            }
-                        }
-                    }
-                    Some(ChannelMsg::ExitStatus { exit_status }) => {
-                        info!("agent exited  status={exit_status}");
-                        break;
-                    }
-                    None => break,
-                    _ => {}
-                }
-            }
+            biased;
+            // Check for abort (or any WS message) before flushing buffered lines.
             ws_msg = ws_receiver.next() => {
                 match ws_msg {
                     Some(Ok(Message::Text(text))) => {
@@ -74,6 +45,43 @@ pub async fn run_agent_relay(
                     }
                     Some(Ok(Message::Pong(_))) => {}
                     _ => break,
+                }
+            }
+            // Send one buffered line per iteration so the ws_receiver abort check
+            // runs between every line instead of only after a full SSH packet drains.
+            _ = std::future::ready(()), if line_buf.contains('\n') => {
+                if let Some(newline_pos) = line_buf.find('\n') {
+                    let line = line_buf[..newline_pos].trim_end_matches('\r').to_owned();
+                    line_buf.drain(..=newline_pos);
+                    let line = normalize_event_line(line);
+                    log_agent_event(vm_id, &line);
+                    if ws_sender.send(Message::Text(line.into())).await.is_err() {
+                        return Ok(());
+                    }
+                }
+            }
+            msg = ssh_channel.wait() => {
+                match msg {
+                    Some(ChannelMsg::Data { ref data }) => {
+                        let chunk = std::str::from_utf8(data).unwrap_or("");
+                        line_buf.push_str(chunk);
+                    }
+                    Some(ChannelMsg::ExtendedData { ref data, .. }) => {
+                        // agent.py stderr lands here — forward to server logs
+                        if let Ok(text) = std::str::from_utf8(data) {
+                            for stderr_line in text.lines() {
+                                if !stderr_line.is_empty() {
+                                    info!(vm_id = %vm_id, "{stderr_line}");
+                                }
+                            }
+                        }
+                    }
+                    Some(ChannelMsg::ExitStatus { exit_status }) => {
+                        info!("agent exited  status={exit_status}");
+                        break;
+                    }
+                    None => break,
+                    _ => {}
                 }
             }
         }
