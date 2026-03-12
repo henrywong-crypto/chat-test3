@@ -48,20 +48,21 @@ async fn run_terminal_session(ws: WebSocket, state: AppState, vm_id: String, use
 }
 
 async fn save_and_drop_vm(state: &AppState, vm_id: &str, user_id: Uuid) {
-    let Ok(mut registry) = state.vms.lock() else {
-        error!("vm registry lock poisoned on disconnect");
-        return;
+    let vm_entry = {
+        let Ok(mut registry) = state.vms.lock() else {
+            error!("vm registry lock poisoned on disconnect");
+            return;
+        };
+        registry.remove(vm_id)
     };
-    let Some(vm_entry) = registry.remove(vm_id) else { return };
-    drop(registry);
-    save_vm_rootfs_on_disconnect(state, vm_id, user_id, vm_entry)
+    let Some(vm_entry) = vm_entry else { return };
+    save_vm_rootfs_on_disconnect(state, user_id, vm_entry)
         .await
         .unwrap_or_else(|e| error!(vm_id = %vm_id, "failed to save rootfs on disconnect: {e}"));
 }
 
 async fn save_vm_rootfs_on_disconnect(
     state: &AppState,
-    vm_id: &str,
     user_id: Uuid,
     vm_entry: VmEntry,
 ) -> anyhow::Result<()> {

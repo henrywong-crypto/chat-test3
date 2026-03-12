@@ -12,7 +12,7 @@ use serde::Deserialize;
 use store::upsert_user;
 use tokio::sync::mpsc;
 use tower_sessions::Session;
-use tracing::{error, info, warn};
+use tracing::{error, info};
 use uuid::Uuid;
 
 use crate::{

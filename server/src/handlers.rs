@@ -96,13 +96,12 @@ pub(crate) async fn get_or_create_terminal(
     let db_user = upsert_user(&state.db, &user.email).await?;
 
     let Some(vm_id) = find_user_vm_id(&state.vms, db_user.id)? else {
-        return check_vm_limit_and_create(user, session, state, db_user).await;
+        return check_vm_limit_and_create(session, state, db_user).await;
     };
     Ok(Redirect::to(&format!("/terminal/{vm_id}")).into_response())
 }
 
 async fn check_vm_limit_and_create(
-    user: User,
     session: Session,
     state: AppState,
     db_user: DbUser,
