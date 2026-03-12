@@ -64,7 +64,7 @@ pub async fn list_chat_sessions(
             .await
             .map(|rd| rd.collect())
             .unwrap_or_default();
-        let mut chat_sessions = build_chat_sessions(&sftp, dir_entries, project_dir).await?;
+        let mut chat_sessions = build_chat_sessions(&sftp, dir_entries, project_dir).await;
         all_chat_sessions.append(&mut chat_sessions);
     }
     all_chat_sessions.sort_by(|a, b| b.last_active_at.cmp(&a.last_active_at));
@@ -96,7 +96,7 @@ async fn build_chat_sessions(
     sftp: &SftpSession,
     dir_entries: Vec<DirEntry>,
     project_dir: &str,
-) -> Result<Vec<ChatSession>> {
+) -> Vec<ChatSession> {
     let mut chat_sessions = Vec::new();
     for dir_entry in &dir_entries {
         if let Some(chat_session) =
@@ -105,7 +105,7 @@ async fn build_chat_sessions(
             chat_sessions.push(chat_session);
         }
     }
-    Ok(chat_sessions)
+    chat_sessions
 }
 
 async fn build_chat_session_with_title(
