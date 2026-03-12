@@ -6,9 +6,7 @@ use axum::{
     response::IntoResponse,
 };
 use download::{
-    file::build_streaming_file_response,
-    validate_within_dir,
-    zip::build_streaming_zip_response,
+    file::build_streaming_file_response, validate_within_dir, zip::build_streaming_zip_response,
 };
 use serde::Deserialize;
 use sftp_client::open_sftp_session;
@@ -60,7 +58,11 @@ pub(crate) async fn download_file_handler(
         .await
         .context("failed to stat remote path")?;
     if metadata.is_dir() {
-        let dirname = real_path.rsplit('/').next().unwrap_or("download").to_owned();
+        let dirname = real_path
+            .rsplit('/')
+            .next()
+            .unwrap_or("download")
+            .to_owned();
         Ok(build_streaming_zip_response(
             sftp,
             real_path,
@@ -68,8 +70,10 @@ pub(crate) async fn download_file_handler(
             &format!("{dirname}.zip"),
         ))
     } else {
-        Ok(build_streaming_file_response(sftp, std::path::Path::new(&real_path))
-            .await
-            .context("failed to build file response")?)
+        Ok(
+            build_streaming_file_response(sftp, std::path::Path::new(&real_path))
+                .await
+                .context("failed to build file response")?,
+        )
     }
 }

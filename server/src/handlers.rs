@@ -1,4 +1,3 @@
-use std::time::{Instant, SystemTime, UNIX_EPOCH};
 use anyhow::{anyhow, Result};
 use axum::{
     extract::{Form, Multipart, Path, Query, State},
@@ -7,9 +6,10 @@ use axum::{
     Json,
 };
 use firecracker_manager::create_vm;
-use sftp_client::{open_sftp_session, SftpSession};
 use serde::Deserialize;
+use sftp_client::{open_sftp_session, SftpSession};
 use ssh_client::connect_ssh;
+use std::time::{Instant, SystemTime, UNIX_EPOCH};
 use store::upsert_user;
 use tokio::io::AsyncWriteExt;
 use tower_sessions::Session;
@@ -77,7 +77,10 @@ fn remove_user_vm(vms: &VmRegistry, user_id: Uuid) {
             .filter(|(_, e)| e.user_id == user_id)
             .map(|(id, _)| id.clone())
             .collect();
-        vm_ids.into_iter().filter_map(|id| registry.remove(&id)).collect()
+        vm_ids
+            .into_iter()
+            .filter_map(|id| registry.remove(&id))
+            .collect()
     };
     drop(removed);
 }
@@ -204,7 +207,14 @@ pub(crate) async fn list_chat_sessions_handler(
         Some(ip) => ip,
         None => return (StatusCode::NOT_FOUND, "Session not found or expired").into_response(),
     };
-    match list_sessions(&guest_ip, &state.ssh_key_path, &state.ssh_user, &state.vm_host_key_path).await {
+    match list_sessions(
+        &guest_ip,
+        &state.ssh_key_path,
+        &state.ssh_user,
+        &state.vm_host_key_path,
+    )
+    .await
+    {
         Ok(session_entries) => Json(session_entries).into_response(),
         Err(e) => {
             error!(vm_id = %vm_id, "list_sessions failed: {e}");
@@ -273,7 +283,13 @@ pub(crate) async fn handle_chat_upload(
     };
     let remote_path = build_chat_upload_path(&filename);
     info!("uploading chat attachment via sftp");
-    let mut ssh_handle = connect_ssh(&guest_ip, &state.ssh_key_path, &state.ssh_user, &state.vm_host_key_path).await?;
+    let mut ssh_handle = connect_ssh(
+        &guest_ip,
+        &state.ssh_key_path,
+        &state.ssh_user,
+        &state.vm_host_key_path,
+    )
+    .await?;
     let sftp = open_sftp_session(&mut ssh_handle).await?;
     write_chat_file_via_sftp(sftp, &remote_path, &file_bytes).await?;
     Ok(Json(serde_json::json!({"path": remote_path})).into_response())
@@ -309,14 +325,27 @@ fn build_chat_upload_path(filename: &str) -> String {
         .as_millis();
     let safe_name: String = filename
         .chars()
-        .map(|c| if c.is_alphanumeric() || c == '.' || c == '-' || c == '_' { c } else { '_' })
+        .map(|c| {
+            if c.is_alphanumeric() || c == '.' || c == '-' || c == '_' {
+                c
+            } else {
+                '_'
+            }
+        })
         .collect();
     format!("/tmp/{ts}_{safe_name}")
 }
 
 async fn write_chat_file_via_sftp(sftp: SftpSession, path: &str, data: &[u8]) -> Result<()> {
-    let mut file = sftp.create(path).await.map_err(|e| anyhow!("sftp create: {e}"))?;
-    file.write_all(data).await.map_err(|e| anyhow!("sftp write: {e}"))?;
-    file.shutdown().await.map_err(|e| anyhow!("sftp shutdown: {e}"))?;
+    let mut file = sftp
+        .create(path)
+        .await
+        .map_err(|e| anyhow!("sftp create: {e}"))?;
+    file.write_all(data)
+        .await
+        .map_err(|e| anyhow!("sftp write: {e}"))?;
+    file.shutdown()
+        .await
+        .map_err(|e| anyhow!("sftp shutdown: {e}"))?;
     Ok(())
 }

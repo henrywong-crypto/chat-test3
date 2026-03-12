@@ -1,10 +1,10 @@
-use std::path::PathBuf;
-
 use anyhow::Result;
 use bytes::Bytes;
 use futures::stream::Stream;
 use russh::{client, Channel, ChannelMsg};
+use serde::Serialize;
 use ssh_client::{connect_ssh, open_exec_channel, SshClient};
+use std::path::PathBuf;
 use tokio::sync::mpsc;
 use tokio_stream::wrappers::ReceiverStream;
 use tracing::info;
@@ -15,7 +15,10 @@ const AGENT_CMD: &str = "bash -lc '\
 '";
 
 pub enum AgentMessage {
-    Query { content: String, session_id: Option<String> },
+    Query {
+        content: String,
+        session_id: Option<String>,
+    },
     Abort,
 }
 
@@ -25,13 +28,12 @@ pub async fn start_agent_relay(
     ssh_user: &str,
     vm_host_key_path: &PathBuf,
     inbound: mpsc::Receiver<AgentMessage>,
-    vm_id: String,
 ) -> Result<impl Stream<Item = Bytes>> {
     let mut ssh_handle = connect_ssh(guest_ip, ssh_key_path, ssh_user, vm_host_key_path).await?;
     info!("agent ssh channel opened");
     let ssh_channel = open_exec_channel(&mut ssh_handle, AGENT_CMD).await?;
     let (tx, rx) = mpsc::channel::<Bytes>(1);
-    tokio::spawn(run_relay(ssh_handle, ssh_channel, inbound, tx, vm_id));
+    tokio::spawn(run_relay(ssh_handle, ssh_channel, inbound, tx));
     Ok(ReceiverStream::new(rx))
 }
 
@@ -40,7 +42,6 @@ async fn run_relay(
     mut ssh_channel: Channel<client::Msg>,
     mut inbound: mpsc::Receiver<AgentMessage>,
     tx: mpsc::Sender<Bytes>,
-    vm_id: String,
 ) -> Result<()> {
     loop {
         tokio::select! {
@@ -66,13 +67,13 @@ async fn run_relay(
                         if let Ok(text) = std::str::from_utf8(data) {
                             for stderr_line in text.lines() {
                                 if !stderr_line.is_empty() {
-                                    info!(vm_id = %vm_id, "{stderr_line}");
+                                    info!("{stderr_line}");
                                 }
                             }
                         }
                     }
                     Some(ChannelMsg::ExitStatus { exit_status }) => {
-                        info!(vm_id = %vm_id, "agent exited  status={exit_status}");
+                        info!("agent exited  status={exit_status}");
                         break;
                     }
                     None => break,
@@ -81,14 +82,24 @@ async fn run_relay(
             }
         }
     }
-    info!(vm_id = %vm_id, "agent relay ended");
+    info!("agent relay ended");
     Ok(())
 }
 
+#[derive(Serialize)]
+struct QueryPayload<'a> {
+    #[serde(rename = "type")]
+    kind: &'a str,
+    content: &'a str,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    session_id: Option<&'a str>,
+}
+
 fn build_query_payload(content: &str, session_id: Option<&str>) -> Result<String> {
-    let v = match session_id {
-        Some(id) => serde_json::json!({"type": "query", "content": content, "session_id": id}),
-        None => serde_json::json!({"type": "query", "content": content}),
+    let query_payload = QueryPayload {
+        kind: "query",
+        content,
+        session_id,
     };
-    Ok(serde_json::to_string(&v)?)
+    Ok(serde_json::to_string(&query_payload)?)
 }

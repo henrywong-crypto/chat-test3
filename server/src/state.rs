@@ -1,8 +1,3 @@
-use std::{
-    collections::HashMap,
-    path::PathBuf,
-    sync::{Arc, Mutex},
-};
 use anyhow::Result;
 use axum::{
     http::StatusCode,
@@ -11,6 +6,11 @@ use axum::{
 use chat_relay::AgentMessage;
 use config::{Config, Environment, File};
 use serde::Deserialize;
+use std::{
+    collections::HashMap,
+    path::PathBuf,
+    sync::{Arc, Mutex},
+};
 use store::PgPool;
 use tokio::sync::{mpsc, Mutex as AsyncMutex};
 use tracing::error;

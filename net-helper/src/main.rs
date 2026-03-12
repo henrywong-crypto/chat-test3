@@ -1,8 +1,8 @@
-use std::process::Command;
 use anyhow::{bail, Context, Result};
-use ipnet::Ipv4Net;
 #[cfg(target_os = "linux")]
 use caps::{CapSet, Capability};
+use ipnet::Ipv4Net;
+use std::process::Command;
 
 fn main() {
     let args: Vec<String> = std::env::args().collect();
@@ -48,7 +48,9 @@ fn run(args: &[String]) -> Result<()> {
 }
 
 fn validate_tap_name(name: &str) -> Result<()> {
-    let digits = name.strip_prefix("tap").ok_or_else(|| anyhow::anyhow!("must start with 'tap'"))?;
+    let digits = name
+        .strip_prefix("tap")
+        .ok_or_else(|| anyhow::anyhow!("must start with 'tap'"))?;
     if digits.is_empty() || digits.len() > 3 {
         bail!("digits part must be 1-3 characters");
     }
@@ -92,7 +94,11 @@ fn run_cmd(prog: &str, args: &[&str]) -> Result<()> {
         .status()
         .with_context(|| format!("failed to run {prog}"))?;
     if !status.success() {
-        bail!("{prog} {:?} failed: exit {}", args, status.code().unwrap_or(-1));
+        bail!(
+            "{prog} {:?} failed: exit {}",
+            args,
+            status.code().unwrap_or(-1)
+        );
     }
     Ok(())
 }
@@ -110,15 +116,35 @@ fn cmd_tap_delete(tap_name: &str) -> Result<()> {
 }
 
 fn cmd_setup_nat(iface: &str) -> Result<()> {
-    std::fs::write("/proc/sys/net/ipv4/ip_forward", "1")
-        .context("failed to enable ip_forward")?;
+    std::fs::write("/proc/sys/net/ipv4/ip_forward", "1").context("failed to enable ip_forward")?;
     run_cmd("iptables", &["-P", "FORWARD", "ACCEPT"])?;
     // Best-effort delete to avoid duplicates on restart
     let _ = Command::new("iptables")
-        .args(["-t", "nat", "-D", "POSTROUTING", "-o", iface, "-j", "MASQUERADE"])
+        .args([
+            "-t",
+            "nat",
+            "-D",
+            "POSTROUTING",
+            "-o",
+            iface,
+            "-j",
+            "MASQUERADE",
+        ])
         .stderr(std::process::Stdio::null())
         .status();
-    run_cmd("iptables", &["-t", "nat", "-A", "POSTROUTING", "-o", iface, "-j", "MASQUERADE"])
+    run_cmd(
+        "iptables",
+        &[
+            "-t",
+            "nat",
+            "-A",
+            "POSTROUTING",
+            "-o",
+            iface,
+            "-j",
+            "MASQUERADE",
+        ],
+    )
 }
 
 fn raise_ambient_net_admin() -> Result<()> {

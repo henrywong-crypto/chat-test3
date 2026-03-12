@@ -9,9 +9,9 @@ use axum::{
 use bytes::Bytes;
 use futures::{SinkExt, StreamExt};
 use russh::{client::Msg, Channel, ChannelMsg};
+use ssh_client::{connect_ssh, open_terminal_channel};
 use std::time::Duration;
 use store::upsert_user;
-use ssh_client::{connect_ssh, open_terminal_channel};
 use tracing::{error, info};
 use uuid::Uuid;
 use vm_lifecycle::build_user_rootfs_path;

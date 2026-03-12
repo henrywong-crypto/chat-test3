@@ -1,7 +1,9 @@
 use anyhow::Result;
 use aws_config::default_provider::credentials::DefaultCredentialsChain;
 use aws_credential_types::{provider::ProvideCredentials, Credentials};
-use firecracker_manager::{build_mmds_with_iam, put_mmds, ImdsCredential, JailerConfig, Vm, VmConfig};
+use firecracker_manager::{
+    build_mmds_with_iam, put_mmds, ImdsCredential, JailerConfig, Vm, VmConfig,
+};
 use std::{
     collections::HashMap,
     path::{Path, PathBuf},

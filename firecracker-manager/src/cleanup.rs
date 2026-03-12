@@ -10,7 +10,10 @@ pub async fn cleanup_stale_vms(net_helper_path: &Path, jailer_chroot_base: &Path
 }
 
 async fn kill_stale_firecracker_processes() {
-    let _ = Command::new("pkill").args(["-f", "firecracker"]).status().await;
+    let _ = Command::new("pkill")
+        .args(["-f", "firecracker"])
+        .status()
+        .await;
 }
 
 async fn delete_stale_tap_interfaces(net_helper_path: &Path) {

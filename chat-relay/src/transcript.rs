@@ -1,7 +1,7 @@
 use anyhow::{anyhow, Result};
 use chrono::{DateTime, TimeZone, Utc};
-use sftp_client::{DirEntry, SftpSession};
 use serde::Serialize;
+use sftp_client::{DirEntry, SftpSession};
 use std::path::PathBuf;
 use tokio::io::{AsyncBufReadExt, AsyncReadExt, BufReader};
 
@@ -40,7 +40,9 @@ pub async fn list_sessions(
     let project_dirs = find_all_project_dirs(&sftp).await;
     let mut all_session_entries = Vec::new();
     for project_dir in &project_dirs {
-        let dir_entries: Vec<DirEntry> = sftp.read_dir(project_dir).await
+        let dir_entries: Vec<DirEntry> = sftp
+            .read_dir(project_dir)
+            .await
             .map(|rd| rd.collect())
             .unwrap_or_default();
         let mut session_entries = build_session_entries(&sftp, dir_entries, project_dir).await?;
@@ -51,7 +53,9 @@ pub async fn list_sessions(
 }
 
 async fn find_all_project_dirs(sftp: &SftpSession) -> Vec<String> {
-    let top_entries: Vec<DirEntry> = sftp.read_dir(PROJECTS_BASE).await
+    let top_entries: Vec<DirEntry> = sftp
+        .read_dir(PROJECTS_BASE)
+        .await
         .map(|rd| rd.collect())
         .unwrap_or_default();
     let mut project_dirs = Vec::new();
@@ -70,7 +74,9 @@ async fn find_all_project_dirs(sftp: &SftpSession) -> Vec<String> {
 
 fn is_directory_entry(entry: &DirEntry) -> bool {
     // Unix directory bit: mode & 0o170000 == 0o040000
-    entry.metadata().permissions
+    entry
+        .metadata()
+        .permissions
         .map(|p| p & 0o170_000 == 0o040_000)
         .unwrap_or(false)
 }
@@ -82,7 +88,9 @@ async fn build_session_entries(
 ) -> Result<Vec<SessionEntry>> {
     let mut session_entries = Vec::new();
     for dir_entry in &dir_entries {
-        if let Some(session_entry) = build_session_entry_with_title(sftp, dir_entry, project_dir).await {
+        if let Some(session_entry) =
+            build_session_entry_with_title(sftp, dir_entry, project_dir).await
+        {
             session_entries.push(session_entry);
         }
     }
@@ -107,7 +115,11 @@ async fn build_session_entry_with_title(
     let title = fetch_session_title(sftp, &path)
         .await
         .unwrap_or_else(|| session_id.clone());
-    Some(SessionEntry { session_id, title, last_active_at })
+    Some(SessionEntry {
+        session_id,
+        title,
+        last_active_at,
+    })
 }
 
 async fn fetch_session_title(sftp: &SftpSession, path: &str) -> Option<String> {
@@ -164,7 +176,8 @@ pub async fn fetch_transcript(
     let mut ssh_handle = connect_ssh(guest_ip, ssh_key_path, ssh_user, vm_host_key_path).await?;
     let sftp = open_sftp_session(&mut ssh_handle).await?;
     let project_dirs = find_all_project_dirs(&sftp).await;
-    let transcript_path = find_session_path(&sftp, &project_dirs, session_id).await
+    let transcript_path = find_session_path(&sftp, &project_dirs, session_id)
+        .await
         .ok_or_else(|| anyhow!("session not found: {session_id}"))?;
     let mut file = sftp.open(&transcript_path).await?;
     let mut contents = String::new();
@@ -215,7 +228,11 @@ fn parse_transcript(contents: &str) -> Result<TranscriptResponse> {
 fn extract_title_from_message(message: &TranscriptMessage) -> Option<String> {
     let text = message.content.iter().find_map(|b| b["text"].as_str())?;
     let title: String = text.chars().take(60).collect();
-    if title.is_empty() { None } else { Some(title) }
+    if title.is_empty() {
+        None
+    } else {
+        Some(title)
+    }
 }
 
 fn extract_transcript_message(
@@ -228,7 +245,11 @@ fn extract_transcript_message(
     if content.is_empty() {
         return None;
     }
-    if type_str == "user" && content.iter().all(|b| b["type"].as_str() == Some("tool_result")) {
+    if type_str == "user"
+        && content
+            .iter()
+            .all(|b| b["type"].as_str() == Some("tool_result"))
+    {
         return None;
     }
     Some(TranscriptMessage { role, content })
@@ -373,7 +394,10 @@ mod tests {
     #[test]
     fn test_extract_title_from_jsonl_uses_summary() {
         let chunk = [summary_entry("My session"), user_text("first msg")].join("\n");
-        assert_eq!(extract_title_from_jsonl(&chunk).as_deref(), Some("My session"));
+        assert_eq!(
+            extract_title_from_jsonl(&chunk).as_deref(),
+            Some("My session")
+        );
     }
 
     #[test]

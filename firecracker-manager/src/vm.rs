@@ -13,10 +13,12 @@ use std::{
 use tracing::info;
 
 use crate::configure::configure_vm;
-use crate::network::{create_tap, delete_tap, format_guest_ip, format_guest_mac, format_tap_ip, format_tap_name};
+use crate::network::{
+    create_tap, delete_tap, format_guest_ip, format_guest_mac, format_tap_ip, format_tap_name,
+};
 use crate::process::{
-    build_chroot_dir, build_vm_boot_args, copy_rootfs,
-    prepare_jail_resources, spawn_firecracker_jailed, wait_for_socket,
+    build_chroot_dir, build_vm_boot_args, copy_rootfs, prepare_jail_resources,
+    spawn_firecracker_jailed, wait_for_socket,
 };
 
 static VM_NET_INDICES: Mutex<BTreeSet<u32>> = Mutex::new(BTreeSet::new());
@@ -136,7 +138,12 @@ async fn launch_vm(
     tap_name: &str,
     chroot_dir: &Path,
 ) -> Result<Vm> {
-    create_tap(&vm_config.net_helper_path, tap_name, &format_tap_ip(net_idx)).await?;
+    create_tap(
+        &vm_config.net_helper_path,
+        tap_name,
+        &format_tap_ip(net_idx),
+    )
+    .await?;
     let mac = format_guest_mac(net_idx);
     let boot_args = build_vm_boot_args(&vm_config.boot_args, &format_guest_ip(net_idx), net_idx);
     let kernel_path_in_jail = PathBuf::from("/vmlinux");

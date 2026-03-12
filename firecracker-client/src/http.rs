@@ -10,7 +10,12 @@ pub(crate) async fn send_put(socket_path: &Path, uri: &str, body: &impl Serializ
     send_request(socket_path, Method::PUT, uri, body).await
 }
 
-async fn send_request(socket_path: &Path, method: Method, uri: &str, body: &impl Serialize) -> Result<()> {
+async fn send_request(
+    socket_path: &Path,
+    method: Method,
+    uri: &str,
+    body: &impl Serialize,
+) -> Result<()> {
     let bytes = serde_json::to_vec(body)?;
     let stream = UnixStream::connect(socket_path).await.with_context(|| {
         format!(

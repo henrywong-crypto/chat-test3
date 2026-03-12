@@ -55,7 +55,10 @@ async fn test_vm_boots() {
         kill(Pid::from_raw(vm_guard.pid as i32), None).is_ok(),
         "VM process is not running"
     );
-    assert!(!vm_guard.guest_ip.is_empty(), "guest IP should not be empty");
+    assert!(
+        !vm_guard.guest_ip.is_empty(),
+        "guest IP should not be empty"
+    );
     // VmGuard drops here, killing the VM and cleaning up TAP/files
 }
 
@@ -103,7 +106,10 @@ async fn test_vm_boots_with_jailer() {
         kill(Pid::from_raw(vm_guard.pid as i32), None).is_ok(),
         "VM process is not running"
     );
-    assert!(!vm_guard.guest_ip.is_empty(), "guest IP should not be empty");
+    assert!(
+        !vm_guard.guest_ip.is_empty(),
+        "guest IP should not be empty"
+    );
     assert!(
         chroot_dir.exists(),
         "chroot dir should exist while VM is running: {}",

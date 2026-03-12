@@ -30,7 +30,7 @@ pub(crate) async fn handle_chat_stream(
     let db_user = match upsert_user(&state.db, &user.email).await {
         Ok(db_user) => db_user,
         Err(e) => {
-            error!(vm_id = %vm_id, "upsert_user failed: {e}");
+            error!("upsert_user failed: {e}");
             return (StatusCode::INTERNAL_SERVER_ERROR, "Internal error").into_response();
         }
     };
@@ -43,14 +43,17 @@ pub(crate) async fn handle_chat_stream(
     };
     mark_vm_ws_connected(&state.vms, &vm_id);
     let (agent_tx, agent_rx) = mpsc::channel::<AgentMessage>(4);
-    state.chat_senders.lock().unwrap().insert(vm_id.clone(), agent_tx);
+    state
+        .chat_senders
+        .lock()
+        .unwrap()
+        .insert(vm_id.clone(), agent_tx);
     let event_stream = match start_agent_relay(
         &guest_ip,
         &state.ssh_key_path,
         &state.ssh_user,
         &state.vm_host_key_path,
         agent_rx,
-        vm_id,
     )
     .await
     {
@@ -93,11 +96,14 @@ pub(crate) async fn handle_chat_query(
         Some(agent_tx) => agent_tx,
         None => return (StatusCode::NOT_FOUND, "No active chat stream").into_response(),
     };
-    let agent_message = AgentMessage::Query { content: body.content, session_id: body.session_id };
+    let agent_message = AgentMessage::Query {
+        content: body.content,
+        session_id: body.session_id,
+    };
     if agent_tx.send(agent_message).await.is_err() {
         return (StatusCode::SERVICE_UNAVAILABLE, "Agent not available").into_response();
     }
-    info!(vm_id = %vm_id, "query forwarded");
+    info!("query forwarded");
     (StatusCode::OK, "").into_response()
 }
 
@@ -124,7 +130,7 @@ pub(crate) async fn handle_chat_abort(
         None => return (StatusCode::NOT_FOUND, "No active chat stream").into_response(),
     };
     let _ = agent_tx.send(AgentMessage::Abort).await;
-    info!(vm_id = %vm_id, "abort forwarded");
+    info!("abort forwarded");
     (StatusCode::OK, "").into_response()
 }
 

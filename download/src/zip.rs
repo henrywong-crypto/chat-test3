@@ -95,8 +95,7 @@ fn write_zip_to_channel(
     mut file_rx: tokio_mpsc::Receiver<(String, Vec<u8>)>,
     zip_tx: mpsc::Sender<Result<Bytes, io::Error>>,
 ) {
-    let options =
-        SimpleFileOptions::default().compression_method(zip::CompressionMethod::Deflated);
+    let options = SimpleFileOptions::default().compression_method(zip::CompressionMethod::Deflated);
     let mut writer = SeekableChannelWriter::new(zip_tx);
     let zip_ok = {
         let mut zip = zip::ZipWriter::new(&mut writer);
@@ -142,16 +141,22 @@ async fn read_file_buffered(sftp: &SftpSession, path: &str) -> anyhow::Result<Ve
 // The buffer drains to zero and the cycle repeats, so memory stays O(largest file).
 
 struct SeekableChannelWriter {
-    buf: Vec<u8>,       // unflushed bytes; buf[0] is at logical offset `base`
-    base: u64,          // logical stream offset of buf[0]
-    pos: u64,           // current read/write position
-    high_water: u64,    // highest position ever reached
+    buf: Vec<u8>,    // unflushed bytes; buf[0] is at logical offset `base`
+    base: u64,       // logical stream offset of buf[0]
+    pos: u64,        // current read/write position
+    high_water: u64, // highest position ever reached
     tx: mpsc::Sender<Result<Bytes, io::Error>>,
 }
 
 impl SeekableChannelWriter {
     fn new(tx: mpsc::Sender<Result<Bytes, io::Error>>) -> Self {
-        Self { buf: Vec::new(), base: 0, pos: 0, high_water: 0, tx }
+        Self {
+            buf: Vec::new(),
+            base: 0,
+            pos: 0,
+            high_water: 0,
+            tx,
+        }
     }
 
     fn flush_to_high_water(&mut self) -> io::Result<()> {

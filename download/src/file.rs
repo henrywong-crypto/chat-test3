@@ -18,9 +18,7 @@ pub async fn build_streaming_file_response(
     sftp: SftpSession,
     path: &Path,
 ) -> anyhow::Result<Response<Body>> {
-    let path_str = path
-        .to_str()
-        .context("remote path must be valid UTF-8")?;
+    let path_str = path.to_str().context("remote path must be valid UTF-8")?;
     let filename = path
         .file_name()
         .and_then(|name| name.to_str())

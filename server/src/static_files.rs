@@ -18,7 +18,10 @@ pub(crate) fn styles_css_version() -> &'static str {
 pub(crate) async fn serve_app_js() -> impl IntoResponse {
     (
         [
-            (header::CONTENT_TYPE, "application/javascript; charset=utf-8"),
+            (
+                header::CONTENT_TYPE,
+                "application/javascript; charset=utf-8",
+            ),
             (header::CACHE_CONTROL, "public, max-age=31536000, immutable"),
         ],
         APP_JS,

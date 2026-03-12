@@ -25,7 +25,11 @@ pub async fn write_file_via_sftp(
     Ok(())
 }
 
-async fn resolve_upload_path(sftp: &SftpSession, remote_path: &str, upload_dir: &str) -> Result<String> {
+async fn resolve_upload_path(
+    sftp: &SftpSession,
+    remote_path: &str,
+    upload_dir: &str,
+) -> Result<String> {
     let path = Path::new(remote_path);
     let parent = path.parent().and_then(|p| p.to_str()).unwrap_or(".");
     let filename = path

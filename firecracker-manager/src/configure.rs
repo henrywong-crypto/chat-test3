@@ -1,9 +1,9 @@
-use std::path::Path;
 use anyhow::Result;
 use firecracker_client::{
     put_mmds, set_boot_source, set_drive, set_machine_config, set_mmds_config,
     set_network_interface, BootSource, Drive, MachineConfig, MmdsConfig, NetworkInterface,
 };
+use std::path::Path;
 
 use crate::vm::VmConfig;
 
