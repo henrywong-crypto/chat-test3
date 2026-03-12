@@ -20,7 +20,7 @@ use axum::{
 };
 use firecracker_manager::{cleanup_stale_vms, setup_host_networking};
 use time::Duration;
-use tokio::{net::TcpListener, signal, task::AbortHandle};
+use tokio::{net::TcpListener, signal, sync::oneshot, task::AbortHandle, time};
 use tower_sessions::{cookie::SameSite, ExpiredDeletion, Expiry, SessionManagerLayer};
 use tower_sessions_sqlx_store::PostgresStore;
 use tracing::info;
@@ -77,7 +77,6 @@ async fn main() -> Result<()> {
         idle_vm_sweep_task.abort_handle(),
     )
     .await?;
-    deletion_task.await??;
     Ok(())
 }
 
@@ -165,14 +164,22 @@ async fn serve_router(
         .await
         .with_context(|| format!("failed to bind to port {port}"))?;
     info!("listening on http://0.0.0.0:{port}");
-    axum::serve(tcp_listener, router)
-        .with_graceful_shutdown(shutdown_signal(
-            deletion_task_abort_handle,
-            mmds_refresh_abort_handle,
-            idle_vm_sweep_abort_handle,
-        ))
-        .await
-        .context("server error")?;
+    let (shutdown_tx, shutdown_rx) = oneshot::channel::<()>();
+    let serve_task = tokio::spawn(async move {
+        axum::serve(tcp_listener, router)
+            .with_graceful_shutdown(async move {
+                let _ = shutdown_rx.await;
+            })
+            .await
+    });
+    shutdown_signal(
+        deletion_task_abort_handle,
+        mmds_refresh_abort_handle,
+        idle_vm_sweep_abort_handle,
+    )
+    .await;
+    let _ = shutdown_tx.send(());
+    let _ = time::timeout(time::Duration::from_secs(5), serve_task).await;
     save_all_vm_rootfs(
         &app_state.vms,
         &app_state.user_rootfs_dir,

@@ -22,19 +22,58 @@ pub enum AgentMessage {
     Abort,
 }
 
-pub async fn start_agent_relay(
+pub fn start_agent_relay(
+    guest_ip: String,
+    ssh_key_path: PathBuf,
+    ssh_user: String,
+    vm_host_key_path: PathBuf,
+    inbound: mpsc::Receiver<AgentMessage>,
+) -> impl Stream<Item = Bytes> {
+    let (tx, rx) = mpsc::channel::<Bytes>(1);
+    tokio::spawn(run_agent_relay(
+        guest_ip,
+        ssh_key_path,
+        ssh_user,
+        vm_host_key_path,
+        inbound,
+        tx,
+    ));
+    ReceiverStream::new(rx)
+}
+
+async fn run_agent_relay(
+    guest_ip: String,
+    ssh_key_path: PathBuf,
+    ssh_user: String,
+    vm_host_key_path: PathBuf,
+    inbound: mpsc::Receiver<AgentMessage>,
+    tx: mpsc::Sender<Bytes>,
+) {
+    if let Err(e) =
+        connect_agent_relay(&guest_ip, &ssh_key_path, &ssh_user, &vm_host_key_path, inbound, tx.clone())
+            .await
+    {
+        let error_payload = serde_json::json!({ "message": e.to_string() });
+        let error_event = format!(
+            "event: error_event\ndata: {}\n\n",
+            serde_json::to_string(&error_payload).unwrap_or_default()
+        );
+        let _ = tx.send(Bytes::from(error_event)).await;
+    }
+}
+
+async fn connect_agent_relay(
     guest_ip: &str,
     ssh_key_path: &PathBuf,
     ssh_user: &str,
     vm_host_key_path: &PathBuf,
     inbound: mpsc::Receiver<AgentMessage>,
-) -> Result<impl Stream<Item = Bytes>> {
+    tx: mpsc::Sender<Bytes>,
+) -> Result<()> {
     let mut ssh_handle = connect_ssh(guest_ip, ssh_key_path, ssh_user, vm_host_key_path).await?;
     info!("agent ssh channel opened");
     let ssh_channel = open_exec_channel(&mut ssh_handle, AGENT_CMD).await?;
-    let (tx, rx) = mpsc::channel::<Bytes>(1);
-    tokio::spawn(run_relay(ssh_handle, ssh_channel, inbound, tx));
-    Ok(ReceiverStream::new(rx))
+    run_relay(ssh_handle, ssh_channel, inbound, tx).await
 }
 
 async fn run_relay(

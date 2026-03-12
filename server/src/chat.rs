@@ -40,13 +40,12 @@ pub(crate) async fn handle_chat_stream(
         .map_err(|e| anyhow!("chat senders lock poisoned: {e}"))?
         .insert(vm_id.clone(), agent_tx);
     let event_stream = start_agent_relay(
-        &guest_ip,
-        &state.ssh_key_path,
-        &state.ssh_user,
-        &state.vm_host_key_path,
+        guest_ip,
+        state.ssh_key_path.clone(),
+        state.ssh_user.clone(),
+        state.vm_host_key_path.clone(),
         agent_rx,
-    )
-    .await?;
+    );
     info!("chat sse stream opened");
     let body = Body::from_stream(event_stream.map(Ok::<_, std::convert::Infallible>));
     Response::builder()
