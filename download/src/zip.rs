@@ -1,4 +1,4 @@
-use anyhow::Context;
+use anyhow::{Context, Result};
 use axum::{
     body::Body,
     http::{header, HeaderValue, Response},
@@ -20,7 +20,7 @@ pub fn build_streaming_zip_response(
     dir_path: String,
     upload_dir: String,
     filename: &str,
-) -> anyhow::Result<Response<Body>> {
+) -> Result<Response<Body>> {
     // zip bytes → HTTP body (bounded for backpressure)
     let (zip_tx, zip_rx) = mpsc::channel::<Result<Bytes, io::Error>>(8);
     // file data → zip writer (bounded to limit SFTP read-ahead)
@@ -114,7 +114,7 @@ fn write_zip_to_channel(
     }
 }
 
-async fn read_file_buffered(sftp: &SftpSession, path: &str) -> anyhow::Result<Vec<u8>> {
+async fn read_file_buffered(sftp: &SftpSession, path: &str) -> Result<Vec<u8>> {
     use tokio::io::AsyncReadExt;
     let mut file = sftp
         .open(path)

@@ -25,21 +25,24 @@ Use `Option` only for values that are genuinely absent as part of normal logic (
 
 ## Channel Sends
 
-Always wrap `mpsc::Sender::send` with `tokio::time::timeout`. A send with no timeout will block forever if the receiver is alive but not consuming — which can happen on an unstable network where the TCP connection appears open but the client is stalled.
+Always wrap `mpsc::Sender::send` with `tokio::time::timeout`. A send with no timeout will block forever if the receiver is alive but not consuming — which can happen on an unstable network where the TCP connection appears open but the client is stalled. Use a three-arm match to distinguish the two failure modes:
 
 ```rust
-// Good — bounded send; treats both timeout and closed receiver as terminal
-if !matches!(
-    timeout(Duration::from_secs(SEND_TIMEOUT_SECS), tx.send(payload)).await,
-    Ok(Ok(()))
-) {
-    break;
+// Good — distinguishes receiver-dropped from consumer-stuck
+match timeout(Duration::from_secs(SEND_TIMEOUT_SECS), tx.send(payload)).await {
+    Ok(Ok(())) => {}
+    Ok(Err(_)) => {
+        info!("receiver dropped, ending relay");
+        return;
+    }
+    Err(_) => {
+        error!("send timed out, consumer likely stuck");
+        return;
+    }
 }
 
 // Bad — blocks forever if consumer stalls
-if tx.send(payload).await.is_err() {
-    break;
-}
+tx.send(payload).await?;
 ```
 
 Define the timeout duration as a named const at the top of the file (e.g. `const SEND_TIMEOUT_SECS: u64 = 30`).

@@ -1,4 +1,4 @@
-use anyhow::Context;
+use anyhow::{Context, Result};
 use axum::{
     extract::{
         ws::{Message, WebSocket, WebSocketUpgrade},
@@ -65,7 +65,7 @@ async fn save_vm_rootfs_on_disconnect(
     state: &AppState,
     user_id: Uuid,
     vm_entry: VmEntry,
-) -> anyhow::Result<()> {
+) -> Result<()> {
     tokio::fs::create_dir_all(&state.user_rootfs_dir)
         .await
         .context("failed to create user rootfs dir on disconnect")?;
@@ -75,7 +75,7 @@ async fn save_vm_rootfs_on_disconnect(
     vm_entry.vm.save_rootfs(&user_rootfs).await.context("failed to save rootfs")
 }
 
-async fn run_ssh_relay(guest_ip: &str, state: &AppState, ws: WebSocket) -> anyhow::Result<()> {
+async fn run_ssh_relay(guest_ip: &str, state: &AppState, ws: WebSocket) -> Result<()> {
     let mut ssh_handle = connect_ssh(
         guest_ip,
         &state.ssh_key_path,
@@ -128,7 +128,7 @@ async fn run_ssh_relay(guest_ip: &str, state: &AppState, ws: WebSocket) -> anyho
     Ok(())
 }
 
-async fn handle_resize_message(ssh_channel: &mut Channel<Msg>, text: &str) -> anyhow::Result<()> {
+async fn handle_resize_message(ssh_channel: &mut Channel<Msg>, text: &str) -> Result<()> {
     let Ok(json) = serde_json::from_str::<serde_json::Value>(text) else {
         return Ok(());
     };

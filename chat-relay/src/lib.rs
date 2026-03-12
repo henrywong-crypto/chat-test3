@@ -8,7 +8,7 @@ use std::path::PathBuf;
 use tokio::sync::mpsc;
 use tokio::time::{interval, timeout, Duration};
 use tokio_stream::wrappers::ReceiverStream;
-use tracing::info;
+use tracing::{error, info};
 
 const AGENT_CMD: &str = "bash -lc '\
     /usr/sbin/logrotate --force /etc/logrotate.d/agent; \
@@ -134,12 +134,16 @@ async fn run_relay(
                 match msg {
                     Some(ChannelMsg::Data { ref data }) => {
                         info!("received stdout from agent  bytes={}", data.len());
-                        if !matches!(
-                            timeout(Duration::from_secs(SEND_TIMEOUT_SECS), tx.send(Bytes::copy_from_slice(data))).await,
-                            Ok(Ok(()))
-                        ) {
-                            info!("sse receiver dropped, ending relay");
-                            break;
+                        match timeout(Duration::from_secs(SEND_TIMEOUT_SECS), tx.send(Bytes::copy_from_slice(data))).await {
+                            Ok(Ok(())) => {}
+                            Ok(Err(_)) => {
+                                info!("sse receiver dropped, ending relay");
+                                break;
+                            }
+                            Err(_) => {
+                                error!("send timed out, sse consumer likely stuck");
+                                break;
+                            }
                         }
                     }
                     Some(ChannelMsg::ExtendedData { ref data, .. }) => {
@@ -165,12 +169,16 @@ async fn run_relay(
                 }
             }
             _ = heartbeat.tick() => {
-                if !matches!(
-                    timeout(Duration::from_secs(SEND_TIMEOUT_SECS), tx.send(Bytes::from_static(b": keep-alive\n\n"))).await,
-                    Ok(Ok(()))
-                ) {
-                    info!("sse receiver dropped during heartbeat, ending relay");
-                    break;
+                match timeout(Duration::from_secs(SEND_TIMEOUT_SECS), tx.send(Bytes::from_static(b": keep-alive\n\n"))).await {
+                    Ok(Ok(())) => {}
+                    Ok(Err(_)) => {
+                        info!("sse receiver dropped during heartbeat, ending relay");
+                        break;
+                    }
+                    Err(_) => {
+                        error!("heartbeat send timed out, sse consumer likely stuck");
+                        break;
+                    }
                 }
             }
         }

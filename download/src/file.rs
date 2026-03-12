@@ -1,4 +1,4 @@
-use anyhow::Context;
+use anyhow::{Context, Result};
 use axum::{
     body::Body,
     http::{header, HeaderValue, Response},
@@ -17,7 +17,7 @@ use tokio_util::io::ReaderStream;
 pub async fn build_streaming_file_response(
     sftp: SftpSession,
     path: &Path,
-) -> anyhow::Result<Response<Body>> {
+) -> Result<Response<Body>> {
     let path_str = path.to_str().context("remote path must be valid UTF-8")?;
     let filename = path
         .file_name()
