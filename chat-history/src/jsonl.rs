@@ -28,10 +28,10 @@ pub(crate) fn parse_chat_history(contents: &str) -> ChatHistory {
 pub(crate) fn extract_last_user_title(contents: &str) -> Option<String> {
     contents
         .lines()
+        .rev()
         .filter_map(|line| serde_json::from_str::<JournalEntry>(line).ok())
         .filter(|e| e.entry_type == "user")
-        .filter_map(|e| extract_user_title(e.message.content))
-        .last()
+        .find_map(|e| extract_user_title(e.message.content))
 }
 
 fn extract_user_title(content: Content) -> Option<String> {
