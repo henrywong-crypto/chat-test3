@@ -562,6 +562,7 @@ function connectChatSse() {
     chatStreaming = false;
     unlockChatInput();
     scrollChatToBottom();
+    loadChatHistory();
   });
   chatEs.addEventListener('error_event', e => {
     const payload = JSON.parse(e.data);
@@ -709,7 +710,7 @@ function ensureThinkingBlock() {
   arrow.className = 'thinking-arrow';
   arrow.textContent = '▸';
   summary.appendChild(arrow);
-  summary.appendChild(document.createTextNode('🤔 Thinking…'));
+  summary.appendChild(document.createTextNode('Thinking…'));
   details.appendChild(summary);
 
   const textEl = document.createElement('div');
