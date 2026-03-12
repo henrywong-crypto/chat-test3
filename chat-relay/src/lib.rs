@@ -6,11 +6,11 @@ use serde::Serialize;
 use ssh_client::{connect_ssh, open_exec_channel, SshClient};
 use std::path::PathBuf;
 use tokio::sync::mpsc;
+use tokio::time::{interval, Duration};
 use tokio_stream::wrappers::ReceiverStream;
 use tracing::info;
 
 const AGENT_CMD: &str = "bash -lc '\
-    /usr/sbin/logrotate --state /dev/null <(printf \"%s/agent.log {\\n  rotate 2\\n  size 10M\\n  missingok\\n  nocreate\\n}\\n\" \"$HOME\"); \
     PYTHONUNBUFFERED=1 /usr/local/bin/uv run /opt/agent.py 2> >(tee -a \"$HOME/agent.log\" >&2)\
 '";
 
@@ -43,6 +43,8 @@ async fn run_relay(
     mut inbound: mpsc::Receiver<AgentMessage>,
     tx: mpsc::Sender<Bytes>,
 ) -> Result<()> {
+    let mut heartbeat = interval(Duration::from_secs(15));
+    heartbeat.tick().await; // consume the immediate first tick
     loop {
         tokio::select! {
             biased;
@@ -94,6 +96,12 @@ async fn run_relay(
                     Some(other) => {
                         info!("unexpected ssh channel message  msg={other:?}");
                     }
+                }
+            }
+            _ = heartbeat.tick() => {
+                if tx.send(Bytes::from_static(b": keep-alive\n\n")).await.is_err() {
+                    info!("sse receiver dropped during heartbeat, ending relay");
+                    break;
                 }
             }
         }

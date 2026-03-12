@@ -504,16 +504,20 @@ function switchToShell() {
 }
 
 function connectChatSse() {
+  console.log('[chat] connecting SSE', vmId);
   chatEs = new EventSource('/sessions/' + vmId + '/chat-stream');
   chatEs.onopen = () => {
+    console.log('[chat] SSE open');
     if (chatEsPending) {
       const content = chatEsPending;
       chatEsPending = null;
       postQuery(content);
     }
   };
-  chatEs.onerror = () => {
+  chatEs.onerror = (e) => {
+    console.log('[chat] SSE error  readyState=' + chatEs.readyState, e);
     if (chatEs.readyState === EventSource.CLOSED) {
+      console.log('[chat] SSE closed');
       chatEs = null;
     }
     chatStreaming = false;
@@ -522,29 +526,35 @@ function connectChatSse() {
     unlockChatInput();
   };
   chatEs.addEventListener('init', () => {
+    console.log('[chat] event: init');
     showThinkingIndicator();
   });
   chatEs.addEventListener('text_delta', e => {
     const payload = JSON.parse(e.data);
+    console.log('[chat] event: text_delta  len=' + payload.text.length);
     removeThinkingIndicator();
     streamHadText = true;
     appendToAssistantMessage(payload.text);
   });
   chatEs.addEventListener('thinking_delta', e => {
     const payload = JSON.parse(e.data);
+    console.log('[chat] event: thinking_delta  len=' + payload.thinking.length);
     appendToThinkingBlock(payload.thinking);
   });
   chatEs.addEventListener('tool_start', e => {
     const payload = JSON.parse(e.data);
+    console.log('[chat] event: tool_start  name=' + payload.name);
     sealAssistantMessage();
     appendToolUseBlock(payload.id, payload.name, payload.input ?? {});
   });
   chatEs.addEventListener('tool_result', e => {
     const payload = JSON.parse(e.data);
+    console.log('[chat] event: tool_result  tool_use_id=' + payload.tool_use_id + '  is_error=' + payload.is_error);
     fillToolResult(payload.tool_use_id, payload.content, payload.is_error);
   });
   chatEs.addEventListener('done', e => {
     const payload = JSON.parse(e.data);
+    console.log('[chat] event: done  session_id=' + payload.session_id);
     if (payload.session_id) chatSessionId = payload.session_id;
     streamHadText = false;
     sealAssistantMessage();
@@ -555,6 +565,7 @@ function connectChatSse() {
   });
   chatEs.addEventListener('error_event', e => {
     const payload = JSON.parse(e.data);
+    console.log('[chat] event: error_event  message=' + (payload.message ?? String(payload)));
     streamHadText = false;
     removeThinkingIndicator();
     sealAssistantMessage();
@@ -585,6 +596,7 @@ function sendQuery(content) {
   }
   prepareForQuery(content);
   if (!chatEs || chatEs.readyState === EventSource.CONNECTING) {
+    console.log('[chat] SSE not ready (readyState=' + (chatEs?.readyState ?? 'null') + '), queuing query');
     chatEsPending = fullContent;
     if (!chatEs) connectChatSse();
     return;
@@ -593,11 +605,13 @@ function sendQuery(content) {
 }
 
 function postQuery(content) {
+  console.log('[chat] posting query  content_len=' + content.length + '  session_id=' + chatSessionId);
   fetch('/sessions/' + vmId + '/chat', {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({ content, session_id: chatSessionId, csrf_token: fmCsrfToken }),
   }).then(res => {
+    console.log('[chat] query response  status=' + res.status);
     if (!res.ok) {
       res.text().then(msg => {
         sealAssistantMessage();
@@ -607,6 +621,7 @@ function postQuery(content) {
       });
     }
   }).catch(err => {
+    console.log('[chat] query fetch error:', err);
     sealAssistantMessage();
     appendErrorMessage('Failed to send message: ' + err.message);
     chatStreaming = false;
