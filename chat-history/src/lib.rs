@@ -37,14 +37,10 @@ pub enum Content {
 pub struct ContentBlock {
     #[serde(rename = "type")]
     pub block_type: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub text: Option<String>,
     #[serde(flatten)]
     fields: serde_json::Map<String, serde_json::Value>,
-}
-
-impl ContentBlock {
-    pub fn text(&self) -> Option<&str> {
-        self.fields.get("text").and_then(|v| v.as_str())
-    }
 }
 
 fn projects_base_path(ssh_user_home: &str) -> String {
@@ -151,25 +147,18 @@ pub async fn fetch_chat_history(
     let mut ssh_handle = connect_ssh(guest_ip, ssh_key_path, ssh_user, vm_host_key_path).await?;
     let sftp = open_sftp_session(&mut ssh_handle).await?;
     let project_dirs = find_all_project_dirs(&sftp, ssh_user_home).await;
-    let chat_history_path = find_session_path(&sftp, &project_dirs, session_id)
-        .await
-        .ok_or_else(|| anyhow!("session not found: {session_id}"))?;
+    let mut chat_history_path = None;
+    for dir in &project_dirs {
+        let path = format!("{dir}/{session_id}.jsonl");
+        if sftp.open(&path).await.is_ok() {
+            chat_history_path = Some(path);
+            break;
+        }
+    }
+    let chat_history_path =
+        chat_history_path.ok_or_else(|| anyhow!("session not found: {session_id}"))?;
     let mut file = sftp.open(&chat_history_path).await?;
     let mut contents = String::new();
     file.read_to_string(&mut contents).await?;
     Ok(jsonl::parse_chat_history(&contents))
-}
-
-async fn find_session_path(
-    sftp: &SftpSession,
-    project_dirs: &[String],
-    session_id: &str,
-) -> Option<String> {
-    for dir in project_dirs {
-        let path = format!("{dir}/{session_id}.jsonl");
-        if sftp.open(&path).await.is_ok() {
-            return Some(path);
-        }
-    }
-    None
 }

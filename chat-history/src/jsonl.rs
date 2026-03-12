@@ -37,7 +37,7 @@ pub(crate) fn extract_last_user_title(contents: &str) -> Option<String> {
 fn extract_user_title(content: Content) -> Option<String> {
     match content {
         Content::Text(text) => Some(text),
-        Content::Blocks(blocks) => blocks.into_iter().find_map(|b| b.text().map(str::to_owned)),
+        Content::Blocks(blocks) => blocks.into_iter().find_map(|b| b.text),
     }
 }
 
@@ -129,7 +129,7 @@ mod tests {
         let Content::Blocks(ref blocks) = chat_history.messages[0].content else { panic!() };
         assert_eq!(blocks.len(), 2);
         assert_eq!(blocks[0].block_type, "thinking");
-        assert_eq!(blocks[1].text(), Some("answer"));
+        assert_eq!(blocks[1].text.as_deref(), Some("answer"));
     }
 
     #[test]
