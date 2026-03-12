@@ -66,18 +66,23 @@ async def run_query(content: str, session_id):
         **({"resume": session_id} if session_id else {}),
     )
     captured_session_id = session_id
-    # Per-block tracking for streaming: index -> type/tool-info/accumulated-input
+    # Per-block tracking for streaming deltas: index -> type / tool-info / accumulated-input
     block_types: dict[int, str] = {}
     tool_info: dict[int, dict] = {}
     tool_input: dict[int, str] = {}
+    # Whether text was already emitted via streaming deltas; if so, skip re-emitting
+    # from the full AssistantEvent to avoid duplicates.
+    emitted_streaming_text = False
     try:
         async for event in query(prompt=content, options=options):
             if hasattr(event, 'session_id') and event.session_id:
                 captured_session_id = event.session_id
             if isinstance(event, StreamEvent):
-                process_stream_event(event, block_types, tool_info, tool_input)
+                had_text = process_stream_event(event, block_types, tool_info, tool_input)
+                if had_text:
+                    emitted_streaming_text = True
             else:
-                process_agent_event(event)
+                process_agent_event(event, emitted_streaming_text)
     except Exception as exc:
         log(f"query error: {exc}")
         emit_sse('error_event', {'message': str(exc)})
@@ -85,32 +90,43 @@ async def run_query(content: str, session_id):
     emit_sse('done', {'session_id': captured_session_id})
 
 
-def process_stream_event(event, block_types: dict, tool_info: dict, tool_input: dict) -> None:
+# ── StreamEvent (raw API streaming) ───────────────────────────────────────────
+
+def process_stream_event(
+    event,
+    block_types: dict,
+    tool_info: dict,
+    tool_input: dict,
+) -> bool:
+    """Process a raw API streaming event. Returns True if any text was emitted."""
     ev = event.event
     ev_type = get_field(ev, 'type')
     if ev_type == 'content_block_start':
-        process_block_start(ev, block_types, tool_info, tool_input)
+        return process_block_start(ev, block_types, tool_info, tool_input)
     elif ev_type == 'content_block_delta':
-        process_block_delta(ev, block_types, tool_info, tool_input)
+        return process_block_delta(ev, block_types, tool_info, tool_input)
     elif ev_type == 'content_block_stop':
         process_block_stop(ev, block_types, tool_info, tool_input)
-    elif ev_type not in ('message_start', 'message_delta', 'message_stop', 'ping'):
+    elif ev_type not in ('message_start', 'message_delta', 'message_stop', 'ping', None):
         log(f"stream_event  {ev_type}")
+    return False
 
 
-def process_block_start(ev, block_types: dict, tool_info: dict, tool_input: dict) -> None:
+def process_block_start(ev, block_types: dict, tool_info: dict, tool_input: dict) -> bool:
     idx = get_field(ev, 'index', 0)
     block = get_field(ev, 'content_block')
     block_type = get_field(block, 'type')
     block_types[idx] = block_type
     if block_type == 'text':
         emit_sse('init', {})
+        return True
     elif block_type == 'tool_use':
         tool_info[idx] = {'id': get_field(block, 'id'), 'name': get_field(block, 'name')}
         tool_input[idx] = ''
+    return False
 
 
-def process_block_delta(ev, block_types: dict, tool_info: dict, tool_input: dict) -> None:
+def process_block_delta(ev, block_types: dict, tool_info: dict, tool_input: dict) -> bool:
     idx = get_field(ev, 'index', 0)
     delta = get_field(ev, 'delta')
     delta_type = get_field(delta, 'type')
@@ -118,6 +134,7 @@ def process_block_delta(ev, block_types: dict, tool_info: dict, tool_input: dict
         text = get_field(delta, 'text', '')
         if text:
             emit_sse('text_delta', {'text': text})
+            return True
     elif delta_type == 'thinking_delta':
         thinking = get_field(delta, 'thinking', '')
         if thinking:
@@ -125,6 +142,7 @@ def process_block_delta(ev, block_types: dict, tool_info: dict, tool_input: dict
     elif delta_type == 'input_json_delta':
         partial = get_field(delta, 'partial_json', '') or ''
         tool_input[idx] = tool_input.get(idx, '') + partial
+    return False
 
 
 def process_block_stop(ev, block_types: dict, tool_info: dict, tool_input: dict) -> None:
@@ -140,44 +158,81 @@ def process_block_stop(ev, block_types: dict, tool_info: dict, tool_input: dict)
     block_types.pop(idx, None)
 
 
-def process_agent_event(event) -> None:
+# ── Non-StreamEvent (structured agent events) ─────────────────────────────────
+
+def process_agent_event(event, emitted_streaming_text: bool) -> None:
     event_type = get_field(event, 'type') or getattr(event, 'type', None)
-    if event_type == 'user':
+    log(f"agent_event  type={event_type!r}  session_id={getattr(event, 'session_id', None)!r}")
+    if event_type == 'assistant':
+        process_assistant_event(event, emitted_streaming_text)
+    elif event_type == 'user':
         process_user_event(event)
-    elif event_type == 'assistant':
-        msg = getattr(event, 'message', None)
-        blocks = [getattr(b, 'type', '?') for b in (getattr(msg, 'content', []) or [])] if msg else []
-        log(f"assistant  blocks={blocks}  session_id={getattr(event, 'session_id', None)!r}")
     elif event_type == 'result':
-        log(f"result  subtype={getattr(event, 'subtype', '?')}  session_id={getattr(event, 'session_id', None)!r}")
+        log(f"result  subtype={getattr(event, 'subtype', '?')}")
     elif event_type == 'system':
-        log(f"system  subtype={getattr(event, 'subtype', '?')}  session_id={getattr(event, 'session_id', None)!r}")
-    elif event_type:
-        log(f"event  type={event_type!r}")
+        log(f"system  subtype={getattr(event, 'subtype', '?')}")
+
+
+def process_assistant_event(event, emitted_streaming_text: bool) -> None:
+    msg = getattr(event, 'message', None)
+    if not msg:
+        return
+    content_blocks = getattr(msg, 'content', []) or []
+    block_types = [getattr(b, 'type', '?') for b in content_blocks]
+    log(f"assistant  blocks={block_types}")
+    if emitted_streaming_text:
+        # Text already came via streaming deltas; only handle tool_use blocks.
+        for block in content_blocks:
+            if getattr(block, 'type', None) == 'tool_use':
+                emit_sse('tool_start', {
+                    'id': getattr(block, 'id', None),
+                    'name': getattr(block, 'name', None),
+                    'input': getattr(block, 'input', {}) or {},
+                })
+        return
+    # No streaming text: emit the full message content now.
+    for block in content_blocks:
+        block_type = getattr(block, 'type', None)
+        if block_type == 'text':
+            text = getattr(block, 'text', '') or ''
+            if text:
+                emit_sse('init', {})
+                emit_sse('text_delta', {'text': text})
+        elif block_type == 'thinking':
+            thinking = getattr(block, 'thinking', '') or ''
+            if thinking:
+                emit_sse('thinking_delta', {'thinking': thinking})
+        elif block_type == 'tool_use':
+            emit_sse('tool_start', {
+                'id': getattr(block, 'id', None),
+                'name': getattr(block, 'name', None),
+                'input': getattr(block, 'input', {}) or {},
+            })
 
 
 def process_user_event(event) -> None:
     msg = getattr(event, 'message', None)
     if not msg:
         return
+    tool_ids = []
     for block in (getattr(msg, 'content', []) or []):
-        if get_field(block, 'type') != 'tool_result':
+        if getattr(block, 'type', None) != 'tool_result':
             continue
-        raw_content = get_field(block, 'content')
+        tool_ids.append(getattr(block, 'tool_use_id', None))
+        raw_content = getattr(block, 'content', None)
         if isinstance(raw_content, list):
             content_str = ' '.join(
-                get_field(b, 'text', '') or ''
+                getattr(b, 'text', '') or ''
                 for b in raw_content
-                if get_field(b, 'type') == 'text'
+                if getattr(b, 'type', None) == 'text'
             )
         else:
             content_str = str(raw_content) if raw_content is not None else ''
         emit_sse('tool_result', {
-            'tool_use_id': get_field(block, 'tool_use_id'),
+            'tool_use_id': getattr(block, 'tool_use_id', None),
             'content': content_str,
-            'is_error': get_field(block, 'is_error') or False,
+            'is_error': getattr(block, 'is_error', False) or False,
         })
-    tool_ids = [get_field(b, 'tool_use_id') for b in (getattr(msg, 'content', []) or []) if get_field(b, 'type') == 'tool_result']
     log(f"user tool_results  tool_use_ids={tool_ids}")
 
 
