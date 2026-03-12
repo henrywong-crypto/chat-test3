@@ -127,11 +127,21 @@ fn default_vm_max_count() -> usize {
 }
 
 pub(crate) fn load_config() -> Result<AppConfig> {
-    let app_config = Config::builder()
+    let mut app_config: AppConfig = Config::builder()
         .add_source(File::with_name("config").required(false))
         .add_source(Environment::default())
         .build()?
         .try_deserialize()?;
+    // Derive ssh_user_home from ssh_user when the caller hasn't explicitly
+    // configured it and ssh_user isn't root (e.g. ssh_user="ubuntu" → "/home/ubuntu").
+    if app_config.ssh_user_home == "/root" && app_config.ssh_user != "root" {
+        app_config.ssh_user_home = format!("/home/{}", app_config.ssh_user);
+    }
+    tracing::info!(
+        ssh_user = %app_config.ssh_user,
+        ssh_user_home = %app_config.ssh_user_home,
+        "config loaded"
+    );
     Ok(app_config)
 }
 
