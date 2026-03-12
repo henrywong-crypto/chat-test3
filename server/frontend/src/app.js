@@ -294,11 +294,10 @@ document.getElementById('fm-file-input').addEventListener('change', function() {
 // ── Chat panel ────────────────────────────────────────────────────────────────
 
 let chatSessionId = null;
-let chatWs = null;
+let chatEs = null;
+let chatEsPending = null;
 let chatStreaming = false;
-// True after we received text via stream_event deltas (avoid duplicating on full AssistantMessage)
 let streamHadText = false;
-let pendingQuery = null;
 let pendingSessionTitle = null;
 
 // Current assistant message container (text node inside it)
@@ -424,7 +423,7 @@ function switchToChat() {
   document.getElementById('tab-chat-icon').classList.add('icon-active');
   document.getElementById('tab-shell-icon').classList.remove('icon-active');
   loadChatHistory();
-  if (!chatWs) connectChatWs();
+  if (!chatEs) connectChatSse();
 }
 
 function switchToShell() {
@@ -440,111 +439,66 @@ function switchToShell() {
   fitAddon.fit();
 }
 
-function isChatPanelOpen() {
-  return !document.getElementById('chat-view').classList.contains('hidden');
-}
-
-function connectChatWs() {
-  chatWs = new WebSocket(wsBase + '/sessions/' + vmId + '/chat');
-  chatWs.onopen = () => {
-    if (pendingQuery) {
-      const { content } = pendingQuery;
-      pendingQuery = null;
-      sendQuery(content);
+function connectChatSse() {
+  chatEs = new EventSource('/sessions/' + vmId + '/chat-stream');
+  chatEs.onopen = () => {
+    if (chatEsPending) {
+      const content = chatEsPending;
+      chatEsPending = null;
+      postQuery(content);
     }
   };
-  chatWs.onmessage = e => {
-    let event;
-    try { event = JSON.parse(e.data); } catch { return; }
-    handleChatEvent(event);
-  };
-  chatWs.onclose = () => {
-    chatWs = null;
-    chatStreaming = false;
-    streamHadText = false;
-    pendingQuery = null;
-    sealAssistantMessage();
-    unlockChatInput();
-    // Auto-reconnect if the chat panel is still open
-    if (isChatPanelOpen()) {
-      setTimeout(() => { if (!chatWs && isChatPanelOpen()) connectChatWs(); }, 2000);
+  chatEs.onerror = () => {
+    if (chatEs.readyState === EventSource.CLOSED) {
+      chatEs = null;
+      chatStreaming = false;
+      streamHadText = false;
+      sealAssistantMessage();
+      unlockChatInput();
     }
   };
-}
-
-
-function handleChatEvent(event) {
-  // Capture session_id from whichever event first carries it
-  if (event.session_id && !chatSessionId) {
-    chatSessionId = event.session_id;
-  }
-  if (event.type === 'system' && event.subtype === 'init') {
+  chatEs.addEventListener('init', () => {
     showThinkingIndicator();
-  } else if (event.type === 'stream_event' && event.event) {
-    const ev = event.event;
-    if (ev.type === 'content_block_start') {
-      const blockType = ev.content_block?.type;
-      if (blockType === 'thinking') {
-        streamInThinkingBlock = true;
-        removeThinkingIndicator();
-        ensureThinkingBlock();
-      } else if (blockType === 'text') {
-        streamInThinkingBlock = false;
-      } else if (blockType === 'tool_use') {
-        streamInThinkingBlock = false;
-      }
-    } else if (ev.type === 'content_block_stop') {
-      if (streamInThinkingBlock) {
-        sealThinkingBlock();
-        streamInThinkingBlock = false;
-      }
-    } else if (ev.type === 'content_block_delta') {
-      if (ev.delta?.type === 'thinking_delta' && ev.delta.thinking) {
-        appendToThinkingBlock(ev.delta.thinking);
-      } else if (ev.delta?.type === 'text_delta' && ev.delta.text) {
-        removeThinkingIndicator();
-        streamHadText = true;
-        appendToAssistantMessage(ev.delta.text);
-      }
-    }
-  } else if (event.type === 'assistant') {
+  });
+  chatEs.addEventListener('text_delta', e => {
+    const payload = JSON.parse(e.data);
     removeThinkingIndicator();
-    const blocks = extractContentBlocks(event);
-    for (const block of blocks) {
-      if (block.type === 'text' && !streamHadText) {
-        appendToAssistantMessage(block.text);
-      } else if (block.type === 'tool_use') {
-        sealAssistantMessage();
-        appendToolUseBlock(block.id, block.name, block.input);
-      }
-    }
-  } else if (event.type === 'user') {
-    const blocks = extractContentBlocks(event);
-    for (const block of blocks) {
-      if (block.type === 'tool_result') {
-        fillToolResult(block.tool_use_id, block.content, block.is_error);
-      }
-    }
-  } else if (event.type === 'result' || event.type === 'done') {
-    if (event.session_id) chatSessionId = event.session_id;
-    // Fallback: if the SDK delivered text in result.result instead of streaming deltas, render it now.
-    if (event.type === 'result' && typeof event.result === 'string' && event.result && !streamHadText) {
-      appendToAssistantMessage(event.result);
-    }
+    streamHadText = true;
+    appendToAssistantMessage(payload.text);
+  });
+  chatEs.addEventListener('thinking_delta', e => {
+    const payload = JSON.parse(e.data);
+    appendToThinkingBlock(payload.thinking);
+  });
+  chatEs.addEventListener('tool_start', e => {
+    const payload = JSON.parse(e.data);
+    sealAssistantMessage();
+    appendToolUseBlock(payload.id, payload.name, payload.input ?? {});
+  });
+  chatEs.addEventListener('tool_result', e => {
+    const payload = JSON.parse(e.data);
+    fillToolResult(payload.tool_use_id, payload.content, payload.is_error);
+  });
+  chatEs.addEventListener('done', e => {
+    const payload = JSON.parse(e.data);
+    if (payload.session_id) chatSessionId = payload.session_id;
     streamHadText = false;
     sealAssistantMessage();
     removeThinkingIndicator();
     chatStreaming = false;
     unlockChatInput();
-  } else if (event.type === 'error') {
+    scrollChatToBottom();
+  });
+  chatEs.addEventListener('error_event', e => {
+    const payload = JSON.parse(e.data);
     streamHadText = false;
     removeThinkingIndicator();
     sealAssistantMessage();
-    appendErrorMessage(event.message ?? String(event));
+    appendErrorMessage(payload.message ?? String(payload));
     chatStreaming = false;
     unlockChatInput();
-  }
-  scrollChatToBottom();
+    scrollChatToBottom();
+  });
 }
 
 function prepareForQuery(content) {
@@ -566,11 +520,20 @@ function sendQuery(content) {
     pendingSessionTitle = content.slice(0, 60);
   }
   prepareForQuery(content);
-  if (chatWs && chatWs.readyState === WebSocket.CONNECTING) {
-    pendingQuery = { content: fullContent };
+  if (!chatEs || chatEs.readyState === EventSource.CONNECTING) {
+    chatEsPending = fullContent;
+    if (!chatEs) connectChatSse();
     return;
   }
-  chatWs.send(JSON.stringify({ type: 'query', content: fullContent, session_id: chatSessionId }));
+  postQuery(fullContent);
+}
+
+function postQuery(content) {
+  fetch('/sessions/' + vmId + '/chat', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ content, session_id: chatSessionId, csrf_token: fmCsrfToken }),
+  });
 }
 
 // ── Message builders ──────────────────────────────────────────────────────────
@@ -1173,9 +1136,12 @@ function scrollChatToBottom() {
 }
 
 function stopGeneration() {
-  if (!chatStreaming || !chatWs) return;
-  chatWs.send(JSON.stringify({ type: 'abort' }));
-  // UI updates happen when the server closes the WS (onclose handler)
+  if (!chatStreaming) return;
+  fetch('/sessions/' + vmId + '/chat/abort', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ csrf_token: fmCsrfToken }),
+  });
 }
 
 function lockChatInput() {

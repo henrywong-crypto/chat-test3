@@ -849,6 +849,7 @@ dependencies = [
  "sftp-client",
  "ssh-client",
  "tokio",
+ "tokio-stream",
  "tracing",
 ]
 

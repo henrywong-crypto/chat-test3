@@ -30,7 +30,7 @@ use crate::{
     auth::{
         get_callback_handler, get_cognito_login_handler, get_login_handler, get_logout_handler,
     },
-    chat::handle_chat_ws_upgrade,
+    chat::{handle_chat_abort, handle_chat_query, handle_chat_stream},
     download::download_file_handler,
     files::list_files_handler,
     handlers::{handle_chat_upload, delete_user_rootfs_handler, get_chat_transcript_handler, get_or_create_terminal, get_terminal_page, list_chat_sessions_handler},
@@ -85,7 +85,9 @@ fn build_router(app_state: AppState, session_store: PostgresStore) -> Router {
         .route("/sessions/{id}/download", get(download_file_handler))
         .route("/sessions/{id}/ls", get(list_files_handler))
         .route("/sessions/{id}/upload", post(upload_file_handler).layer(DefaultBodyLimit::max(50 * 1024 * 1024)))
-        .route("/sessions/{id}/chat", get(handle_chat_ws_upgrade))
+        .route("/sessions/{id}/chat-stream", get(handle_chat_stream))
+        .route("/sessions/{id}/chat", post(handle_chat_query))
+        .route("/sessions/{id}/chat/abort", post(handle_chat_abort))
         .route("/sessions/{id}/chat-history", get(list_chat_sessions_handler))
         .route("/sessions/{id}/chat-transcript", get(get_chat_transcript_handler))
         .route("/sessions/{id}/chat-upload", post(handle_chat_upload).layer(DefaultBodyLimit::max(50 * 1024 * 1024)))

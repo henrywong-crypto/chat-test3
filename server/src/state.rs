@@ -1,17 +1,18 @@
-use anyhow::Result;
-use axum::{
-    http::StatusCode,
-    response::{IntoResponse, Response},
-};
-use config::{Config, Environment, File};
-use serde::Deserialize;
 use std::{
     collections::HashMap,
     path::PathBuf,
     sync::{Arc, Mutex},
 };
+use anyhow::Result;
+use axum::{
+    http::StatusCode,
+    response::{IntoResponse, Response},
+};
+use chat_relay::AgentMessage;
+use config::{Config, Environment, File};
+use serde::Deserialize;
 use store::PgPool;
-use tokio::sync::Mutex as AsyncMutex;
+use tokio::sync::{mpsc, Mutex as AsyncMutex};
 use tracing::error;
 use uuid::Uuid;
 use vm_lifecycle::{VmBuildConfig, VmEntry, VmRegistry};
@@ -152,6 +153,7 @@ pub(crate) struct AppState {
     pub(crate) db: PgPool,
     pub(crate) vms: VmRegistry,
     pub(crate) rootfs_lock: Arc<AsyncMutex<()>>,
+    pub(crate) chat_senders: Arc<Mutex<HashMap<String, mpsc::Sender<AgentMessage>>>>,
 }
 
 impl AppState {
@@ -161,6 +163,7 @@ impl AppState {
             db: pg_pool,
             vms: Arc::new(Mutex::new(HashMap::new())),
             rootfs_lock: Arc::new(AsyncMutex::new(())),
+            chat_senders: Arc::new(Mutex::new(HashMap::new())),
         }
     }
 }
