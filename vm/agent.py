@@ -187,6 +187,7 @@ def process_agent_event(event, emitted_streaming_text: bool) -> None:
 def process_assistant_event(event, emitted_streaming_text: bool) -> None:
     msg = getattr(event, 'message', None)
     if not msg:
+        log(f"DBG assistant no .message; attrs={[a for a in dir(event) if not a.startswith('_')][:12]}")
         return
     content_blocks = getattr(msg, 'content', []) or []
     block_types = [getattr(b, 'type', '?') for b in content_blocks]
