@@ -5,6 +5,24 @@
 - Use `anyhow` for error handling.
 - Use `clap` for CLI argument parsing.
 
+## Error Handling
+
+When an operation returns `Result`, propagate the error with `?` and add context with `.context("...")`. Never swallow errors by converting them to a default value.
+
+```rust
+// Good — fail with context
+let cage_dir = path.parent().context("cage path has no parent")?;
+let weight = metadata.weight.context("missing animal weight")?;
+let tag = HeaderValue::from_str(&value).context("invalid cage tag header")?;
+
+// Bad — silently substitute a default
+let cage_dir = path.parent().unwrap_or(".");
+let weight = metadata.weight.unwrap_or(0);
+let tag = HeaderValue::from_str(&value).unwrap_or(HeaderValue::from_static("fallback"));
+```
+
+Use `Option` only for values that are genuinely absent as part of normal logic (e.g. "animal has no cage", "search found no match"). Use `Result` for anything that can fail due to I/O, missing data, or invalid input.
+
 ## Code Conventions
 
 Every convention exists to maximize readability — code should read like well-written prose where names, structure, and boundaries make intent obvious at a glance.

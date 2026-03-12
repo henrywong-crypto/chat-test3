@@ -1,4 +1,4 @@
-use anyhow::{anyhow, Context, Result};
+use anyhow::{Context, Result};
 use chrono::{DateTime, TimeZone, Utc};
 use serde::{Deserialize, Serialize};
 use sftp_client::{open_sftp_session, DirEntry, SftpSession};
@@ -56,14 +56,10 @@ pub async fn list_chat_sessions(
 ) -> Result<Vec<ChatSession>> {
     let mut ssh_handle = connect_ssh(guest_ip, ssh_key_path, ssh_user, vm_host_key_path).await?;
     let sftp = open_sftp_session(&mut ssh_handle).await?;
-    let project_dirs = find_all_project_dirs(&sftp, ssh_user_home).await;
+    let project_dirs = find_all_project_dirs(&sftp, ssh_user_home).await?;
     let mut all_chat_sessions = Vec::new();
     for project_dir in &project_dirs {
-        let dir_entries: Vec<DirEntry> = sftp
-            .read_dir(project_dir)
-            .await
-            .map(|rd| rd.collect())
-            .unwrap_or_default();
+        let dir_entries: Vec<DirEntry> = sftp.read_dir(project_dir).await?.collect();
         let mut chat_sessions = build_chat_sessions(&sftp, dir_entries, project_dir).await?;
         all_chat_sessions.append(&mut chat_sessions);
     }
@@ -71,13 +67,9 @@ pub async fn list_chat_sessions(
     Ok(all_chat_sessions)
 }
 
-async fn find_all_project_dirs(sftp: &SftpSession, ssh_user_home: &str) -> Vec<String> {
+async fn find_all_project_dirs(sftp: &SftpSession, ssh_user_home: &str) -> Result<Vec<String>> {
     let projects_base = projects_base_path(ssh_user_home);
-    let top_entries: Vec<DirEntry> = sftp
-        .read_dir(&projects_base)
-        .await
-        .map(|rd| rd.collect())
-        .unwrap_or_default();
+    let top_entries: Vec<DirEntry> = sftp.read_dir(&projects_base).await?.collect();
     let mut project_dirs = Vec::new();
     for entry in top_entries {
         let name = entry.file_name();
@@ -89,7 +81,7 @@ async fn find_all_project_dirs(sftp: &SftpSession, ssh_user_home: &str) -> Vec<S
             project_dirs.push(path);
         }
     }
-    project_dirs
+    Ok(project_dirs)
 }
 
 async fn build_chat_sessions(
@@ -148,7 +140,7 @@ pub async fn fetch_chat_history(
 ) -> Result<ChatHistory> {
     let mut ssh_handle = connect_ssh(guest_ip, ssh_key_path, ssh_user, vm_host_key_path).await?;
     let sftp = open_sftp_session(&mut ssh_handle).await?;
-    let project_dirs = find_all_project_dirs(&sftp, ssh_user_home).await;
+    let project_dirs = find_all_project_dirs(&sftp, ssh_user_home).await?;
     let mut chat_history_path = None;
     for dir in &project_dirs {
         let path = format!("{dir}/{session_id}.jsonl");
@@ -158,7 +150,7 @@ pub async fn fetch_chat_history(
         }
     }
     let chat_history_path =
-        chat_history_path.ok_or_else(|| anyhow!("session not found: {session_id}"))?;
+        chat_history_path.context(format!("session not found: {session_id}"))?;
     let mut file = sftp.open(&chat_history_path).await?;
     let mut contents = String::new();
     file.read_to_string(&mut contents).await?;
