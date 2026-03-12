@@ -54,8 +54,18 @@ CLAUDE_SETTINGS = """\
 CHROOT_ROOT_SCRIPT = """\
 set -e
 apt-get update -qq
-apt-get install -y -qq curl
+apt-get install -y -qq curl logrotate
 curl -LsSf https://astral.sh/uv/install.sh | env UV_INSTALL_DIR=/usr/local/bin sh
+"""
+
+LOGROTATE_CONF = """\
+/home/ubuntu/agent.log {
+    rotate 5
+    size 10M
+    compress
+    missingok
+    notifempty
+}
 """
 
 # Runs as the ubuntu user inside the chroot.
@@ -216,6 +226,7 @@ def prepare_rootfs(rootfs: Path) -> None:
     run(["chmod", "1777", str(rootfs / "tmp")])
     (rootfs / "var/cache/apt/archives/partial").mkdir(parents=True, exist_ok=True)
     (rootfs / "var/log/apt").mkdir(parents=True, exist_ok=True)
+    (rootfs / "etc/logrotate.d/agent").write_text(LOGROTATE_CONF)
 
 
 def mount_binds(rootfs: Path) -> list[Path]:

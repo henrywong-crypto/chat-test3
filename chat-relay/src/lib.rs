@@ -11,6 +11,7 @@ use tokio_stream::wrappers::ReceiverStream;
 use tracing::info;
 
 const AGENT_CMD: &str = "bash -lc '\
+    /usr/sbin/logrotate --force /etc/logrotate.d/agent; \
     PYTHONUNBUFFERED=1 /usr/local/bin/uv run /opt/agent.py 2> >(tee -a \"$HOME/agent.log\" >&2)\
 '";
 
