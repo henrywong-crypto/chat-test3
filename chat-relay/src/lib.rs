@@ -55,7 +55,8 @@ async fn run_agent_relay(
     let heartbeat_tx = tx.clone();
     let heartbeat_task = tokio::spawn(async move {
         let mut interval = interval(Duration::from_secs(15));
-        interval.tick().await;
+        // Do NOT skip the first tick: fire immediately to flush nginx proxy buffers
+        // so the browser receives the HTTP 200 headers and fires onopen without delay.
         loop {
             interval.tick().await;
             if heartbeat_tx

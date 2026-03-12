@@ -17,6 +17,19 @@ def log(msg: str) -> None:
     sys.stderr.flush()
 
 
+def emit_sse(event_name: str, data: dict) -> None:
+    """Write a properly formatted SSE event to stdout."""
+    sys.stdout.write(f"event: {event_name}\ndata: {json.dumps(data, cls=_Encoder)}\n\n")
+    sys.stdout.flush()
+
+
+def get_field(obj, field, default=None):
+    """Get a field from either a dict or an object attribute."""
+    if isinstance(obj, dict):
+        return obj.get(field, default)
+    return getattr(obj, field, default)
+
+
 async def main():
     loop = asyncio.get_event_loop()
     reader = asyncio.StreamReader()
@@ -53,50 +66,119 @@ async def run_query(content: str, session_id):
         **({"resume": session_id} if session_id else {}),
     )
     captured_session_id = session_id
+    # Per-block tracking for streaming: index -> type/tool-info/accumulated-input
+    block_types: dict[int, str] = {}
+    tool_info: dict[int, dict] = {}
+    tool_input: dict[int, str] = {}
     try:
         async for event in query(prompt=content, options=options):
-            if isinstance(event, StreamEvent):
-                ev = event.event
-                ev_type = getattr(ev, 'type', None) or (ev.get('type') if isinstance(ev, dict) else None)
-                # Only log structural stream events, not text deltas (too noisy)
-                if ev_type not in ('content_block_delta', 'message_delta'):
-                    log(f"stream_event  {ev_type}")
-                emit(
-                    {
-                        "type": "stream_event",
-                        "session_id": event.session_id,
-                        "event": event.event,
-                    }
-                )
-            else:
-                event_type = getattr(event, 'type', None)
-                if event_type == 'assistant':
-                    content_blocks = []
-                    msg = getattr(event, 'message', None)
-                    if msg:
-                        raw_content = getattr(msg, 'content', [])
-                        content_blocks = [getattr(b, 'type', '?') for b in (raw_content or [])]
-                    log(f"assistant  blocks={content_blocks}  session_id={getattr(event, 'session_id', None)!r}")
-                elif event_type == 'user':
-                    msg = getattr(event, 'message', None)
-                    if msg:
-                        raw_content = getattr(msg, 'content', []) or []
-                        tool_ids = [getattr(b, 'tool_use_id', None) for b in raw_content if getattr(b, 'type', None) == 'tool_result']
-                        log(f"user tool_results  tool_use_ids={tool_ids}")
-                elif event_type == 'result':
-                    log(f"result  subtype={getattr(event, 'subtype', '?')}  session_id={getattr(event, 'session_id', None)!r}")
-                elif event_type == 'system':
-                    log(f"system  subtype={getattr(event, 'subtype', '?')}  session_id={getattr(event, 'session_id', None)!r}")
-                elif event_type:
-                    log(f"event  type={event_type!r}")
-                emit(event)
             if hasattr(event, 'session_id') and event.session_id:
                 captured_session_id = event.session_id
+            if isinstance(event, StreamEvent):
+                process_stream_event(event, block_types, tool_info, tool_input)
+            else:
+                process_agent_event(event)
     except Exception as exc:
         log(f"query error: {exc}")
-        emit({'type': 'error', 'message': str(exc)})
+        emit_sse('error_event', {'message': str(exc)})
     log(f"query done  session_id={captured_session_id!r}")
-    emit({'type': 'done', 'session_id': captured_session_id})
+    emit_sse('done', {'session_id': captured_session_id})
+
+
+def process_stream_event(event, block_types: dict, tool_info: dict, tool_input: dict) -> None:
+    ev = event.event
+    ev_type = get_field(ev, 'type')
+    if ev_type == 'content_block_start':
+        process_block_start(ev, block_types, tool_info, tool_input)
+    elif ev_type == 'content_block_delta':
+        process_block_delta(ev, block_types, tool_info, tool_input)
+    elif ev_type == 'content_block_stop':
+        process_block_stop(ev, block_types, tool_info, tool_input)
+    elif ev_type not in ('message_start', 'message_delta', 'message_stop', 'ping'):
+        log(f"stream_event  {ev_type}")
+
+
+def process_block_start(ev, block_types: dict, tool_info: dict, tool_input: dict) -> None:
+    idx = get_field(ev, 'index', 0)
+    block = get_field(ev, 'content_block')
+    block_type = get_field(block, 'type')
+    block_types[idx] = block_type
+    if block_type == 'text':
+        emit_sse('init', {})
+    elif block_type == 'tool_use':
+        tool_info[idx] = {'id': get_field(block, 'id'), 'name': get_field(block, 'name')}
+        tool_input[idx] = ''
+
+
+def process_block_delta(ev, block_types: dict, tool_info: dict, tool_input: dict) -> None:
+    idx = get_field(ev, 'index', 0)
+    delta = get_field(ev, 'delta')
+    delta_type = get_field(delta, 'type')
+    if delta_type == 'text_delta':
+        text = get_field(delta, 'text', '')
+        if text:
+            emit_sse('text_delta', {'text': text})
+    elif delta_type == 'thinking_delta':
+        thinking = get_field(delta, 'thinking', '')
+        if thinking:
+            emit_sse('thinking_delta', {'thinking': thinking})
+    elif delta_type == 'input_json_delta':
+        partial = get_field(delta, 'partial_json', '') or ''
+        tool_input[idx] = tool_input.get(idx, '') + partial
+
+
+def process_block_stop(ev, block_types: dict, tool_info: dict, tool_input: dict) -> None:
+    idx = get_field(ev, 'index', 0)
+    if block_types.get(idx) == 'tool_use' and idx in tool_info:
+        raw_input = tool_input.pop(idx, '{}') or '{}'
+        try:
+            input_data = json.loads(raw_input)
+        except json.JSONDecodeError:
+            input_data = {}
+        info = tool_info.pop(idx)
+        emit_sse('tool_start', {'id': info['id'], 'name': info['name'], 'input': input_data})
+    block_types.pop(idx, None)
+
+
+def process_agent_event(event) -> None:
+    event_type = get_field(event, 'type') or getattr(event, 'type', None)
+    if event_type == 'user':
+        process_user_event(event)
+    elif event_type == 'assistant':
+        msg = getattr(event, 'message', None)
+        blocks = [getattr(b, 'type', '?') for b in (getattr(msg, 'content', []) or [])] if msg else []
+        log(f"assistant  blocks={blocks}  session_id={getattr(event, 'session_id', None)!r}")
+    elif event_type == 'result':
+        log(f"result  subtype={getattr(event, 'subtype', '?')}  session_id={getattr(event, 'session_id', None)!r}")
+    elif event_type == 'system':
+        log(f"system  subtype={getattr(event, 'subtype', '?')}  session_id={getattr(event, 'session_id', None)!r}")
+    elif event_type:
+        log(f"event  type={event_type!r}")
+
+
+def process_user_event(event) -> None:
+    msg = getattr(event, 'message', None)
+    if not msg:
+        return
+    for block in (getattr(msg, 'content', []) or []):
+        if get_field(block, 'type') != 'tool_result':
+            continue
+        raw_content = get_field(block, 'content')
+        if isinstance(raw_content, list):
+            content_str = ' '.join(
+                get_field(b, 'text', '') or ''
+                for b in raw_content
+                if get_field(b, 'type') == 'text'
+            )
+        else:
+            content_str = str(raw_content) if raw_content is not None else ''
+        emit_sse('tool_result', {
+            'tool_use_id': get_field(block, 'tool_use_id'),
+            'content': content_str,
+            'is_error': get_field(block, 'is_error') or False,
+        })
+    tool_ids = [get_field(b, 'tool_use_id') for b in (getattr(msg, 'content', []) or []) if get_field(b, 'type') == 'tool_result']
+    log(f"user tool_results  tool_use_ids={tool_ids}")
 
 
 class _Encoder(json.JSONEncoder):
@@ -113,24 +195,6 @@ class _Encoder(json.JSONEncoder):
             if type_val is not None:
                 data['type'] = type_val if isinstance(type_val, str) else str(type_val)
         return data
-
-
-def emit(obj):
-    if dataclasses.is_dataclass(obj) and not isinstance(obj, type):
-        data = dataclasses.asdict(obj)
-    elif hasattr(obj, 'model_dump'):
-        data = obj.model_dump()
-    elif isinstance(obj, dict):
-        data = obj
-    else:
-        data = {'raw': str(obj)}
-    # Pydantic's model_dump() may omit discriminator `type` fields; re-inject from attribute if missing.
-    if isinstance(data, dict) and 'type' not in data:
-        type_val = getattr(obj, 'type', None)
-        if type_val is not None:
-            data['type'] = type_val if isinstance(type_val, str) else str(type_val)
-    sys.stdout.write(json.dumps(data, cls=_Encoder) + '\n')
-    sys.stdout.flush()
 
 
 asyncio.run(main())
