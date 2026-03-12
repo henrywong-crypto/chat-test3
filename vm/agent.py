@@ -77,7 +77,9 @@ async def run_query(content: str, session_id):
         async for event in query(prompt=content, options=options):
             if hasattr(event, 'session_id') and event.session_id:
                 captured_session_id = event.session_id
-            if isinstance(event, StreamEvent):
+            is_stream = isinstance(event, StreamEvent)
+            log(f"DBG event class={type(event).__name__} is_stream={is_stream}")
+            if is_stream:
                 had_text = process_stream_event(event, block_types, tool_info, tool_input)
                 if had_text:
                     emitted_streaming_text = True
@@ -101,6 +103,7 @@ def process_stream_event(
     """Process a raw API streaming event. Returns True if any text was emitted."""
     ev = event.event
     ev_type = get_field(ev, 'type')
+    log(f"DBG stream ev_type={ev_type!r} ev_class={type(ev).__name__}")
     if ev_type == 'content_block_start':
         return process_block_start(ev, block_types, tool_info, tool_input)
     elif ev_type == 'content_block_delta':
@@ -176,6 +179,7 @@ def process_agent_event(event, emitted_streaming_text: bool) -> None:
 def process_assistant_event(event, emitted_streaming_text: bool) -> None:
     msg = getattr(event, 'message', None)
     if not msg:
+        log(f"DBG assistant_event: msg is None")
         return
     content_blocks = getattr(msg, 'content', []) or []
     block_types = [getattr(b, 'type', '?') for b in content_blocks]
