@@ -1,6 +1,22 @@
-use serde::Deserialize;
+use anyhow::{Context, Result};
+use serde::{Deserialize, Serialize};
+use sftp_client::open_sftp_session;
+use ssh_client::connect_ssh;
+use std::path::PathBuf;
+use tokio::io::AsyncReadExt;
 
-use crate::{ChatHistory, ChatMessage, Content};
+use crate::{project::find_all_project_dirs, Content};
+
+#[derive(Serialize)]
+pub struct ChatHistory {
+    pub messages: Vec<ChatMessage>,
+}
+
+#[derive(Serialize)]
+pub struct ChatMessage {
+    pub role: String,
+    pub content: Content,
+}
 
 #[derive(Deserialize)]
 struct JournalMessage {
@@ -13,6 +29,33 @@ struct JournalEntry {
     #[serde(rename = "type")]
     entry_type: String,
     message: JournalMessage,
+}
+
+pub async fn fetch_chat_history(
+    guest_ip: &str,
+    ssh_key_path: &PathBuf,
+    ssh_user: &str,
+    vm_host_key_path: &PathBuf,
+    session_id: &str,
+    ssh_user_home: &str,
+) -> Result<ChatHistory> {
+    let mut ssh_handle = connect_ssh(guest_ip, ssh_key_path, ssh_user, vm_host_key_path).await?;
+    let sftp = open_sftp_session(&mut ssh_handle).await?;
+    let project_dirs = find_all_project_dirs(&sftp, ssh_user_home).await;
+    let mut chat_history_path = None;
+    for dir in &project_dirs {
+        let path = format!("{dir}/{session_id}.jsonl");
+        if sftp.open(&path).await.is_ok() {
+            chat_history_path = Some(path);
+            break;
+        }
+    }
+    let chat_history_path =
+        chat_history_path.context(format!("session not found: {session_id}"))?;
+    let mut file = sftp.open(&chat_history_path).await?;
+    let mut contents = String::new();
+    file.read_to_string(&mut contents).await?;
+    Ok(parse_chat_history(&contents))
 }
 
 pub(crate) fn parse_chat_history(contents: &str) -> ChatHistory {
