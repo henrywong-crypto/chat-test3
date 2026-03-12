@@ -77,9 +77,7 @@ async def run_query(content: str, session_id):
         async for event in query(prompt=content, options=options):
             if hasattr(event, 'session_id') and event.session_id:
                 captured_session_id = event.session_id
-            is_stream = isinstance(event, StreamEvent)
-            log(f"DBG event class={type(event).__name__} is_stream={is_stream}")
-            if is_stream:
+            if isinstance(event, StreamEvent):
                 had_text = process_stream_event(event, block_types, tool_info, tool_input)
                 if had_text:
                     emitted_streaming_text = True
@@ -103,7 +101,6 @@ def process_stream_event(
     """Process a raw API streaming event. Returns True if any text was emitted."""
     ev = event.event
     ev_type = get_field(ev, 'type')
-    log(f"DBG stream ev_type={ev_type!r} ev_class={type(ev).__name__}")
     if ev_type == 'content_block_start':
         return process_block_start(ev, block_types, tool_info, tool_input)
     elif ev_type == 'content_block_delta':
@@ -163,8 +160,19 @@ def process_block_stop(ev, block_types: dict, tool_info: dict, tool_input: dict)
 
 # ── Non-StreamEvent (structured agent events) ─────────────────────────────────
 
+def _class_to_event_type(event) -> str | None:
+    """Derive event type from class name for SDKs that don't set a .type attribute.
+
+    e.g. AssistantMessage -> 'assistant', ResultMessage -> 'result'
+    """
+    name = type(event).__name__
+    if name.endswith('Message'):
+        return name[:-len('Message')].lower()
+    return None
+
+
 def process_agent_event(event, emitted_streaming_text: bool) -> None:
-    event_type = get_field(event, 'type') or getattr(event, 'type', None)
+    event_type = get_field(event, 'type') or getattr(event, 'type', None) or _class_to_event_type(event)
     log(f"agent_event  type={event_type!r}  session_id={getattr(event, 'session_id', None)!r}")
     if event_type == 'assistant':
         process_assistant_event(event, emitted_streaming_text)
@@ -179,7 +187,6 @@ def process_agent_event(event, emitted_streaming_text: bool) -> None:
 def process_assistant_event(event, emitted_streaming_text: bool) -> None:
     msg = getattr(event, 'message', None)
     if not msg:
-        log(f"DBG assistant_event: msg is None")
         return
     content_blocks = getattr(msg, 'content', []) or []
     block_types = [getattr(b, 'type', '?') for b in content_blocks]
