@@ -6,7 +6,11 @@ use ssh_client::connect_ssh;
 use std::path::PathBuf;
 use tokio::io::AsyncReadExt;
 
-mod jsonl;
+mod history;
+mod session;
+
+use history::parse_chat_history;
+use session::extract_last_user_title;
 
 #[derive(Serialize)]
 pub struct ChatSession {
@@ -124,7 +128,7 @@ async fn fetch_session_title(sftp: &SftpSession, path: &str) -> Result<Option<St
     let mut file = sftp.open(path).await?;
     let mut contents = String::new();
     file.read_to_string(&mut contents).await?;
-    Ok(jsonl::extract_last_user_title(&contents))
+    Ok(extract_last_user_title(&contents))
 }
 
 pub async fn fetch_chat_history(
@@ -151,5 +155,5 @@ pub async fn fetch_chat_history(
     let mut file = sftp.open(&chat_history_path).await?;
     let mut contents = String::new();
     file.read_to_string(&mut contents).await?;
-    Ok(jsonl::parse_chat_history(&contents))
+    Ok(parse_chat_history(&contents))
 }
