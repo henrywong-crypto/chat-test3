@@ -1,6 +1,7 @@
 use anyhow::Result;
 
 pub mod file;
+pub mod seekable_channel_writer;
 pub mod zip;
 
 use std::path::Path;
