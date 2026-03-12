@@ -69,7 +69,9 @@ pub async fn list_chat_sessions(
 
 async fn find_all_project_dirs(sftp: &SftpSession, ssh_user_home: &str) -> Result<Vec<String>> {
     let projects_base = projects_base_path(ssh_user_home);
-    let top_entries: Vec<DirEntry> = sftp.read_dir(&projects_base).await?.collect();
+    let top_entries: Vec<DirEntry> = sftp.read_dir(&projects_base).await
+        .map(|entries| entries.collect())
+        .unwrap_or_default();
     let mut project_dirs = Vec::new();
     for entry in top_entries {
         let name = entry.file_name();
