@@ -6,7 +6,7 @@ use serde::Serialize;
 use ssh_client::{connect_ssh, open_exec_channel, SshClient};
 use std::path::PathBuf;
 use tokio::sync::mpsc;
-use tokio::time::{interval, Duration};
+use tokio::time::{interval, timeout, Duration};
 use tokio_stream::wrappers::ReceiverStream;
 use tracing::info;
 
@@ -14,6 +14,9 @@ const AGENT_CMD: &str = "bash -lc '\
     /usr/sbin/logrotate --force /etc/logrotate.d/agent; \
     PYTHONUNBUFFERED=1 /usr/local/bin/uv run /opt/agent.py 2> >(tee -a \"$HOME/agent.log\" >&2)\
 '";
+
+const HEARTBEAT_SECS: u64 = 60;
+const SEND_TIMEOUT_SECS: u64 = 30;
 
 pub enum AgentMessage {
     Query {
@@ -55,7 +58,7 @@ async fn run_agent_relay(
     // connections before the relay is ready.
     let heartbeat_tx = tx.clone();
     let heartbeat_task = tokio::spawn(async move {
-        let mut interval = interval(Duration::from_secs(15));
+        let mut interval = interval(Duration::from_secs(HEARTBEAT_SECS));
         // Do NOT skip the first tick: fire immediately to flush nginx proxy buffers
         // so the browser receives the HTTP 200 headers and fires onopen without delay.
         loop {
@@ -79,7 +82,7 @@ async fn run_agent_relay(
             "event: error_event\ndata: {}\n\n",
             serde_json::to_string(&error_payload).unwrap_or_default()
         );
-        let _ = tx.send(Bytes::from(error_event)).await;
+        let _ = timeout(Duration::from_secs(SEND_TIMEOUT_SECS), tx.send(Bytes::from(error_event))).await;
     }
 }
 
@@ -103,7 +106,7 @@ async fn run_relay(
     mut inbound: mpsc::Receiver<AgentMessage>,
     tx: mpsc::Sender<Bytes>,
 ) -> Result<()> {
-    let mut heartbeat = interval(Duration::from_secs(15));
+    let mut heartbeat = interval(Duration::from_secs(HEARTBEAT_SECS));
     heartbeat.tick().await; // consume the immediate first tick
     loop {
         tokio::select! {
@@ -131,7 +134,10 @@ async fn run_relay(
                 match msg {
                     Some(ChannelMsg::Data { ref data }) => {
                         info!("received stdout from agent  bytes={}", data.len());
-                        if tx.send(Bytes::copy_from_slice(data)).await.is_err() {
+                        if !matches!(
+                            timeout(Duration::from_secs(SEND_TIMEOUT_SECS), tx.send(Bytes::copy_from_slice(data))).await,
+                            Ok(Ok(()))
+                        ) {
                             info!("sse receiver dropped, ending relay");
                             break;
                         }
@@ -159,7 +165,10 @@ async fn run_relay(
                 }
             }
             _ = heartbeat.tick() => {
-                if tx.send(Bytes::from_static(b": keep-alive\n\n")).await.is_err() {
+                if !matches!(
+                    timeout(Duration::from_secs(SEND_TIMEOUT_SECS), tx.send(Bytes::from_static(b": keep-alive\n\n"))).await,
+                    Ok(Ok(()))
+                ) {
                     info!("sse receiver dropped during heartbeat, ending relay");
                     break;
                 }

@@ -23,6 +23,27 @@ let tag = HeaderValue::from_str(&value).unwrap_or(HeaderValue::from_static("fall
 
 Use `Option` only for values that are genuinely absent as part of normal logic (e.g. "animal has no cage", "search found no match"). Use `Result` for anything that can fail due to I/O, missing data, or invalid input.
 
+## Channel Sends
+
+Always wrap `mpsc::Sender::send` with `tokio::time::timeout`. A send with no timeout will block forever if the receiver is alive but not consuming — which can happen on an unstable network where the TCP connection appears open but the client is stalled.
+
+```rust
+// Good — bounded send; treats both timeout and closed receiver as terminal
+if !matches!(
+    timeout(Duration::from_secs(SEND_TIMEOUT_SECS), tx.send(payload)).await,
+    Ok(Ok(()))
+) {
+    break;
+}
+
+// Bad — blocks forever if consumer stalls
+if tx.send(payload).await.is_err() {
+    break;
+}
+```
+
+Define the timeout duration as a named const at the top of the file (e.g. `const SEND_TIMEOUT_SECS: u64 = 30`).
+
 ## Code Conventions
 
 Every convention exists to maximize readability — code should read like well-written prose where names, structure, and boundaries make intent obvious at a glance.
