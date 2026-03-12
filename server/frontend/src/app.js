@@ -515,11 +515,11 @@ function connectChatSse() {
   chatEs.onerror = () => {
     if (chatEs.readyState === EventSource.CLOSED) {
       chatEs = null;
-      chatStreaming = false;
-      streamHadText = false;
-      sealAssistantMessage();
-      unlockChatInput();
     }
+    chatStreaming = false;
+    streamHadText = false;
+    sealAssistantMessage();
+    unlockChatInput();
   };
   chatEs.addEventListener('init', () => {
     showThinkingIndicator();
@@ -597,6 +597,20 @@ function postQuery(content) {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({ content, session_id: chatSessionId, csrf_token: fmCsrfToken }),
+  }).then(res => {
+    if (!res.ok) {
+      res.text().then(msg => {
+        sealAssistantMessage();
+        appendErrorMessage(msg || `Server error ${res.status}`);
+        chatStreaming = false;
+        unlockChatInput();
+      });
+    }
+  }).catch(err => {
+    sealAssistantMessage();
+    appendErrorMessage('Failed to send message: ' + err.message);
+    chatStreaming = false;
+    unlockChatInput();
   });
 }
 
