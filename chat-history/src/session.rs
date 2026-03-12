@@ -1,5 +1,5 @@
 use anyhow::{Context, Result};
-use chrono::{DateTime, TimeZone, Utc};
+use chrono::{DateTime, Utc};
 use serde::{Deserialize, Serialize};
 use sftp_client::{open_sftp_session, DirEntry, SftpSession};
 use ssh_client::connect_ssh;
@@ -87,9 +87,7 @@ async fn build_chat_session_with_title(
     project_dir: &str,
 ) -> Result<ChatSession> {
     let mtime = dir_entry.metadata().mtime.context("missing mtime on session file")?;
-    let last_active_at = Utc
-        .timestamp_opt(mtime as i64, 0)
-        .single()
+    let last_active_at = DateTime::from_timestamp(mtime as i64, 0)
         .context("mtime is out of range for a timestamp")?;
     let path = format!("{project_dir}/{session_id}.jsonl");
     let title = fetch_session_title(sftp, &path).await?.unwrap_or_else(|| session_id.to_owned());
