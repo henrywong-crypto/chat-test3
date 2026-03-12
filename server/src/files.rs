@@ -44,11 +44,12 @@ pub(crate) async fn list_files_handler(
         return Ok((StatusCode::NOT_FOUND, "Not found").into_response());
     }
     let db_user = upsert_user(&state.db, &user.email).await?;
-    let guest_ip = match find_vm_guest_ip_for_user(&state.vms, &vm_id, db_user.id)
-        .or_else(|| find_user_vm_guest_ip(&state.vms, db_user.id))
-    {
+    let guest_ip = match find_vm_guest_ip_for_user(&state.vms, &vm_id, db_user.id)? {
         Some(ip) => ip,
-        None => return Ok((StatusCode::NOT_FOUND, "Session not found or expired").into_response()),
+        None => match find_user_vm_guest_ip(&state.vms, db_user.id)? {
+            Some(ip) => ip,
+            None => return Ok((StatusCode::NOT_FOUND, "Session not found or expired").into_response()),
+        },
     };
     let mut ssh_handle = connect_ssh(
         &guest_ip,

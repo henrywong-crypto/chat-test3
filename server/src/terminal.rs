@@ -12,7 +12,7 @@ use russh::{client::Msg, Channel, ChannelMsg};
 use ssh_client::{connect_ssh, open_terminal_channel};
 use std::time::Duration;
 use store::upsert_user;
-use tracing::{error, info};
+use tracing::{error, info, warn};
 use uuid::Uuid;
 use vm_lifecycle::build_user_rootfs_path;
 
@@ -39,10 +39,16 @@ pub(crate) async fn handle_ws_upgrade(
 
 async fn run_terminal_session(ws: WebSocket, state: AppState, vm_id: String, user_id: Uuid) {
     let guest_ip = match find_vm_guest_ip_for_user(&state.vms, &vm_id, user_id) {
-        Some(guest_ip) => guest_ip,
-        None => return,
+        Ok(Some(guest_ip)) => guest_ip,
+        Ok(None) => return,
+        Err(e) => {
+            error!("vm registry error: {e}");
+            return;
+        }
     };
-    mark_vm_ws_connected(&state.vms, &vm_id);
+    if let Err(e) = mark_vm_ws_connected(&state.vms, &vm_id) {
+        error!("failed to mark VM ws connected: {e}");
+    }
     if let Err(e) = run_ssh_relay(&guest_ip, &state, ws).await {
         error!("terminal session error: {e}");
     }
@@ -51,10 +57,13 @@ async fn run_terminal_session(ws: WebSocket, state: AppState, vm_id: String, use
 
 async fn save_and_drop_vm(state: &AppState, vm_id: &str, user_id: Uuid) {
     let vm_entry = {
-        let Ok(mut registry) = state.vms.lock() else {
-            return;
-        };
-        registry.remove(vm_id)
+        match state.vms.lock() {
+            Ok(mut registry) => registry.remove(vm_id),
+            Err(e) => {
+                error!("vm registry lock poisoned on disconnect: {e}");
+                return;
+            }
+        }
     };
     let Some(vm_entry) = vm_entry else {
         return;
@@ -104,7 +113,9 @@ async fn run_ssh_relay(guest_ip: &str, state: &AppState, ws: WebSocket) -> anyho
                         }
                     }
                     Some(Ok(Message::Text(text))) => {
-                        handle_resize_message(&mut ssh_channel, &text).await;
+                        if let Err(e) = handle_resize_message(&mut ssh_channel, &text).await {
+                            warn!("handle_resize_message failed: {e}");
+                        }
                     }
                     Some(Ok(Message::Ping(data))) => {
                         let _ = ws_sender.send(Message::Pong(data)).await;
@@ -123,12 +134,13 @@ async fn run_ssh_relay(guest_ip: &str, state: &AppState, ws: WebSocket) -> anyho
     Ok(())
 }
 
-async fn handle_resize_message(ssh_channel: &mut Channel<Msg>, text: &str) {
+async fn handle_resize_message(ssh_channel: &mut Channel<Msg>, text: &str) -> anyhow::Result<()> {
     if let Ok(json) = serde_json::from_str::<serde_json::Value>(text) {
         if json["type"] == "resize" {
             let cols = json["cols"].as_u64().unwrap_or(80) as u32;
             let rows = json["rows"].as_u64().unwrap_or(24) as u32;
-            let _ = ssh_channel.window_change(cols, rows, 0, 0).await;
+            ssh_channel.window_change(cols, rows, 0, 0).await?;
         }
     }
+    Ok(())
 }

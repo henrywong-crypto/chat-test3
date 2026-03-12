@@ -64,7 +64,7 @@ pub async fn list_chat_sessions(
             .await
             .map(|rd| rd.collect())
             .unwrap_or_default();
-        let mut chat_sessions = build_chat_sessions(&sftp, dir_entries, project_dir).await;
+        let mut chat_sessions = build_chat_sessions(&sftp, dir_entries, project_dir).await?;
         all_chat_sessions.append(&mut chat_sessions);
     }
     all_chat_sessions.sort_by(|a, b| b.last_active_at.cmp(&a.last_active_at));
@@ -96,26 +96,29 @@ async fn build_chat_sessions(
     sftp: &SftpSession,
     dir_entries: Vec<DirEntry>,
     project_dir: &str,
-) -> Vec<ChatSession> {
+) -> Result<Vec<ChatSession>> {
     let mut chat_sessions = Vec::new();
     for dir_entry in &dir_entries {
         if let Some(chat_session) =
-            build_chat_session_with_title(sftp, dir_entry, project_dir).await
+            build_chat_session_with_title(sftp, dir_entry, project_dir).await?
         {
             chat_sessions.push(chat_session);
         }
     }
-    chat_sessions
+    Ok(chat_sessions)
 }
 
 async fn build_chat_session_with_title(
     sftp: &SftpSession,
     dir_entry: &DirEntry,
     project_dir: &str,
-) -> Option<ChatSession> {
-    let session_id = dir_entry.file_name().strip_suffix(".jsonl")?.to_owned();
+) -> Result<Option<ChatSession>> {
+    let session_id = match dir_entry.file_name().strip_suffix(".jsonl") {
+        Some(id) => id.to_owned(),
+        None => return Ok(None),
+    };
     if session_id.starts_with("agent-") {
-        return None;
+        return Ok(None);
     }
     let mtime = dir_entry.metadata().mtime.unwrap_or(0);
     let last_active_at = Utc
@@ -124,16 +127,16 @@ async fn build_chat_session_with_title(
         .unwrap_or_default();
     let path = format!("{project_dir}/{session_id}.jsonl");
     let title = fetch_session_title(sftp, &path)
-        .await
+        .await?
         .unwrap_or_else(|| session_id.clone());
-    Some(ChatSession { session_id, title, last_active_at })
+    Ok(Some(ChatSession { session_id, title, last_active_at }))
 }
 
-async fn fetch_session_title(sftp: &SftpSession, path: &str) -> Option<String> {
-    let mut file = sftp.open(path).await.ok()?;
+async fn fetch_session_title(sftp: &SftpSession, path: &str) -> Result<Option<String>> {
+    let mut file = sftp.open(path).await?;
     let mut contents = String::new();
-    file.read_to_string(&mut contents).await.ok()?;
-    jsonl::extract_last_user_title(&contents)
+    file.read_to_string(&mut contents).await?;
+    Ok(jsonl::extract_last_user_title(&contents))
 }
 
 pub async fn fetch_chat_history(

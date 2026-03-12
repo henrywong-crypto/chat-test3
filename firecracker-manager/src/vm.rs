@@ -10,7 +10,7 @@ use std::{
     sync::Mutex,
     time::Duration,
 };
-use tracing::info;
+use tracing::{info, warn};
 
 use crate::configure::configure_vm;
 use crate::network::{
@@ -23,15 +23,24 @@ use crate::process::{
 
 static VM_NET_INDICES: Mutex<BTreeSet<u32>> = Mutex::new(BTreeSet::new());
 
-fn acquire_net_idx() -> Option<u32> {
-    let mut used = VM_NET_INDICES.lock().unwrap();
-    let idx = (0..254u32).find(|i| !used.contains(i))?;
-    used.insert(idx);
-    Some(idx)
+fn acquire_net_idx() -> Result<Option<u32>> {
+    let mut used = VM_NET_INDICES
+        .lock()
+        .map_err(|e| anyhow::anyhow!("VM network index lock poisoned: {e}"))?;
+    let idx = (0..254u32).find(|i| !used.contains(i));
+    if let Some(i) = idx {
+        used.insert(i);
+    }
+    Ok(idx)
 }
 
 fn release_net_idx(idx: u32) {
-    VM_NET_INDICES.lock().unwrap().remove(&idx);
+    match VM_NET_INDICES.lock() {
+        Ok(mut used) => {
+            used.remove(&idx);
+        }
+        Err(e) => warn!("VM network index lock poisoned on release: {e}"),
+    }
 }
 
 pub struct JailerConfig {
@@ -101,12 +110,16 @@ impl Drop for Vm {
 }
 
 async fn stop_vm(socket_path: &Path, pid: u32) {
-    let _ = stop_instance(socket_path).await;
+    if let Err(e) = stop_instance(socket_path).await {
+        warn!("failed to stop VM instance gracefully: {e}");
+    }
     if tokio::time::timeout(Duration::from_secs(10), wait_for_process_exit(pid))
         .await
         .is_err()
     {
-        let _ = kill(Pid::from_raw(pid as i32), Signal::SIGKILL);
+        if let Err(e) = kill(Pid::from_raw(pid as i32), Signal::SIGKILL) {
+            warn!("failed to SIGKILL process {pid}: {e}");
+        }
     }
 }
 
@@ -120,7 +133,7 @@ async fn wait_for_process_exit(pid: u32) {
 }
 
 pub async fn create_vm(vm_config: &VmConfig) -> Result<Vm> {
-    let net_idx = acquire_net_idx().context("no free network indices (254 VMs already running)")?;
+    let net_idx = acquire_net_idx()?.context("no free network indices (254 VMs already running)")?;
     let tap_name = format_tap_name(net_idx);
     let chroot_dir = build_chroot_dir(&vm_config.jailer.chroot_base, &vm_config.id);
     let result = launch_vm(vm_config, net_idx, &tap_name, &chroot_dir).await;

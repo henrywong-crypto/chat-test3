@@ -1,4 +1,4 @@
-use anyhow::{anyhow, Result};
+use anyhow::{anyhow, Context, Result};
 use axum::{
     extract::{Form, Multipart, Path, Query, State},
     http::StatusCode,
@@ -34,13 +34,13 @@ pub(crate) struct CsrfForm {
     csrf_token: String,
 }
 
-async fn get_csrf_token(session: &Session) -> String {
+async fn get_csrf_token(session: &Session) -> Result<String> {
     if let Ok(Some(token)) = session.get::<String>("csrf_token").await {
-        return token;
+        return Ok(token);
     }
     let token = Uuid::new_v4().to_string().replace('-', "");
-    let _ = session.insert("csrf_token", &token).await;
-    token
+    session.insert("csrf_token", &token).await.context("failed to store CSRF token")?;
+    Ok(token)
 }
 
 async fn validate_csrf(session: &Session, submitted: &str) -> bool {
@@ -61,28 +61,27 @@ fn register_vm(vms: &VmRegistry, vm_id: String, vm_entry: VmEntry) -> Result<(),
     Ok(())
 }
 
-fn find_user_vm_id(vms: &VmRegistry, user_id: Uuid) -> Option<String> {
-    let registry = vms.lock().ok()?;
-    registry
+fn find_user_vm_id(vms: &VmRegistry, user_id: Uuid) -> Result<Option<String>> {
+    let registry = vms.lock().context("vm registry lock poisoned")?;
+    Ok(registry
         .iter()
         .find(|(_, e)| e.user_id == user_id)
-        .map(|(id, _)| id.clone())
+        .map(|(id, _)| id.clone()))
 }
 
-fn remove_user_vm(vms: &VmRegistry, user_id: Uuid) {
-    let removed: Vec<VmEntry> = {
-        let Ok(mut registry) = vms.lock() else { return };
-        let vm_ids: Vec<String> = registry
-            .iter()
-            .filter(|(_, e)| e.user_id == user_id)
-            .map(|(id, _)| id.clone())
-            .collect();
-        vm_ids
-            .into_iter()
-            .filter_map(|id| registry.remove(&id))
-            .collect()
-    };
+fn remove_user_vm(vms: &VmRegistry, user_id: Uuid) -> Result<()> {
+    let mut registry = vms.lock().context("vm registry lock poisoned")?;
+    let vm_ids: Vec<String> = registry
+        .iter()
+        .filter(|(_, e)| e.user_id == user_id)
+        .map(|(id, _)| id.clone())
+        .collect();
+    let removed: Vec<VmEntry> = vm_ids
+        .into_iter()
+        .filter_map(|id| registry.remove(&id))
+        .collect();
     drop(removed);
+    Ok(())
 }
 
 pub(crate) async fn get_or_create_terminal(
@@ -92,11 +91,15 @@ pub(crate) async fn get_or_create_terminal(
 ) -> Result<Response, AppError> {
     let db_user = upsert_user(&state.db, &user.email).await?;
 
-    if let Some(vm_id) = find_user_vm_id(&state.vms, db_user.id) {
+    if let Some(vm_id) = find_user_vm_id(&state.vms, db_user.id)? {
         return Ok(Redirect::to(&format!("/terminal/{vm_id}")).into_response());
     }
 
-    let vm_count = state.vms.lock().map(|r| r.len()).unwrap_or(0);
+    let vm_count = state
+        .vms
+        .lock()
+        .map_err(|_| anyhow!("vm registry lock poisoned"))?
+        .len();
     if vm_count >= state.vm_max_count {
         return Ok((StatusCode::SERVICE_UNAVAILABLE, "VM limit reached").into_response());
     }
@@ -124,7 +127,7 @@ pub(crate) async fn get_or_create_terminal(
     };
     register_vm(&state.vms, vm_id.clone(), vm_entry)?;
 
-    let csrf_token = get_csrf_token(&session).await;
+    let csrf_token = get_csrf_token(&session).await?;
     let has_user_rootfs = find_user_rootfs(&state.user_rootfs_dir, db_user.id).is_some();
     Ok(Html(render_terminal_page(
         &vm_id,
@@ -152,7 +155,7 @@ pub(crate) async fn delete_user_rootfs_handler(
     let _guard = state.rootfs_lock.lock().await;
     let _ = tokio::fs::remove_file(&rootfs_path).await;
     drop(_guard);
-    remove_user_vm(&state.vms, db_user.id);
+    remove_user_vm(&state.vms, db_user.id)?;
     Ok(Redirect::to("/").into_response())
 }
 
@@ -169,16 +172,17 @@ pub(crate) async fn get_terminal_page(
         Ok(db_user) => db_user,
         Err(_) => return (StatusCode::INTERNAL_SERVER_ERROR, "Internal error").into_response(),
     };
-    let owned = state
-        .vms
-        .lock()
-        .ok()
-        .and_then(|r| r.get(&vm_id).map(|e| e.user_id == db_user.id))
-        .unwrap_or(false);
+    let owned = match state.vms.lock() {
+        Ok(registry) => registry.get(&vm_id).map(|e| e.user_id == db_user.id).unwrap_or(false),
+        Err(_) => return (StatusCode::INTERNAL_SERVER_ERROR, "Internal error").into_response(),
+    };
     if !owned {
         return (StatusCode::NOT_FOUND, "Not found").into_response();
     }
-    let csrf_token = get_csrf_token(&session).await;
+    let csrf_token = match get_csrf_token(&session).await {
+        Ok(token) => token,
+        Err(_) => return (StatusCode::INTERNAL_SERVER_ERROR, "Internal error").into_response(),
+    };
     let has_user_rootfs = find_user_rootfs(&state.user_rootfs_dir, db_user.id).is_some();
     Html(render_terminal_page(
         &vm_id,
@@ -204,8 +208,9 @@ pub(crate) async fn list_chat_sessions_handler(
         Err(_) => return (StatusCode::INTERNAL_SERVER_ERROR, "Internal error").into_response(),
     };
     let guest_ip = match find_vm_guest_ip_for_user(&state.vms, &vm_id, db_user.id) {
-        Some(ip) => ip,
-        None => return (StatusCode::NOT_FOUND, "Session not found or expired").into_response(),
+        Ok(Some(ip)) => ip,
+        Ok(None) => return (StatusCode::NOT_FOUND, "Session not found or expired").into_response(),
+        Err(_) => return (StatusCode::INTERNAL_SERVER_ERROR, "Internal error").into_response(),
     };
     match list_chat_sessions(
         &guest_ip,
@@ -243,8 +248,9 @@ pub(crate) async fn get_chat_transcript_handler(
         Err(_) => return (StatusCode::INTERNAL_SERVER_ERROR, "Internal error").into_response(),
     };
     let guest_ip = match find_vm_guest_ip_for_user(&state.vms, &vm_id, db_user.id) {
-        Some(ip) => ip,
-        None => return (StatusCode::NOT_FOUND, "Session not found or expired").into_response(),
+        Ok(Some(ip)) => ip,
+        Ok(None) => return (StatusCode::NOT_FOUND, "Session not found or expired").into_response(),
+        Err(_) => return (StatusCode::INTERNAL_SERVER_ERROR, "Internal error").into_response(),
     };
     match fetch_chat_history(
         &guest_ip,
@@ -279,7 +285,7 @@ pub(crate) async fn handle_chat_upload(
     if !validate_csrf(&session, &csrf_token).await {
         return Ok((StatusCode::FORBIDDEN, "Forbidden").into_response());
     }
-    let guest_ip = match find_vm_guest_ip_for_user(&state.vms, &vm_id, db_user.id) {
+    let guest_ip = match find_vm_guest_ip_for_user(&state.vms, &vm_id, db_user.id)? {
         Some(ip) => ip,
         None => return Ok((StatusCode::NOT_FOUND, "Session not found or expired").into_response()),
     };

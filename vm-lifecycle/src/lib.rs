@@ -1,4 +1,4 @@
-use anyhow::Result;
+use anyhow::{Context, Result};
 use aws_config::default_provider::credentials::DefaultCredentialsChain;
 use aws_credential_types::{provider::ProvideCredentials, Credentials};
 use firecracker_manager::{
@@ -38,11 +38,9 @@ pub struct VmBuildConfig {
     pub jailer_chroot_base: PathBuf,
 }
 
-fn system_time_to_iso8601(t: SystemTime) -> String {
-    OffsetDateTime::try_from(t)
-        .ok()
-        .and_then(|dt| dt.format(&Rfc3339).ok())
-        .unwrap_or_else(|| "2099-01-01T00:00:00Z".to_string())
+fn system_time_to_iso8601(t: SystemTime) -> Result<String> {
+    let dt = OffsetDateTime::try_from(t).context("system time out of range")?;
+    dt.format(&Rfc3339).context("failed to format time as RFC 3339")
 }
 
 pub fn build_vm_config(
@@ -115,7 +113,11 @@ pub async fn fetch_host_iam_credentials() -> Option<(String, ImdsCredential)> {
     let role_name = std::env::var("AWS_ROLE_NAME").unwrap_or_else(|_| "vm-role".to_string());
     let expiration = credentials
         .expiry()
-        .map(system_time_to_iso8601)
+        .and_then(|t| {
+            system_time_to_iso8601(t)
+                .map_err(|e| warn!("failed to format credential expiry: {e}"))
+                .ok()
+        })
         .unwrap_or_else(|| "2099-01-01T00:00:00Z".to_string());
     Some((role_name, build_imds_credential(&credentials, expiration)))
 }

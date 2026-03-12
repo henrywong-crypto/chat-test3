@@ -35,19 +35,30 @@ pub(crate) async fn handle_chat_stream(
         }
     };
     let guest_ip = match find_vm_guest_ip_for_user(&state.vms, &vm_id, db_user.id) {
-        Some(guest_ip) => guest_ip,
-        None => {
+        Ok(Some(guest_ip)) => guest_ip,
+        Ok(None) => {
             warn!("chat stream: vm not found");
             return (StatusCode::NOT_FOUND, "VM not found").into_response();
         }
+        Err(e) => {
+            error!("vm registry error: {e}");
+            return (StatusCode::INTERNAL_SERVER_ERROR, "Internal error").into_response();
+        }
     };
-    mark_vm_ws_connected(&state.vms, &vm_id);
+    if let Err(e) = mark_vm_ws_connected(&state.vms, &vm_id) {
+        error!("failed to mark VM ws connected: {e}");
+        return (StatusCode::INTERNAL_SERVER_ERROR, "Internal error").into_response();
+    }
     let (agent_tx, agent_rx) = mpsc::channel::<AgentMessage>(4);
-    state
-        .chat_senders
-        .lock()
-        .unwrap()
-        .insert(vm_id.clone(), agent_tx);
+    match state.chat_senders.lock() {
+        Ok(mut senders) => {
+            senders.insert(vm_id.clone(), agent_tx);
+        }
+        Err(e) => {
+            error!("chat senders lock poisoned: {e}");
+            return (StatusCode::INTERNAL_SERVER_ERROR, "Internal error").into_response();
+        }
+    }
     let event_stream = match start_agent_relay(
         &guest_ip,
         &state.ssh_key_path,
@@ -65,11 +76,17 @@ pub(crate) async fn handle_chat_stream(
     };
     info!("chat sse stream opened");
     let body = Body::from_stream(event_stream.map(Ok::<_, std::convert::Infallible>));
-    Response::builder()
+    match Response::builder()
         .header(header::CONTENT_TYPE, "text/event-stream")
         .header(header::CACHE_CONTROL, "no-cache")
         .body(body)
-        .unwrap()
+    {
+        Ok(response) => response,
+        Err(e) => {
+            error!("failed to build SSE response: {e}");
+            (StatusCode::INTERNAL_SERVER_ERROR, "Internal error").into_response()
+        }
+    }
 }
 
 #[derive(Deserialize)]

@@ -1,4 +1,4 @@
-use anyhow::Result;
+use anyhow::{Context, Result};
 use axum::{
     http::StatusCode,
     response::{IntoResponse, Response},
@@ -199,28 +199,31 @@ impl<E: Into<anyhow::Error>> From<E> for AppError {
     }
 }
 
-pub(crate) fn mark_vm_ws_connected(vms: &VmRegistry, vm_id: &str) {
-    if let Ok(mut registry) = vms.lock() {
-        if let Some(entry) = registry.get_mut(vm_id) {
-            entry.ws_connected = true;
-        }
+pub(crate) fn mark_vm_ws_connected(vms: &VmRegistry, vm_id: &str) -> Result<()> {
+    let mut registry = vms.lock().context("vm registry lock poisoned")?;
+    if let Some(entry) = registry.get_mut(vm_id) {
+        entry.ws_connected = true;
     }
+    Ok(())
 }
 
 pub(crate) fn find_vm_guest_ip_for_user(
     vms: &VmRegistry,
     vm_id: &str,
     user_id: Uuid,
-) -> Option<String> {
-    let registry = vms.lock().ok()?;
-    let vm_entry = registry.get(vm_id)?;
-    (vm_entry.user_id == user_id).then(|| vm_entry.vm.guest_ip())
+) -> Result<Option<String>> {
+    let registry = vms.lock().context("vm registry lock poisoned")?;
+    let vm_entry = match registry.get(vm_id) {
+        Some(e) => e,
+        None => return Ok(None),
+    };
+    Ok((vm_entry.user_id == user_id).then(|| vm_entry.vm.guest_ip()))
 }
 
-pub(crate) fn find_user_vm_guest_ip(vms: &VmRegistry, user_id: Uuid) -> Option<String> {
-    let registry = vms.lock().ok()?;
-    registry
+pub(crate) fn find_user_vm_guest_ip(vms: &VmRegistry, user_id: Uuid) -> Result<Option<String>> {
+    let registry = vms.lock().context("vm registry lock poisoned")?;
+    Ok(registry
         .values()
         .find(|e| e.user_id == user_id)
-        .map(|e| e.vm.guest_ip())
+        .map(|e| e.vm.guest_ip()))
 }
