@@ -1377,22 +1377,34 @@ async function loadAndRenderTranscript(sessionId) {
 }
 
 function renderTranscriptMessages(messages) {
-  for (const message of messages) {
+  for (let i = 0; i < messages.length; i++) {
+    const message = messages[i];
     if (message.role === 'user') {
-      const textContent = message.content
-        .filter(b => b.type === 'text')
-        .map(b => b.text)
-        .join('');
-      appendUserMessage(textContent);
+      sealAssistantTurn();
+      const textContent = Array.isArray(message.content)
+        ? message.content.filter(b => b.type === 'text').map(b => b.text).join('')
+        : (typeof message.content === 'string' ? message.content : '');
+      if (textContent) appendUserMessage(textContent);
     } else if (message.role === 'assistant') {
-      for (const block of message.content) {
-        if (block.type === 'text' && block.text) {
+      const blocks = Array.isArray(message.content) ? message.content : [];
+      for (const block of blocks) {
+        if (block.type === 'thinking' && block.thinking) {
+          appendToThinkingBlock(block.thinking);
+        } else if (block.type === 'text' && block.text) {
           appendToAssistantMessage(block.text);
         } else if (block.type === 'tool_use') {
+          sealAssistantMessage();
           appendToolUseBlock(block.id, block.name, block.input);
         }
       }
-      sealAssistantTurn();
+      // Keep the turn open if the next message is also assistant
+      const nextIsAssistant = i + 1 < messages.length && messages[i + 1].role === 'assistant';
+      if (nextIsAssistant) {
+        sealAssistantMessage();
+      } else {
+        sealAssistantTurn();
+      }
     }
   }
+  sealAssistantTurn();
 }

@@ -57,8 +57,7 @@ async def run_query(content: str, session_id):
     from claude_agent_sdk import ClaudeAgentOptions, query
     from claude_agent_sdk.types import StreamEvent
 
-    preview = content[:80].replace('\n', ' ')
-    log(f"query start  session_id={session_id!r}  content={preview!r}")
+    log(f"query start  session_id={session_id!r}  content_len={len(content)}")
 
     options = ClaudeAgentOptions(
         cwd=os.environ.get('HOME', '/root'),
