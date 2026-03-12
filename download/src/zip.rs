@@ -1,4 +1,4 @@
-use anyhow::{Context, Result};
+use anyhow::{bail, Context, Result};
 use axum::{
     body::Body,
     http::{header, HeaderValue, Response},
@@ -7,13 +7,23 @@ use bytes::Bytes;
 use futures::{channel::mpsc, SinkExt};
 use russh_sftp::client::SftpSession;
 use std::io;
-use tokio::sync::mpsc as tokio_mpsc;
+use tokio::{
+    sync::mpsc as tokio_mpsc,
+    time::{timeout, Duration},
+};
 use zip::write::SimpleFileOptions;
 
 use crate::validate_within_dir;
 
 const MAX_DOWNLOAD_BYTES: usize = 100 * 1024 * 1024; // 100 MB
 const MAX_ZIP_DEPTH: usize = 10;
+const FILE_CHUNK_SIZE: usize = 64 * 1024; // 64 KB
+const SEND_TIMEOUT_SECS: u64 = 30;
+
+enum FileEvent {
+    Start(String),
+    Chunk(Bytes),
+}
 
 pub fn build_streaming_zip_response(
     sftp: SftpSession,
@@ -23,8 +33,8 @@ pub fn build_streaming_zip_response(
 ) -> Result<Response<Body>> {
     // zip bytes → HTTP body (bounded for backpressure)
     let (zip_tx, zip_rx) = mpsc::channel::<Result<Bytes, io::Error>>(8);
-    // file data → zip writer (bounded to limit SFTP read-ahead)
-    let (file_tx, file_rx) = tokio_mpsc::channel::<(String, Vec<u8>)>(4);
+    // file events → zip writer (bounded to limit SFTP read-ahead)
+    let (file_tx, file_rx) = tokio_mpsc::channel::<FileEvent>(4);
 
     tokio::spawn(collect_zip_files(sftp, dir_path, upload_dir, file_tx));
     tokio::task::spawn_blocking(move || write_zip_to_channel(file_rx, zip_tx));
@@ -43,7 +53,7 @@ async fn collect_zip_files(
     sftp: SftpSession,
     dir_path: String,
     upload_dir: String,
-    file_tx: tokio_mpsc::Sender<(String, Vec<u8>)>,
+    file_tx: tokio_mpsc::Sender<FileEvent>,
 ) {
     let mut total_bytes: usize = 0;
     let mut dirs_to_visit: Vec<(String, usize)> = vec![(dir_path.clone(), 0)];
@@ -70,28 +80,51 @@ async fn collect_zip_files(
                 }
                 continue;
             }
-            let data = match read_file_buffered(&sftp, &child_path).await {
-                Ok(data) => data,
-                Err(_) => return,
-            };
-            total_bytes += data.len();
-            if total_bytes > MAX_DOWNLOAD_BYTES {
-                return;
-            }
             let relative = child_path
                 .strip_prefix(&dir_path)
                 .unwrap_or(&child_path)
                 .trim_start_matches('/')
                 .to_owned();
-            if file_tx.send((relative, data)).await.is_err() {
+            match timeout(Duration::from_secs(SEND_TIMEOUT_SECS), file_tx.send(FileEvent::Start(relative))).await {
+                Ok(Ok(())) => {}
+                _ => return,
+            }
+            if stream_file(&sftp, &child_path, &file_tx, &mut total_bytes).await.is_err() {
                 return;
             }
         }
     }
 }
 
+async fn stream_file(
+    sftp: &SftpSession,
+    path: &str,
+    file_tx: &tokio_mpsc::Sender<FileEvent>,
+    total_bytes: &mut usize,
+) -> Result<()> {
+    use tokio::io::AsyncReadExt;
+    let mut file = sftp.open(path).await.context("failed to open remote file")?;
+    let mut buf = vec![0u8; FILE_CHUNK_SIZE];
+    loop {
+        let n = file.read(&mut buf).await.context("failed to read remote file")?;
+        if n == 0 {
+            break;
+        }
+        *total_bytes += n;
+        if *total_bytes > MAX_DOWNLOAD_BYTES {
+            bail!("download size limit exceeded");
+        }
+        match timeout(Duration::from_secs(SEND_TIMEOUT_SECS), file_tx.send(FileEvent::Chunk(Bytes::copy_from_slice(&buf[..n])))).await {
+            Ok(Ok(())) => {}
+            Ok(Err(_)) => bail!("zip writer dropped"),
+            Err(_) => bail!("zip writer send timed out"),
+        }
+    }
+    Ok(())
+}
+
 fn write_zip_to_channel(
-    mut file_rx: tokio_mpsc::Receiver<(String, Vec<u8>)>,
+    mut file_rx: tokio_mpsc::Receiver<FileEvent>,
     zip_tx: mpsc::Sender<Result<Bytes, io::Error>>,
 ) {
     let options = SimpleFileOptions::default().compression_method(zip::CompressionMethod::Deflated);
@@ -99,12 +132,20 @@ fn write_zip_to_channel(
     let zip_ok = {
         let mut zip = zip::ZipWriter::new(&mut writer);
         let mut ok = true;
-        while let Some((name, data)) = file_rx.blocking_recv() {
-            if zip.start_file(&name, options).is_err()
-                || io::Write::write_all(&mut zip, &data).is_err()
-            {
-                ok = false;
-                break;
+        while let Some(event) = file_rx.blocking_recv() {
+            match event {
+                FileEvent::Start(name) => {
+                    if zip.start_file(&name, options).is_err() {
+                        ok = false;
+                        break;
+                    }
+                }
+                FileEvent::Chunk(data) => {
+                    if io::Write::write_all(&mut zip, &data).is_err() {
+                        ok = false;
+                        break;
+                    }
+                }
             }
         }
         ok && zip.finish().is_ok()
@@ -112,19 +153,6 @@ fn write_zip_to_channel(
     if zip_ok {
         let _ = writer.flush_remaining();
     }
-}
-
-async fn read_file_buffered(sftp: &SftpSession, path: &str) -> Result<Vec<u8>> {
-    use tokio::io::AsyncReadExt;
-    let mut file = sftp
-        .open(path)
-        .await
-        .context("failed to open remote file")?;
-    let mut buf = Vec::new();
-    file.read_to_end(&mut buf)
-        .await
-        .context("failed to read remote file")?;
-    Ok(buf)
 }
 
 // ── SeekableChannelWriter ─────────────────────────────────────────────────────
