@@ -1,13 +1,12 @@
 use axum::{
+    body::Body,
     extract::{Path, State},
-    http::StatusCode,
-    response::{
-        sse::{Event, KeepAlive, Sse},
-        IntoResponse, Response,
-    },
+    http::{header, StatusCode},
+    response::{IntoResponse, Response},
     Json,
 };
 use chat_relay::{start_agent_relay, AgentMessage};
+use futures::StreamExt;
 use serde::Deserialize;
 use store::upsert_user;
 use tokio::sync::mpsc;
@@ -62,7 +61,12 @@ pub(crate) async fn handle_chat_stream(
         }
     };
     info!("chat sse stream opened");
-    Sse::new(event_stream).keep_alive(KeepAlive::default()).into_response()
+    let body = Body::from_stream(event_stream.map(Ok::<_, std::convert::Infallible>));
+    Response::builder()
+        .header(header::CONTENT_TYPE, "text/event-stream")
+        .header(header::CACHE_CONTROL, "no-cache")
+        .body(body)
+        .unwrap()
 }
 
 #[derive(Deserialize)]

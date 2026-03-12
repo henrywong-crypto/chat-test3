@@ -1,12 +1,11 @@
-use std::{path::PathBuf, time::Duration};
+use std::path::PathBuf;
 
 use anyhow::Result;
-use axum::response::sse::Event;
 use bytes::Bytes;
 use futures::stream::Stream;
 use russh::{client, Channel, ChannelMsg};
 use ssh_client::{connect_ssh, open_exec_channel, SshClient};
-use tokio::{sync::mpsc, time::timeout};
+use tokio::sync::mpsc;
 use tokio_stream::wrappers::ReceiverStream;
 use tracing::info;
 
@@ -27,24 +26,22 @@ pub async fn start_agent_relay(
     vm_host_key_path: &PathBuf,
     inbound: mpsc::Receiver<AgentMessage>,
     vm_id: String,
-) -> Result<impl Stream<Item = anyhow::Result<Event>>> {
+) -> Result<impl Stream<Item = Bytes>> {
     let mut ssh_handle = connect_ssh(guest_ip, ssh_key_path, ssh_user, vm_host_key_path).await?;
     info!("agent ssh channel opened");
     let ssh_channel = open_exec_channel(&mut ssh_handle, AGENT_CMD).await?;
-    let (event_tx, event_rx) = mpsc::channel::<anyhow::Result<Event>>(1);
-    tokio::spawn(run_relay(ssh_handle, ssh_channel, inbound, event_tx, vm_id));
-    Ok(ReceiverStream::new(event_rx))
+    let (tx, rx) = mpsc::channel::<Bytes>(1);
+    tokio::spawn(run_relay(ssh_handle, ssh_channel, inbound, tx, vm_id));
+    Ok(ReceiverStream::new(rx))
 }
 
 async fn run_relay(
     _ssh_handle: client::Handle<SshClient>, // keeps the SSH connection alive for the duration of the relay
     mut ssh_channel: Channel<client::Msg>,
     mut inbound: mpsc::Receiver<AgentMessage>,
-    event_tx: mpsc::Sender<anyhow::Result<Event>>,
+    tx: mpsc::Sender<Bytes>,
     vm_id: String,
 ) -> Result<()> {
-    let mut line_buf = String::new();
-    let mut pending_event_name: Option<String> = None;
     loop {
         tokio::select! {
             biased;
@@ -54,25 +51,16 @@ async fn run_relay(
                     Some(AgentMessage::Query { content, session_id }) => {
                         let payload = build_query_payload(&content, session_id.as_deref())?;
                         let line = format!("{payload}\n");
-                        if ssh_channel.data(Bytes::from(line).as_ref()).await.is_err() {
-                            break;
-                        }
-                    }
-                }
-            }
-            _ = std::future::ready(()), if line_buf.contains('\n') => {
-                if let Some(pos) = line_buf.find('\n') {
-                    let line = line_buf[..pos].trim_end_matches('\r').to_owned();
-                    line_buf.drain(..=pos);
-                    if forward_sse_line(line, &mut pending_event_name, &event_tx).await.is_err() {
-                        break;
+                        ssh_channel.data(Bytes::from(line).as_ref()).await?;
                     }
                 }
             }
             msg = ssh_channel.wait() => {
                 match msg {
                     Some(ChannelMsg::Data { ref data }) => {
-                        line_buf.push_str(std::str::from_utf8(data).unwrap_or(""));
+                        if tx.send(Bytes::copy_from_slice(data)).await.is_err() {
+                            break;
+                        }
                     }
                     Some(ChannelMsg::ExtendedData { ref data, .. }) => {
                         if let Ok(text) = std::str::from_utf8(data) {
@@ -94,26 +82,6 @@ async fn run_relay(
         }
     }
     info!(vm_id = %vm_id, "agent relay ended");
-    Ok(())
-}
-
-/// Parses one SSE line and forwards a data event if applicable.
-/// Returns `Err` when the SSE client has disconnected or the send timed out.
-async fn forward_sse_line(
-    line: String,
-    pending_event_name: &mut Option<String>,
-    event_tx: &mpsc::Sender<anyhow::Result<Event>>,
-) -> Result<()> {
-    if let Some(name) = line.strip_prefix("event: ") {
-        *pending_event_name = Some(name.to_owned());
-    } else if let Some(payload) = line.strip_prefix("data: ") {
-        let name = pending_event_name.take().unwrap_or_else(|| "message".to_owned());
-        let event = Event::default().event(name).data(payload.to_owned());
-        timeout(Duration::from_secs(5), event_tx.send(Ok(event)))
-            .await
-            .map_err(|_| anyhow::anyhow!("sse send timeout"))?
-            .map_err(|_| anyhow::anyhow!("sse client disconnected"))?;
-    }
     Ok(())
 }
 
