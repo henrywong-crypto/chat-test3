@@ -48,18 +48,29 @@ async fn run_relay(
             biased;
             msg = inbound.recv() => {
                 match msg {
-                    None | Some(AgentMessage::Abort) => break,
+                    None => {
+                        info!("inbound channel closed, ending relay");
+                        break;
+                    }
+                    Some(AgentMessage::Abort) => {
+                        info!("abort received, ending relay");
+                        break;
+                    }
                     Some(AgentMessage::Query { content, session_id }) => {
+                        info!("sending query to agent  session_id={session_id:?}  content_len={}", content.len());
                         let payload = build_query_payload(&content, session_id.as_deref())?;
                         let line = format!("{payload}\n");
                         ssh_channel.data(Bytes::from(line).as_ref()).await?;
+                        info!("query sent to agent");
                     }
                 }
             }
             msg = ssh_channel.wait() => {
                 match msg {
                     Some(ChannelMsg::Data { ref data }) => {
+                        info!("received stdout from agent  bytes={}", data.len());
                         if tx.send(Bytes::copy_from_slice(data)).await.is_err() {
+                            info!("sse receiver dropped, ending relay");
                             break;
                         }
                     }
@@ -76,8 +87,13 @@ async fn run_relay(
                         info!("agent exited  status={exit_status}");
                         break;
                     }
-                    None => break,
-                    _ => {}
+                    None => {
+                        info!("ssh channel closed");
+                        break;
+                    }
+                    Some(other) => {
+                        info!("unexpected ssh channel message  msg={other:?}");
+                    }
                 }
             }
         }

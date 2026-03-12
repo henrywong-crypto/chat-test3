@@ -78,16 +78,19 @@ pub(crate) async fn handle_chat_query(
         return (StatusCode::FORBIDDEN, "Forbidden").into_response();
     }
     let Some(agent_tx) = find_agent_sender(&state, &vm_id) else {
+        info!("no active chat stream for vm_id={vm_id}");
         return (StatusCode::NOT_FOUND, "No active chat stream").into_response();
     };
+    let content_len = body.content.len();
     let agent_message = AgentMessage::Query {
         content: body.content,
         session_id: body.session_id,
     };
     if agent_tx.send(agent_message).await.is_err() {
+        info!("agent sender closed for vm_id={vm_id}");
         return (StatusCode::SERVICE_UNAVAILABLE, "Agent not available").into_response();
     }
-    info!("query forwarded");
+    info!("query forwarded  vm_id={vm_id}  content_len={content_len}");
     (StatusCode::OK, "").into_response()
 }
 
