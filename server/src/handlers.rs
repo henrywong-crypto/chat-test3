@@ -228,6 +228,7 @@ pub(crate) async fn list_chat_sessions_handler(
         error!(vm_id = %vm_id, "list_chat_sessions failed: {e}");
         (StatusCode::INTERNAL_SERVER_ERROR, "Internal error").into_response()
     }))
+}
 
 #[derive(Deserialize)]
 pub(crate) struct TranscriptQuery {
@@ -261,6 +262,7 @@ pub(crate) async fn get_chat_transcript_handler(
         error!(vm_id = %vm_id, session_id = %query.session_id, "fetch_chat_history failed: {e}");
         (StatusCode::NOT_FOUND, "Transcript not found").into_response()
     }))
+}
 
 pub(crate) async fn handle_chat_upload(
     user: User,
