@@ -56,7 +56,7 @@ pub async fn list_chat_sessions(
 ) -> Result<Vec<ChatSession>> {
     let mut ssh_handle = connect_ssh(guest_ip, ssh_key_path, ssh_user, vm_host_key_path).await?;
     let sftp = open_sftp_session(&mut ssh_handle).await?;
-    let project_dirs = find_all_project_dirs(&sftp, ssh_user_home).await?;
+    let project_dirs = find_all_project_dirs(&sftp, ssh_user_home).await;
     let mut all_chat_sessions = Vec::new();
     for project_dir in &project_dirs {
         let dir_entries: Vec<DirEntry> = sftp.read_dir(project_dir).await?.collect();
@@ -67,7 +67,7 @@ pub async fn list_chat_sessions(
     Ok(all_chat_sessions)
 }
 
-async fn find_all_project_dirs(sftp: &SftpSession, ssh_user_home: &str) -> Result<Vec<String>> {
+async fn find_all_project_dirs(sftp: &SftpSession, ssh_user_home: &str) -> Vec<String> {
     let projects_base = projects_base_path(ssh_user_home);
     // Directory may not exist yet on a fresh VM; treat as empty rather than an error
     let top_entries: Vec<DirEntry> = sftp.read_dir(&projects_base).await
@@ -84,7 +84,7 @@ async fn find_all_project_dirs(sftp: &SftpSession, ssh_user_home: &str) -> Resul
             project_dirs.push(path);
         }
     }
-    Ok(project_dirs)
+    project_dirs
 }
 
 async fn build_chat_sessions(
@@ -137,7 +137,7 @@ pub async fn fetch_chat_history(
 ) -> Result<ChatHistory> {
     let mut ssh_handle = connect_ssh(guest_ip, ssh_key_path, ssh_user, vm_host_key_path).await?;
     let sftp = open_sftp_session(&mut ssh_handle).await?;
-    let project_dirs = find_all_project_dirs(&sftp, ssh_user_home).await?;
+    let project_dirs = find_all_project_dirs(&sftp, ssh_user_home).await;
     let mut chat_history_path = None;
     for dir in &project_dirs {
         let path = format!("{dir}/{session_id}.jsonl");
