@@ -62,7 +62,7 @@ fn register_vm(vms: &VmRegistry, vm_id: String, vm_entry: VmEntry) -> Result<(),
 }
 
 fn find_user_vm_id(vms: &VmRegistry, user_id: Uuid) -> Result<Option<String>> {
-    let registry = vms.lock().context("vm registry lock poisoned")?;
+    let registry = vms.lock().map_err(|_| anyhow!("vm registry lock poisoned"))?;
     Ok(registry
         .iter()
         .find(|(_, e)| e.user_id == user_id)
@@ -70,7 +70,7 @@ fn find_user_vm_id(vms: &VmRegistry, user_id: Uuid) -> Result<Option<String>> {
 }
 
 fn remove_user_vm(vms: &VmRegistry, user_id: Uuid) -> Result<()> {
-    let mut registry = vms.lock().context("vm registry lock poisoned")?;
+    let mut registry = vms.lock().map_err(|_| anyhow!("vm registry lock poisoned"))?;
     let vm_ids: Vec<String> = registry
         .iter()
         .filter(|(_, e)| e.user_id == user_id)
