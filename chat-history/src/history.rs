@@ -36,14 +36,25 @@ pub async fn fetch_chat_history(
 }
 
 pub(crate) fn parse_chat_history(contents: &str) -> ChatHistory {
-    let messages = contents
+    let mut messages = Vec::new();
+    let mut skip_next_assistant = false;
+    for entry in contents
         .lines()
         .filter_map(|line| serde_json::from_str::<JournalEntry>(line).ok())
         .filter(|e| matches!(e.type_.as_str(), "user" | "assistant"))
         .filter(|e| !e.is_meta)
-        .filter(|e| !is_slash_command(&e.message.content))
-        .map(build_chat_message)
-        .collect();
+    {
+        if is_slash_command(&entry.message.content) {
+            skip_next_assistant = true;
+            continue;
+        }
+        if entry.type_ == "assistant" && skip_next_assistant {
+            skip_next_assistant = false;
+            continue;
+        }
+        skip_next_assistant = false;
+        messages.push(build_chat_message(entry));
+    }
     ChatHistory { messages }
 }
 
@@ -158,5 +169,15 @@ mod tests {
             panic!()
         };
         assert_eq!(text, "first message");
+    }
+
+    #[test]
+    fn test_assistant_response_to_slash_command_is_excluded() {
+        let assistant_response = make_assistant_line("No response requested.");
+        let jsonl = [FIXTURE_SLASH_COMMAND_USER, &assistant_response, FIXTURE_FIRST_USER, &make_assistant_line("hello")].join("\n");
+        let chat_history = parse_chat_history(&jsonl);
+        assert_eq!(chat_history.messages.len(), 2);
+        assert_eq!(chat_history.messages[0].role, "user");
+        assert_eq!(chat_history.messages[1].role, "assistant");
     }
 }
