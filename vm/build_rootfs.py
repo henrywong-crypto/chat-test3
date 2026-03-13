@@ -70,6 +70,21 @@ LOGROTATE_CONF = """\
 }
 """
 
+IMDS_ROUTE_UNIT = """\
+[Unit]
+Description=Add IMDS route for Firecracker MMDS
+DefaultDependencies=no
+After=network-pre.target
+
+[Service]
+Type=oneshot
+ExecStart=/usr/sbin/ip route add 169.254.169.254 dev eth0
+RemainAfterExit=yes
+
+[Install]
+WantedBy=network.target
+"""
+
 # Runs as the ubuntu user inside the chroot.
 CHROOT_USER_SCRIPT = """\
 set -e
@@ -224,11 +239,25 @@ def setup_host_ssh_key(workdir: Path, rootfs: Path) -> Path:
 
 
 def prepare_rootfs(rootfs: Path) -> None:
-    (rootfs / "etc/resolv.conf").write_text("nameserver 1.1.1.1\n")
+    # Ubuntu 24.04 ships /etc/resolv.conf as a symlink to a systemd-resolved
+    # runtime path under /run — which is a tmpfs and is empty at VM boot.
+    # Remove the symlink and write a real file so DNS works without
+    # systemd-resolved.
+    resolv_conf = rootfs / "etc/resolv.conf"
+    if resolv_conf.is_symlink():
+        resolv_conf.unlink()
+    resolv_conf.write_text("nameserver 1.1.1.1\n")
+    # Mask systemd-resolved so it cannot recreate the symlink at runtime.
+    (rootfs / "etc/systemd/system/systemd-resolved.service").symlink_to("/dev/null")
     run(["chmod", "1777", str(rootfs / "tmp")])
     (rootfs / "var/cache/apt/archives/partial").mkdir(parents=True, exist_ok=True)
     (rootfs / "var/log/apt").mkdir(parents=True, exist_ok=True)
     (rootfs / "etc/logrotate.d/agent").write_text(LOGROTATE_CONF)
+    systemd_dir = rootfs / "etc/systemd/system"
+    (systemd_dir / "imds-route.service").write_text(IMDS_ROUTE_UNIT)
+    wants_dir = systemd_dir / "network.target.wants"
+    wants_dir.mkdir(exist_ok=True)
+    (wants_dir / "imds-route.service").symlink_to("/etc/systemd/system/imds-route.service")
 
 
 def mount_binds(rootfs: Path) -> list[Path]:

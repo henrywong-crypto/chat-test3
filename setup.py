@@ -370,8 +370,42 @@ def build_rootfs(ci_version: str) -> None:
             sudo("chmod", "600", str(ubuntu_ssh / "authorized_keys"))
             sudo("chown", "-R", "1000:1000", str(ubuntu_ssh))
 
-            # DNS inside the rootfs
+            # Ubuntu 24.04 ships /etc/resolv.conf as a symlink to a
+            # systemd-resolved runtime path under /run — which is a tmpfs and
+            # is empty at VM boot.  Remove the symlink and write a real file so
+            # DNS works without systemd-resolved.
+            sudo("rm", "-f", str(squashfs_root / "etc" / "resolv.conf"))
             sudo_write(squashfs_root / "etc" / "resolv.conf", "nameserver 1.1.1.1\n")
+            # Mask systemd-resolved so it cannot recreate the symlink at runtime.
+            sudo(
+                "ln", "-sf", "/dev/null",
+                str(squashfs_root / "etc" / "systemd" / "system" / "systemd-resolved.service"),
+            )
+
+            # IMDS route unit — adds 169.254.169.254 dev eth0 at boot so
+            # the guest can reach the Firecracker MMDS IMDS-compat endpoint
+            systemd_dir = squashfs_root / "etc" / "systemd" / "system"
+            sudo_write(
+                systemd_dir / "imds-route.service",
+                "[Unit]\n"
+                "Description=Add IMDS route for Firecracker MMDS\n"
+                "DefaultDependencies=no\n"
+                "After=network-pre.target\n"
+                "\n"
+                "[Service]\n"
+                "Type=oneshot\n"
+                "ExecStart=/usr/sbin/ip route add 169.254.169.254 dev eth0\n"
+                "RemainAfterExit=yes\n"
+                "\n"
+                "[Install]\n"
+                "WantedBy=network.target\n",
+            )
+            sudo(
+                "ln", "-s",
+                "/etc/systemd/system/imds-route.service",
+                str(systemd_dir / "network.target.wants" / "imds-route.service"),
+                check=False,
+            )
 
             # Inject the persistent SSH host key so it never changes across rebuilds
             etc_ssh = squashfs_root / "etc" / "ssh"
