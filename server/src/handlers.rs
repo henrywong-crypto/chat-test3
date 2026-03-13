@@ -126,9 +126,11 @@ async fn check_vm_limit_and_create(
     let iam_creds = if state.use_iam_creds {
         Some(fetch_host_iam_credentials().await.context("failed to fetch IAM credentials for VM")?)
     } else {
+        info!("use_iam_creds=false, skipping IAM credential fetch");
         None
     };
     let has_iam_creds = iam_creds.is_some();
+    info!(has_iam_creds, "building vm config");
     let user_rootfs = ensure_user_rootfs(
         &state.user_rootfs_dir,
         &state.rootfs_path,
