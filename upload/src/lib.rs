@@ -1,22 +1,22 @@
 use anyhow::{anyhow, bail, Context, Result};
 use russh_sftp::client::SftpSession;
 use std::path::Path;
-use tokio::io::AsyncWriteExt;
+use tokio::io::{copy, AsyncRead, AsyncWriteExt};
 
-use download::validate_within_dir;
+use common::validate_within_dir;
 
 pub async fn write_file_via_sftp(
     sftp: SftpSession,
     remote_path: &str,
     upload_dir: &str,
-    data: &[u8],
+    source: &mut (impl AsyncRead + Unpin),
 ) -> Result<()> {
     let resolved_path = resolve_upload_path(&sftp, remote_path, upload_dir).await?;
     let mut file = sftp
         .create(&resolved_path)
         .await
         .context("failed to create remote file")?;
-    file.write_all(data)
+    copy(source, &mut file)
         .await
         .context("failed to write file data")?;
     file.shutdown()

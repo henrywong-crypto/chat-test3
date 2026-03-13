@@ -5,6 +5,29 @@
 - Use `anyhow` for error handling.
 - Use `clap` for CLI argument parsing.
 
+### `common` crate
+
+Put utilities in `common` when they are used by two or more crates and carry no domain-specific logic. Import from `common` directly — do not re-export through a domain crate.
+
+```rust
+// Good — shared utility lives in common, each crate imports it directly
+// common/src/lib.rs
+pub fn parse_tag_number(raw: &str) -> Option<TagNumber> { ... }
+
+// feeding/src/lib.rs
+use common::parse_tag_number;
+
+// habitat/src/lib.rs
+use common::parse_tag_number;
+
+// Bad — utility defined in one domain crate and imported by another
+// feeding/src/lib.rs
+pub fn parse_tag_number(raw: &str) -> Option<TagNumber> { ... }  // belongs in common
+
+// habitat/src/lib.rs
+use feeding::parse_tag_number;  // habitat should not depend on feeding
+```
+
 ## Keyword Conflicts
 
 When a field name conflicts with a Rust keyword, use a trailing underscore (`type_`), not a raw identifier (`r#type`) or a prefixed rename (`entry_type`, `block_type`):
@@ -360,6 +383,38 @@ fn load_cage_key(key_path: &PathBuf) -> Result<Arc<Key>>;
 
 // Bad — tuple bundles multiple return values
 fn load_cage_data(tag_path: &PathBuf, key_path: &PathBuf) -> Result<(Option<Tag>, Arc<Key>)>;
+```
+
+### Streaming Multipart Uploads
+
+When handling a multipart file upload, stream the file field directly to its destination — do not buffer it into `Bytes` first. Wrap the `Field` in a `StreamReader` and pipe it with `tokio::io::copy`.
+
+The file data flows: multipart TCP socket → `Field` stream → `StreamReader` → `tokio::io::copy` → destination writer.
+
+```rust
+// Good — file streamed directly to destination
+async fn stream_animal_import_file(multipart: &mut Multipart, sftp: SftpSession, cage_path: &str) -> Result<()> {
+    while let Some(field) = multipart.next_field().await.context("failed to read multipart field")? {
+        if field.name().unwrap_or("") == "file" {
+            let mut reader = StreamReader::new(
+                field.map_err(|e| IoError::new(ErrorKind::Other, e)),
+            );
+            return write_animal_file_via_sftp(sftp, cage_path, &mut reader).await;
+        }
+    }
+    Err(anyhow!("missing 'file' field"))
+}
+
+// Bad — buffers entire file into memory before writing
+async fn stream_animal_import_file(multipart: &mut Multipart, sftp: SftpSession, cage_path: &str) -> Result<()> {
+    while let Some(field) = multipart.next_field().await.context("failed to read multipart field")? {
+        if field.name().unwrap_or("") == "file" {
+            let data = field.bytes().await.context("failed to read file")?;  // entire file in memory
+            return write_animal_file_via_sftp(sftp, cage_path, &data).await;
+        }
+    }
+    Err(anyhow!("missing 'file' field"))
+}
 ```
 
 ### Versioning

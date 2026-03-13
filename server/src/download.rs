@@ -5,9 +5,8 @@ use axum::{
     http::StatusCode,
     response::IntoResponse,
 };
-use download::{
-    file::build_streaming_file_response, validate_within_dir, zip::build_streaming_zip_response,
-};
+use common::validate_within_dir;
+use download::{file::build_streaming_file_response, zip::build_streaming_zip_response};
 use serde::Deserialize;
 use sftp_client::open_sftp_session;
 use ssh_client::connect_ssh;

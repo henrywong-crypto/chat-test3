@@ -15,6 +15,7 @@ bytes = "1.11.1"
 chat-history = { path = "../chat-history" }
 chat-relay = { path = "../chat-relay" }
 chrono = { version = "0.4", features = ["serde"] }
+common = { path = "../common" }
 config = "0.15.19"
 download = { path = "../download" }
 firecracker-manager = { path = "../firecracker-manager" }

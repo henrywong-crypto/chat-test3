@@ -5,7 +5,7 @@ use axum::{
     response::IntoResponse,
     Json,
 };
-use download::validate_within_dir;
+use common::validate_within_dir;
 use russh_sftp::client::{fs::DirEntry, SftpSession};
 use serde::{Deserialize, Serialize};
 use sftp_client::open_sftp_session;

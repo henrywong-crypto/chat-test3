@@ -14,7 +14,7 @@ use tokio::{
 use zip::write::SimpleFileOptions;
 
 use crate::seekable_channel_writer::SeekableChannelWriter;
-use crate::validate_within_dir;
+use common::validate_within_dir;
 
 const MAX_DOWNLOAD_BYTES: usize = 100 * 1024 * 1024; // 100 MB
 const MAX_ZIP_DEPTH: usize = 10;

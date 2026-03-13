@@ -7,6 +7,7 @@ edition = "2021"
 anyhow = "1.0.102"
 axum = { version = "0.8.8" }
 bytes = "1.11.1"
+common = { path = "../common" }
 futures = "0.3.32"
 russh = "0.57.1"
 russh-sftp = "2.1.1"

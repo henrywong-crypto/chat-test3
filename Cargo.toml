@@ -2,6 +2,7 @@
 members = [
     "chat-history",
     "chat-relay",
+    "common",
     "download",
     "firecracker-client",
     "firecracker-manager",
