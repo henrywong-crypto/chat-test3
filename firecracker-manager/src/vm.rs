@@ -166,7 +166,7 @@ async fn launch_vm(
     let socket_path = chroot_dir.join("run/firecracker.socket");
 
     prepare_jail_resources(chroot_dir, &vm_config.kernel_path).await?;
-    info!(src = %vm_config.rootfs_path.display(), dst = %rootfs_copy.display(), "copying rootfs");
+    info!("copying rootfs");
     copy_rootfs(&vm_config.rootfs_path, &rootfs_copy).await?;
     let child = spawn_firecracker_jailed(&vm_config.id, &vm_config.jailer)?;
     let pid = child

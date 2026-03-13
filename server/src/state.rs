@@ -159,11 +159,7 @@ pub(crate) fn load_config() -> Result<AppConfig> {
     if app_config.ssh_user_home == "/root" && app_config.ssh_user != "root" {
         app_config.ssh_user_home = format!("/home/{}", app_config.ssh_user);
     }
-    tracing::info!(
-        ssh_user = %app_config.ssh_user,
-        ssh_user_home = %app_config.ssh_user_home,
-        "config loaded"
-    );
+    tracing::info!("config loaded");
     Ok(app_config)
 }
 

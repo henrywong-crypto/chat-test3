@@ -57,7 +57,7 @@ pub fn build_vm_config(
                 false,
             )
         });
-    info!(vm_id = %vm_id, mmds_imds_compat, "configured mmds");
+    info!(mmds_imds_compat, "configured mmds");
     Ok(VmConfig {
         id: vm_id,
         kernel_path: vm_build_config.kernel_path.clone(),

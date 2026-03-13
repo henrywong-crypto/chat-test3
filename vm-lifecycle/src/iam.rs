@@ -20,13 +20,7 @@ pub async fn fetch_host_iam_credentials() -> Result<HostIamCredential> {
     let role_name = std::env::var("AWS_ROLE_NAME").unwrap_or_else(|_| "vm-role".to_string());
     let expiration = format_credential_expiry(&credentials);
     let key_id_prefix = &credentials.access_key_id()[..4.min(credentials.access_key_id().len())];
-    info!(
-        role_name = %role_name,
-        key_id_prefix = %key_id_prefix,
-        has_session_token = credentials.session_token().is_some(),
-        expiration = %expiration,
-        "fetched host IAM credentials"
-    );
+    info!("fetched host IAM credentials");
     Ok(HostIamCredential {
         role_name,
         credential: build_imds_credential(&credentials, expiration),
