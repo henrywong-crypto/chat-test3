@@ -9,7 +9,6 @@ import dataclasses
 import json
 import os
 import sys
-import uuid
 
 
 def log(msg: str) -> None:
@@ -82,7 +81,7 @@ async def main():
 
 async def run_query(content: str, session_id):
     from claude_agent_sdk import ClaudeAgentOptions, PermissionResultAllow, query
-    from claude_agent_sdk.types import StreamEvent
+    from claude_agent_sdk.types import HookMatcher, StreamEvent
 
     global _pending_ask_user_question
     _pending_ask_user_question = None
@@ -90,33 +89,35 @@ async def run_query(content: str, session_id):
     log(f"query start  session_id={session_id!r}  content_len={len(content)}")
 
     async def handle_tool_permission(tool_name, input_, context):
-        global _pending_ask_user_question
         log(f"can_use_tool called  tool_name={tool_name!r}")
-        if tool_name != 'AskUserQuestion':
-            return PermissionResultAllow()
-        pending = _pending_ask_user_question
-        if pending:
-            # Panel was already shown from process_block_stop; just await the answer.
-            request_id, fut = pending
-        else:
-            # Streaming didn't emit the panel yet (e.g. non-streaming path); emit now.
-            request_id = str(uuid.uuid4())
-            fut = asyncio.get_running_loop().create_future()
-            _pending_questions[request_id] = fut
-            _pending_ask_user_question = (request_id, fut)
-            emit_sse('ask_user_question', {
-                'request_id': request_id,
-                'questions': get_field(input_, 'questions') or [],
-            })
-        log(f"AskUserQuestion awaiting answer  request_id={request_id!r}")
+        return PermissionResultAllow()
+
+    async def ask_user_question_hook(input_data, tool_use_id, context):
+        global _pending_ask_user_question
+        # Look up the future that process_block_stop created for this tool_use_id.
+        fut = _pending_questions.get(tool_use_id) if tool_use_id else None
+        if not fut:
+            log(f"PreToolUse AskUserQuestion: no pending question  tool_use_id={tool_use_id!r}")
+            return {'continue_': True}
+        log(f"PreToolUse AskUserQuestion: waiting for answer  request_id={tool_use_id!r}")
         answers = await fut
+        _pending_questions.pop(tool_use_id, None)
         _pending_ask_user_question = None
-        log(f"AskUserQuestion answered  request_id={request_id!r}")
-        return PermissionResultAllow(updated_input={**input_, 'answers': answers})
+        log(f"PreToolUse AskUserQuestion: answered  request_id={tool_use_id!r}")
+        tool_input = get_field(input_data, 'tool_input') or {}
+        return {
+            'hookSpecificOutput': {
+                'hookEventName': 'PreToolUse',
+                'updatedInput': {**tool_input, 'answers': answers},
+            }
+        }
 
     options = ClaudeAgentOptions(
         cwd=os.environ.get('HOME', '/root'),
         can_use_tool=handle_tool_permission,
+        hooks={
+            'PreToolUse': [HookMatcher(matcher='AskUserQuestion', hooks=[ask_user_question_hook])],
+        },
         **({"resume": session_id} if session_id else {}),
     )
 
@@ -226,23 +227,22 @@ def process_block_stop(ev, block_types: dict, tool_info: dict, tool_input: dict)
             input_data = {}
         info = tool_info.pop(idx)
         if info['name'] == 'AskUserQuestion':
-            _emit_ask_user_question(input_data.get('questions', []))
+            _emit_ask_user_question(info['id'], input_data.get('questions', []))
         else:
             emit_sse('tool_start', {'id': info['id'], 'name': info['name'], 'input': input_data})
     block_types.pop(idx, None)
 
 
-def _emit_ask_user_question(questions: list) -> None:
+def _emit_ask_user_question(tool_use_id: str, questions: list) -> None:
     """Emit ask_user_question SSE and register the pending future. No-op if already shown."""
     global _pending_ask_user_question
     if _pending_ask_user_question:
         return
-    request_id = str(uuid.uuid4())
     fut = asyncio.get_running_loop().create_future()
-    _pending_questions[request_id] = fut
-    _pending_ask_user_question = (request_id, fut)
-    emit_sse('ask_user_question', {'request_id': request_id, 'questions': questions})
-    log(f"AskUserQuestion panel shown  request_id={request_id!r}")
+    _pending_questions[tool_use_id] = fut
+    _pending_ask_user_question = (tool_use_id, fut)
+    emit_sse('ask_user_question', {'request_id': tool_use_id, 'questions': questions})
+    log(f"AskUserQuestion panel shown  request_id={tool_use_id!r}")
 
 
 # ── Non-StreamEvent (structured agent events) ─────────────────────────────────
@@ -322,7 +322,7 @@ def process_assistant_event(event, emitted_streaming_text: bool) -> None:
             if block_name == 'AskUserQuestion':
                 block_input = getattr(block, 'input', {}) or {}
                 questions = block_input.get('questions', []) if isinstance(block_input, dict) else []
-                _emit_ask_user_question(questions)
+                _emit_ask_user_question(getattr(block, 'id', None) or '', questions)
             else:
                 emit_sse('tool_start', {
                     'id': getattr(block, 'id', None),
