@@ -35,6 +35,8 @@ def get_field(obj, field, default=None):
 _pending_questions: dict[str, asyncio.Future] = {}
 # Queue for incoming stdin messages (queries, etc.) from the Rust relay.
 _stdin_queue: asyncio.Queue = asyncio.Queue()
+# Tracks the in-flight AskUserQuestion panel so can_use_tool can await it.
+_pending_ask_user_question: tuple[str, asyncio.Future] | None = None
 
 
 async def route_stdin(reader: asyncio.StreamReader) -> None:
@@ -82,19 +84,33 @@ async def run_query(content: str, session_id):
     from claude_agent_sdk import ClaudeAgentOptions, PermissionResultAllow, query
     from claude_agent_sdk.types import StreamEvent
 
+    global _pending_ask_user_question
+    _pending_ask_user_question = None
+
     log(f"query start  session_id={session_id!r}  content_len={len(content)}")
 
     async def handle_tool_permission(tool_name, input_, context):
+        global _pending_ask_user_question
+        log(f"can_use_tool called  tool_name={tool_name!r}")
         if tool_name != 'AskUserQuestion':
             return PermissionResultAllow()
-        request_id = str(uuid.uuid4())
-        emit_sse('ask_user_question', {
-            'request_id': request_id,
-            'questions': input_.get('questions', []),
-        })
-        fut = asyncio.get_event_loop().create_future()
-        _pending_questions[request_id] = fut
+        pending = _pending_ask_user_question
+        if pending:
+            # Panel was already shown from process_block_stop; just await the answer.
+            request_id, fut = pending
+        else:
+            # Streaming didn't emit the panel yet (e.g. non-streaming path); emit now.
+            request_id = str(uuid.uuid4())
+            fut = asyncio.get_running_loop().create_future()
+            _pending_questions[request_id] = fut
+            _pending_ask_user_question = (request_id, fut)
+            emit_sse('ask_user_question', {
+                'request_id': request_id,
+                'questions': get_field(input_, 'questions') or [],
+            })
+        log(f"AskUserQuestion awaiting answer  request_id={request_id!r}")
         answers = await fut
+        _pending_ask_user_question = None
         log(f"AskUserQuestion answered  request_id={request_id!r}")
         return PermissionResultAllow(updated_input={**input_, 'answers': answers})
 
@@ -134,6 +150,12 @@ async def run_query(content: str, session_id):
     except Exception as exc:
         log(f"query error: {exc}")
         emit_sse('error_event', {'message': str(exc)})
+    finally:
+        # Clean up any unresolved AskUserQuestion state from this query.
+        if _pending_ask_user_question:
+            stale_request_id, _ = _pending_ask_user_question
+            _pending_questions.pop(stale_request_id, None)
+            _pending_ask_user_question = None
     log(f"query done  session_id={captured_session_id!r}")
     emit_sse('done', {'session_id': captured_session_id})
 
@@ -194,6 +216,7 @@ def process_block_delta(ev, block_types: dict, tool_info: dict, tool_input: dict
 
 
 def process_block_stop(ev, block_types: dict, tool_info: dict, tool_input: dict) -> None:
+    global _pending_ask_user_question
     idx = get_field(ev, 'index', 0)
     if block_types.get(idx) == 'tool_use' and idx in tool_info:
         raw_input = tool_input.pop(idx, '{}') or '{}'
@@ -202,8 +225,24 @@ def process_block_stop(ev, block_types: dict, tool_info: dict, tool_input: dict)
         except json.JSONDecodeError:
             input_data = {}
         info = tool_info.pop(idx)
-        emit_sse('tool_start', {'id': info['id'], 'name': info['name'], 'input': input_data})
+        if info['name'] == 'AskUserQuestion':
+            _emit_ask_user_question(input_data.get('questions', []))
+        else:
+            emit_sse('tool_start', {'id': info['id'], 'name': info['name'], 'input': input_data})
     block_types.pop(idx, None)
+
+
+def _emit_ask_user_question(questions: list) -> None:
+    """Emit ask_user_question SSE and register the pending future. No-op if already shown."""
+    global _pending_ask_user_question
+    if _pending_ask_user_question:
+        return
+    request_id = str(uuid.uuid4())
+    fut = asyncio.get_running_loop().create_future()
+    _pending_questions[request_id] = fut
+    _pending_ask_user_question = (request_id, fut)
+    emit_sse('ask_user_question', {'request_id': request_id, 'questions': questions})
+    log(f"AskUserQuestion panel shown  request_id={request_id!r}")
 
 
 # ── Non-StreamEvent (structured agent events) ─────────────────────────────────
@@ -259,11 +298,12 @@ def process_assistant_event(event, emitted_streaming_text: bool) -> None:
         # Text already came via streaming deltas; only handle tool_use blocks.
         for block in content_blocks:
             if (getattr(block, 'type', None) or _block_type(block)) == 'tool_use':
-                emit_sse('tool_start', {
-                    'id': getattr(block, 'id', None),
-                    'name': getattr(block, 'name', None),
-                    'input': getattr(block, 'input', {}) or {},
-                })
+                if (getattr(block, 'name', None) or '') != 'AskUserQuestion':
+                    emit_sse('tool_start', {
+                        'id': getattr(block, 'id', None),
+                        'name': getattr(block, 'name', None),
+                        'input': getattr(block, 'input', {}) or {},
+                    })
         return
     # No streaming text: emit the full message content now.
     for block in content_blocks:
@@ -278,11 +318,17 @@ def process_assistant_event(event, emitted_streaming_text: bool) -> None:
             if thinking:
                 emit_sse('thinking_delta', {'thinking': thinking})
         elif block_type == 'tool_use':
-            emit_sse('tool_start', {
-                'id': getattr(block, 'id', None),
-                'name': getattr(block, 'name', None),
-                'input': getattr(block, 'input', {}) or {},
-            })
+            block_name = getattr(block, 'name', None) or ''
+            if block_name == 'AskUserQuestion':
+                block_input = getattr(block, 'input', {}) or {}
+                questions = block_input.get('questions', []) if isinstance(block_input, dict) else []
+                _emit_ask_user_question(questions)
+            else:
+                emit_sse('tool_start', {
+                    'id': getattr(block, 'id', None),
+                    'name': block_name,
+                    'input': getattr(block, 'input', {}) or {},
+                })
 
 
 def process_user_event(event) -> None:
