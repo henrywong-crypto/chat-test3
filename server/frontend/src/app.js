@@ -924,8 +924,6 @@ function renderQuestionPanel(requestId, questions) {
 
 function submitQuestionAnswer(requestId, answers) {
   console.log('[chat] submitting question answer  request_id=' + requestId);
-  const summary = Object.entries(answers).map(([q, a]) => `${q}\n${a}`).join('\n\n');
-  if (summary) appendUserMessage(summary);
   fetch('/sessions/' + vmId + '/chat-question-answer', {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
@@ -1534,33 +1532,9 @@ function hasUserTextBeforeNextAssistant(messages, i) {
 }
 
 function renderTranscriptMessages(messages) {
-  // Pre-build a set of tool_use_ids that belong to AskUserQuestion so we can
-  // render their tool_result answers as user bubbles.
-  const askUserQuestionIds = new Set();
-  for (const message of messages) {
-    if (message.role !== 'assistant') continue;
-    const blocks = Array.isArray(message.content) ? message.content : [];
-    for (const block of blocks) {
-      if (block.type === 'tool_use' && block.name === 'AskUserQuestion' && block.id) {
-        askUserQuestionIds.add(block.id);
-      }
-    }
-  }
-
   for (let i = 0; i < messages.length; i++) {
     const message = messages[i];
     if (message.role === 'user') {
-      if (Array.isArray(message.content)) {
-        for (const block of message.content) {
-          if (block.type === 'tool_result' && askUserQuestionIds.has(block.tool_use_id)) {
-            const answerText = extractAskUserQuestionAnswerText(block.content);
-            if (answerText) {
-              sealAssistantTurn();
-              appendUserMessage(answerText);
-            }
-          }
-        }
-      }
       const textContent = Array.isArray(message.content)
         ? message.content.filter(b => b.type === 'text').map(b => b.text).join('')
         : (typeof message.content === 'string' ? message.content : '');
@@ -1576,8 +1550,6 @@ function renderTranscriptMessages(messages) {
         } else if (block.type === 'text' && block.text) {
           appendToAssistantMessage(block.text);
         } else if (block.type === 'tool_use') {
-          // AskUserQuestion is an interactive tool; skip it in history view.
-          if (block.name === 'AskUserQuestion') continue;
           sealAssistantMessage();
           appendToolUseBlock(block.id, block.name, block.input);
         }
@@ -1590,24 +1562,6 @@ function renderTranscriptMessages(messages) {
     }
   }
   sealAssistantTurn();
-}
-
-function extractAskUserQuestionAnswerText(content) {
-  if (!content) return '';
-  // Content may be a string (possibly JSON) or an array of text blocks.
-  if (Array.isArray(content)) {
-    return content.filter(b => b.type === 'text').map(b => b.text || '').join(' ');
-  }
-  if (typeof content === 'string') {
-    try {
-      const parsed = JSON.parse(content);
-      if (parsed && typeof parsed === 'object' && parsed.answers) {
-        return Object.entries(parsed.answers).map(([q, a]) => `${q}\n${a}`).join('\n\n');
-      }
-    } catch {}
-    return content;
-  }
-  return '';
 }
 
 // ── API key settings ──────────────────────────────────────────────────────────
