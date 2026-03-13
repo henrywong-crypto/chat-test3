@@ -7,8 +7,8 @@ use common::validate_within_dir;
 
 pub async fn write_file_via_sftp(
     sftp: SftpSession,
-    remote_path: &str,
-    upload_dir: &str,
+    remote_path: &Path,
+    upload_dir: &Path,
     source: &mut (impl AsyncRead + Unpin),
 ) -> Result<()> {
     let resolved = resolve_upload_path(&sftp, remote_path, upload_dir).await?;
@@ -28,15 +28,14 @@ pub async fn write_file_via_sftp(
 
 async fn resolve_upload_path(
     sftp: &SftpSession,
-    remote_path: &str,
-    upload_dir: &str,
+    remote_path: &Path,
+    upload_dir: &Path,
 ) -> Result<PathBuf> {
-    let path = Path::new(remote_path);
-    let parent = path
+    let parent = remote_path
         .parent()
         .and_then(|p| p.to_str())
         .context("upload path has no valid parent directory")?;
-    let filename = path
+    let filename = remote_path
         .file_name()
         .context("upload path has no filename")?;
     let canonical_parent = sftp
@@ -44,6 +43,6 @@ async fn resolve_upload_path(
         .await
         .context("failed to resolve upload directory")?;
     let resolved = PathBuf::from(canonical_parent).join(filename);
-    validate_within_dir(&resolved, Path::new(upload_dir))?;
+    validate_within_dir(&resolved, upload_dir)?;
     Ok(resolved)
 }

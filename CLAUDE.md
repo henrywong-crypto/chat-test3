@@ -393,24 +393,24 @@ The file data flows: multipart TCP socket → `Field` stream → `StreamReader` 
 
 ```rust
 // Good — file streamed directly to destination
-async fn stream_animal_import_file(multipart: &mut Multipart, sftp: SftpSession, cage_path: &str) -> Result<()> {
+async fn stream_animal_import_file(multipart: &mut Multipart, sftp: SftpSession, cage_path: &Path, upload_dir: &Path) -> Result<()> {
     while let Some(field) = multipart.next_field().await.context("failed to read multipart field")? {
         if field.name().unwrap_or("") == "file" {
             let mut reader = StreamReader::new(
                 field.map_err(|e| IoError::new(ErrorKind::Other, e)),
             );
-            return write_animal_file_via_sftp(sftp, cage_path, &mut reader).await;
+            return write_animal_file_via_sftp(sftp, cage_path, upload_dir, &mut reader).await;
         }
     }
     Err(anyhow!("missing 'file' field"))
 }
 
 // Bad — buffers entire file into memory before writing
-async fn stream_animal_import_file(multipart: &mut Multipart, sftp: SftpSession, cage_path: &str) -> Result<()> {
+async fn stream_animal_import_file(multipart: &mut Multipart, sftp: SftpSession, cage_path: &Path, upload_dir: &Path) -> Result<()> {
     while let Some(field) = multipart.next_field().await.context("failed to read multipart field")? {
         if field.name().unwrap_or("") == "file" {
             let data = field.bytes().await.context("failed to read file")?;  // entire file in memory
-            return write_animal_file_via_sftp(sftp, cage_path, &data).await;
+            return write_animal_file_via_sftp(sftp, cage_path, upload_dir, &data).await;
         }
     }
     Err(anyhow!("missing 'file' field"))
@@ -419,35 +419,51 @@ async fn stream_animal_import_file(multipart: &mut Multipart, sftp: SftpSession,
 
 ### Path Handling
 
-Use `Path`/`PathBuf` for all path operations. Only convert to `&str` at external API call sites (e.g. SFTP methods that require `&str`). Never manipulate paths as strings — no `format!("{}/{}", ...)`, `trim_end_matches('/')`, or `rsplit('/')`.
+Use `Path`/`PathBuf` for all path operations. Functions that receive or compare paths take `&Path`, not `&str`. Convert strings to `&Path` at the boundary where they enter (e.g. from a multipart field or config value) and only convert back to `&str` at external API call sites (e.g. SFTP methods that require `&str`). Never manipulate paths as strings — no `format!("{}/{}", ...)`, `trim_end_matches('/')`, or `rsplit('/')`.
 
 ```rust
-// Good — path construction uses PathBuf::join, extraction uses Path methods
-let cage_path = PathBuf::from(canonical_parent).join(cage_name);
-let cage_dir = real_path.file_name().and_then(|f| f.to_str()).context("cage path has no final component")?;
-let animal_path = cage_dir.join(&animal_name);
-// Convert to &str only at the SFTP call site
-sftp.open(animal_path.to_str().context("animal path is not valid UTF-8")?).await?;
+// Good — &Path flows through all internal functions; strings converted at the edges
+async fn handle_animal_import(multipart: &mut Multipart, cage_path_str: String, upload_dir: &str) -> Result<()> {
+    // convert at the entry boundary
+    stream_animal_import_file(multipart, sftp, Path::new(&cage_path_str), Path::new(upload_dir)).await
+}
 
-// Bad — string manipulation for path operations
-let cage_path = format!("{}/{}", canonical_parent.trim_end_matches('/'), cage_name);
-let cage_dir = real_path.rsplit('/').next().context("cage path has no final component")?;
-let animal_path = format!("{}/{}", cage_dir.trim_end_matches('/'), animal_name);
-sftp.open(&animal_path).await?;
+async fn stream_animal_import_file(multipart: &mut Multipart, sftp: SftpSession, cage_path: &Path, upload_dir: &Path) -> Result<()> {
+    // ...
+    write_animal_file_via_sftp(sftp, cage_path, upload_dir, &mut reader).await
+}
+
+async fn write_animal_file_via_sftp(sftp: SftpSession, cage_path: &Path, upload_dir: &Path, source: &mut impl AsyncRead) -> Result<()> {
+    let resolved = resolve_animal_path(&sftp, cage_path, upload_dir).await?;
+    // convert to &str only at the SFTP call site
+    sftp.create(resolved.to_str().context("resolved path is not valid UTF-8")?).await?;
+    // ...
+}
+
+// Bad — &str passed through every layer, Path::new() scattered throughout
+async fn stream_animal_import_file(multipart: &mut Multipart, sftp: SftpSession, cage_path: &str, upload_dir: &str) -> Result<()> {
+    // ...
+    write_animal_file_via_sftp(sftp, cage_path, upload_dir, &mut reader).await
+}
+
+async fn write_animal_file_via_sftp(sftp: SftpSession, cage_path: &str, upload_dir: &str, source: &mut impl AsyncRead) -> Result<()> {
+    if !Path::new(&resolved).starts_with(upload_dir) { ... }  // Path::new buried inside
+    // ...
+}
 ```
 
-Functions that validate or compare paths accept `&Path`, not `&str`:
+Use `PathBuf::join` for path construction and `Path` methods for component extraction:
 
 ```rust
 // Good
-fn validate_within_cage_dir(animal_path: &Path, cage_dir: &Path) -> Result<()> {
-    if !animal_path.starts_with(cage_dir) { ... }
-}
+let cage_path = PathBuf::from(canonical_parent).join(cage_name);
+let cage_dir = real_path.file_name().and_then(|f| f.to_str()).context("cage path has no final component")?;
+let animal_path = cage_dir.join(&animal_name);
 
 // Bad
-fn validate_within_cage_dir(animal_path: &str, cage_dir: &str) -> Result<()> {
-    if !Path::new(animal_path).starts_with(cage_dir) { ... }
-}
+let cage_path = format!("{}/{}", canonical_parent.trim_end_matches('/'), cage_name);
+let cage_dir = real_path.rsplit('/').next().context("cage path has no final component")?;
+let animal_path = format!("{}/{}", cage_dir.trim_end_matches('/'), animal_name);
 ```
 
 ### Versioning

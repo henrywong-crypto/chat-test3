@@ -8,7 +8,10 @@ use futures::TryStreamExt;
 use russh_sftp::client::SftpSession;
 use sftp_client::open_sftp_session;
 use ssh_client::connect_ssh;
-use std::io::{Error as IoError, ErrorKind};
+use std::{
+    io::{Error as IoError, ErrorKind},
+    path::Path,
+};
 use store::upsert_user;
 use tokio_util::io::StreamReader;
 use tower_sessions::Session;
@@ -50,7 +53,7 @@ pub(crate) async fn upload_file_handler(
     )
     .await?;
     let sftp = open_sftp_session(&mut ssh_handle).await?;
-    stream_upload_file(&mut multipart, sftp, &upload_metadata.remote_path, &state.upload_dir).await?;
+    stream_upload_file(&mut multipart, sftp, Path::new(&upload_metadata.remote_path), Path::new(&state.upload_dir)).await?;
     Ok((StatusCode::OK, "").into_response())
 }
 
@@ -94,8 +97,8 @@ async fn extract_upload_metadata(multipart: &mut Multipart) -> Result<UploadMeta
 async fn stream_upload_file(
     multipart: &mut Multipart,
     sftp: SftpSession,
-    remote_path: &str,
-    upload_dir: &str,
+    remote_path: &Path,
+    upload_dir: &Path,
 ) -> Result<()> {
     while let Some(field) = multipart
         .next_field()
