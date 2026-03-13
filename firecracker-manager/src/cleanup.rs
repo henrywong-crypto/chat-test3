@@ -39,6 +39,42 @@ fn parse_tap_interface_name(line: &str) -> Option<&str> {
     name.starts_with("tap").then_some(name)
 }
 
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_valid_tap_interface_extracted() {
+        assert_eq!(parse_tap_interface_name("5: tap0: <BROADCAST,MULTICAST,UP>"), Some("tap0"));
+        assert_eq!(parse_tap_interface_name("12: tap99: <...>"), Some("tap99"));
+    }
+
+    #[test]
+    fn test_non_tap_interface_returns_none() {
+        assert_eq!(parse_tap_interface_name("3: eth0: <BROADCAST,MULTICAST,UP>"), None);
+        assert_eq!(parse_tap_interface_name("1: lo: <LOOPBACK,UP>"), None);
+        assert_eq!(parse_tap_interface_name("4: tun0: <...>"), None);
+    }
+
+    #[test]
+    fn test_line_with_no_colon_returns_none() {
+        assert_eq!(parse_tap_interface_name("somethingnocolon"), None);
+        assert_eq!(parse_tap_interface_name(""), None);
+    }
+
+    #[test]
+    fn test_whitespace_around_name_is_trimmed() {
+        // ip link output always has a space after the index colon
+        assert_eq!(parse_tap_interface_name("5:  tap1: <...>"), Some("tap1"));
+    }
+
+    #[test]
+    fn test_line_with_only_one_colon_still_parses() {
+        // no trailing section after the name colon — still works
+        assert_eq!(parse_tap_interface_name("5: tap2"), Some("tap2"));
+    }
+}
+
 async fn delete_stale_chroot_dirs(chroot_base: &Path) {
     let firecracker_dir = chroot_base.join("firecracker");
     let Ok(mut entries) = fs::read_dir(&firecracker_dir).await else {

@@ -122,7 +122,11 @@ async fn check_vm_limit_and_create(
         return Ok((StatusCode::SERVICE_UNAVAILABLE, "VM limit reached").into_response());
     }
 
-    let iam_creds = fetch_host_iam_credentials().await;
+    let iam_creds = if state.use_iam_creds {
+        fetch_host_iam_credentials().await
+    } else {
+        None
+    };
     let has_iam_creds = iam_creds.is_some();
     let user_rootfs = ensure_user_rootfs(
         &state.user_rootfs_dir,
@@ -232,7 +236,7 @@ pub(crate) async fn list_chat_sessions_handler(
     .await
     .map(|sessions| Json(sessions).into_response())
     .unwrap_or_else(|e| {
-        error!(vm_id = %vm_id, "list_chat_sessions failed: {e}");
+        error!("list_chat_sessions failed: {e}");
         (StatusCode::INTERNAL_SERVER_ERROR, "Internal error").into_response()
     }))
 }
@@ -266,7 +270,7 @@ pub(crate) async fn get_chat_transcript_handler(
     .await
     .map(|history| Json(history).into_response())
     .unwrap_or_else(|e| {
-        error!(vm_id = %vm_id, "fetch_chat_history failed: {e}");
+        error!("fetch_chat_history failed: {e}");
         (StatusCode::NOT_FOUND, "Transcript not found").into_response()
     }))
 }

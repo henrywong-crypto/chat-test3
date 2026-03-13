@@ -214,3 +214,48 @@ fn build_query_payload(content: &str, session_id: Option<&str>) -> Result<String
     };
     Ok(serde_json::to_string(&query_payload)?)
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn parse(json: &str) -> serde_json::Value {
+        serde_json::from_str(json).expect("invalid JSON")
+    }
+
+    #[test]
+    fn test_type_field_is_always_query() {
+        let json = build_query_payload("hello", None).unwrap();
+        assert_eq!(parse(&json)["type"], "query");
+    }
+
+    #[test]
+    fn test_content_field_is_present() {
+        let json = build_query_payload("hello world", None).unwrap();
+        assert_eq!(parse(&json)["content"], "hello world");
+    }
+
+    #[test]
+    fn test_session_id_included_when_some() {
+        let json = build_query_payload("hello", Some("abc-123")).unwrap();
+        assert_eq!(parse(&json)["session_id"], "abc-123");
+    }
+
+    #[test]
+    fn test_session_id_omitted_when_none() {
+        let json = build_query_payload("hello", None).unwrap();
+        assert!(parse(&json).get("session_id").is_none());
+    }
+
+    #[test]
+    fn test_special_characters_in_content_are_escaped() {
+        let json = build_query_payload("say \"hello\"\nand\\goodbye", None).unwrap();
+        assert_eq!(parse(&json)["content"], "say \"hello\"\nand\\goodbye");
+    }
+
+    #[test]
+    fn test_empty_content() {
+        let json = build_query_payload("", None).unwrap();
+        assert_eq!(parse(&json)["content"], "");
+    }
+}

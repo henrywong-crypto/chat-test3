@@ -69,6 +69,8 @@ pub(crate) struct AppConfig {
     pub(crate) vm_mem_size_mib: u32,
     #[serde(default = "default_vm_max_count")]
     pub(crate) vm_max_count: usize,
+    #[serde(default = "default_true")]
+    pub(crate) use_iam_creds: bool,
 }
 
 fn default_kernel_path() -> PathBuf {
@@ -124,6 +126,9 @@ fn default_vm_mem_size_mib() -> u32 {
 }
 fn default_vm_max_count() -> usize {
     20
+}
+fn default_true() -> bool {
+    true
 }
 
 pub(crate) fn load_config() -> Result<AppConfig> {

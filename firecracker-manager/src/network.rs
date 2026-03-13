@@ -74,3 +74,73 @@ async fn fetch_host_iface_name() -> Option<String> {
     }
     None
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    // ── format_tap_name ───────────────────────────────────────────────────────
+
+    #[test]
+    fn test_format_tap_name_single_digit() {
+        assert_eq!(format_tap_name(0), "tap0");
+        assert_eq!(format_tap_name(9), "tap9");
+    }
+
+    #[test]
+    fn test_format_tap_name_multi_digit() {
+        assert_eq!(format_tap_name(10), "tap10");
+        assert_eq!(format_tap_name(253), "tap253");
+    }
+
+    // ── format_tap_ip ─────────────────────────────────────────────────────────
+
+    #[test]
+    fn test_format_tap_ip_structure() {
+        assert_eq!(format_tap_ip(0), "172.16.0.1/30");
+        assert_eq!(format_tap_ip(1), "172.16.1.1/30");
+        assert_eq!(format_tap_ip(255), "172.16.255.1/30");
+    }
+
+    // ── format_guest_ip ───────────────────────────────────────────────────────
+
+    #[test]
+    fn test_format_guest_ip_structure() {
+        assert_eq!(format_guest_ip(0), "172.16.0.2");
+        assert_eq!(format_guest_ip(1), "172.16.1.2");
+        assert_eq!(format_guest_ip(255), "172.16.255.2");
+    }
+
+    #[test]
+    fn test_tap_and_guest_ip_share_same_subnet_for_same_idx() {
+        // For each idx, tap (.1) and guest (.2) are in the same /30 block.
+        for idx in [0u32, 1, 128, 253] {
+            let tap_ip = format_tap_ip(idx);
+            let guest_ip = format_guest_ip(idx);
+            let tap_prefix = tap_ip.trim_end_matches(".1/30");
+            let guest_prefix = guest_ip.trim_end_matches(".2");
+            assert_eq!(tap_prefix, guest_prefix, "idx={idx}: subnet mismatch");
+        }
+    }
+
+    // ── format_guest_mac ─────────────────────────────────────────────────────
+
+    #[test]
+    fn test_format_guest_mac_zero_padded_for_low_idx() {
+        assert_eq!(format_guest_mac(0), "06:00:AC:10:00:02");
+        assert_eq!(format_guest_mac(1), "06:00:AC:10:01:02");
+        assert_eq!(format_guest_mac(15), "06:00:AC:10:0F:02");
+    }
+
+    #[test]
+    fn test_format_guest_mac_two_hex_digits_for_high_idx() {
+        assert_eq!(format_guest_mac(16), "06:00:AC:10:10:02");
+        assert_eq!(format_guest_mac(255), "06:00:AC:10:FF:02");
+    }
+
+    #[test]
+    fn test_format_guest_mac_uses_uppercase_hex() {
+        let mac = format_guest_mac(0xAB);
+        assert!(mac.contains("AB"), "expected uppercase hex in {mac}");
+    }
+}

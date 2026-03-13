@@ -62,7 +62,7 @@ async fn save_and_drop_vm(state: &AppState, vm_id: &str, user_id: Uuid) {
     let Some(vm_entry) = vm_entry else { return };
     save_vm_rootfs_on_disconnect(state, user_id, vm_entry)
         .await
-        .unwrap_or_else(|e| error!(vm_id = %vm_id, "failed to save rootfs on disconnect: {e}"));
+        .unwrap_or_else(|e| error!("failed to save rootfs on disconnect: {e}"));
 }
 
 async fn save_vm_rootfs_on_disconnect(

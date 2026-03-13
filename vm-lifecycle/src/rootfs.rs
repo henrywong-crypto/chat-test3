@@ -1,0 +1,79 @@
+use anyhow::{Context, Result};
+use std::{
+    collections::HashMap,
+    path::{Path, PathBuf},
+};
+use tokio::sync::Mutex as AsyncMutex;
+use tracing::{error, info};
+use uuid::Uuid;
+
+use crate::{VmEntry, VmRegistry};
+
+pub fn build_user_rootfs_path(user_rootfs_dir: &Path, user_id: Uuid) -> PathBuf {
+    user_rootfs_dir.join(format!("{user_id}.ext4"))
+}
+
+pub fn find_user_rootfs(user_rootfs_dir: &Path, user_id: Uuid) -> Option<PathBuf> {
+    let rootfs_path = build_user_rootfs_path(user_rootfs_dir, user_id);
+    rootfs_path.exists().then_some(rootfs_path)
+}
+
+pub async fn ensure_user_rootfs(
+    user_rootfs_dir: &Path,
+    base_rootfs_path: &Path,
+    user_id: Uuid,
+    rootfs_lock: &AsyncMutex<()>,
+) -> Result<PathBuf> {
+    let rootfs_path = build_user_rootfs_path(user_rootfs_dir, user_id);
+    let _guard = rootfs_lock.lock().await;
+    if rootfs_path.exists() {
+        return Ok(rootfs_path);
+    }
+    tokio::fs::create_dir_all(user_rootfs_dir).await?;
+    tokio::fs::copy(base_rootfs_path, &rootfs_path).await?;
+    Ok(rootfs_path)
+}
+
+pub async fn save_all_vm_rootfs(
+    vms: &VmRegistry,
+    user_rootfs_dir: &Path,
+    rootfs_lock: &AsyncMutex<()>,
+) {
+    let vm_entries: HashMap<String, VmEntry> = {
+        let Ok(mut registry) = vms.lock() else {
+            return;
+        };
+        registry.drain().collect()
+    };
+    if vm_entries.is_empty() {
+        return;
+    }
+    info!(
+        "saving rootfs for {} running vm(s) before shutdown",
+        vm_entries.len()
+    );
+    save_vm_rootfs_to_dir(vm_entries, user_rootfs_dir, rootfs_lock)
+        .await
+        .unwrap_or_else(|e| error!("failed to save rootfs on shutdown: {e}"));
+}
+
+async fn save_vm_rootfs_to_dir(
+    vm_entries: HashMap<String, VmEntry>,
+    user_rootfs_dir: &Path,
+    rootfs_lock: &AsyncMutex<()>,
+) -> Result<()> {
+    tokio::fs::create_dir_all(user_rootfs_dir)
+        .await
+        .context("failed to create user rootfs dir on shutdown")?;
+    let _guard = rootfs_lock.lock().await;
+    for (_vm_id, vm_entry) in vm_entries {
+        let rootfs_path = build_user_rootfs_path(user_rootfs_dir, vm_entry.user_id);
+        info!(dest = %rootfs_path.display(), "saving rootfs on shutdown");
+        vm_entry
+            .vm
+            .save_rootfs(&rootfs_path)
+            .await
+            .unwrap_or_else(|e| error!("failed to save rootfs on shutdown: {e}"));
+    }
+    Ok(())
+}
