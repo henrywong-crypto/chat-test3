@@ -16,6 +16,8 @@ pub struct ChatHistory {
 pub struct ChatMessage {
     pub role: String,
     pub content: Content,
+    #[serde(rename = "isCompactSummary")]
+    pub is_compact_summary: bool,
 }
 
 pub async fn fetch_chat_history(
@@ -45,12 +47,13 @@ pub(crate) fn parse_chat_history(contents: &str) -> ChatHistory {
         .filter(|e| !e.is_meta)
     {
         if entry.is_compact_summary {
-            if let Some(chat_message) = build_compact_summary_message(entry) {
-                messages.push(chat_message);
-            }
+            messages.push(build_compact_summary_message(entry));
             continue;
         }
         if is_slash_command(&entry.message.content) {
+            // Skip the next assistant entry too: Claude Code writes a synthetic
+            // assistant reply (e.g. "No response requested.") after every slash
+            // command. That reply is an internal acknowledgment, not real output.
             skip_next_assistant = true;
             continue;
         }
@@ -100,24 +103,15 @@ fn build_chat_message(entry: JournalEntry) -> ChatMessage {
     ChatMessage {
         role: entry.message.role,
         content: entry.message.content,
+        is_compact_summary: false,
     }
 }
 
-fn build_compact_summary_message(entry: JournalEntry) -> Option<ChatMessage> {
-    let summary = extract_compact_summary_body(entry.message.content)?;
-    Some(ChatMessage {
+fn build_compact_summary_message(entry: JournalEntry) -> ChatMessage {
+    ChatMessage {
         role: entry.message.role,
-        content: Content::Text(summary),
-    })
-}
-
-fn extract_compact_summary_body(content: Content) -> Option<String> {
-    match content {
-        Content::Text(text) => text
-            .split_once("Summary:\n")
-            .map(|(_, summary)| summary.trim().to_owned())
-            .filter(|s| !s.is_empty()),
-        Content::ContentBlocks(_) => None,
+        content: entry.message.content,
+        is_compact_summary: true,
     }
 }
 
@@ -282,18 +276,23 @@ mod tests {
     }
 
     #[test]
-    fn test_compact_summary_body_is_shown() {
-        let jsonl = [&make_compact_summary_line(), FIXTURE_FIRST_USER].join("\n");
+    fn test_compact_summary_is_included_with_flag() {
+        let compact_summary_text = "This session is being continued from a previous conversation that ran out of context. The summary below covers the earlier portion of the conversation.\n\nSummary:\n...";
+        let compact_summary = serde_json::json!({
+            "type": "user",
+            "isCompactSummary": true,
+            "message": { "role": "user", "content": compact_summary_text }
+        })
+        .to_string();
+        let jsonl = [&compact_summary, FIXTURE_FIRST_USER].join("\n");
         let chat_history = parse_chat_history(&jsonl);
         assert_eq!(chat_history.messages.len(), 2);
+        assert!(chat_history.messages[0].is_compact_summary);
         let Content::Text(ref text) = chat_history.messages[0].content else {
             panic!()
         };
-        assert_eq!(text, "...");
-        let Content::Text(ref text) = chat_history.messages[1].content else {
-            panic!()
-        };
-        assert_eq!(text, "first message");
+        assert_eq!(text, compact_summary_text);
+        assert!(!chat_history.messages[1].is_compact_summary);
     }
 
     #[test]
