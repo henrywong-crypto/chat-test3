@@ -19,6 +19,9 @@ pub use rootfs::{
     build_user_rootfs_path, ensure_user_rootfs, find_user_rootfs, save_all_vm_rootfs,
 };
 
+const BOOT_ARGS: &str = "reboot=k panic=1 quiet loglevel=3 selinux=0 8250.nr_uarts=0";
+const CONNECT_TIMEOUT: Duration = Duration::from_secs(60);
+
 pub type VmRegistry = Arc<Mutex<HashMap<String, VmEntry>>>;
 
 pub struct VmEntry {
@@ -31,7 +34,6 @@ pub struct VmEntry {
 
 pub struct VmBuildConfig {
     pub kernel_path: PathBuf,
-    pub rootfs_path: PathBuf,
     pub net_helper_path: PathBuf,
     pub vcpu_count: u8,
     pub mem_size_mib: u32,
@@ -45,7 +47,7 @@ pub struct VmBuildConfig {
 pub fn build_vm_config(
     vm_build_config: &VmBuildConfig,
     iam_creds: HostIamCredential,
-    user_rootfs: Option<&Path>,
+    user_rootfs: &Path,
 ) -> Result<VmConfig> {
     let vm_id = Uuid::new_v4().to_string();
     let mmds_metadata =
@@ -54,13 +56,11 @@ pub fn build_vm_config(
     Ok(VmConfig {
         id: vm_id,
         kernel_path: vm_build_config.kernel_path.clone(),
-        rootfs_path: user_rootfs
-            .map(|p| p.to_path_buf())
-            .unwrap_or_else(|| vm_build_config.rootfs_path.clone()),
+        rootfs_path: user_rootfs.to_path_buf(),
         net_helper_path: vm_build_config.net_helper_path.clone(),
         vcpu_count: vm_build_config.vcpu_count,
         mem_size_mib: vm_build_config.mem_size_mib,
-        boot_args: "reboot=k panic=1 quiet loglevel=3 selinux=0 8250.nr_uarts=0".to_string(),
+        boot_args: BOOT_ARGS.to_string(),
         mmds_metadata: Some(mmds_metadata),
         mmds_imds_compat: true,
         jailer: JailerConfig {
@@ -72,8 +72,6 @@ pub fn build_vm_config(
         },
     })
 }
-
-const CONNECT_TIMEOUT: Duration = Duration::from_secs(60);
 
 pub async fn refresh_all_vm_mmds(vms: &VmRegistry, use_iam_creds: bool, iam_role_name: &str) {
     if !use_iam_creds {

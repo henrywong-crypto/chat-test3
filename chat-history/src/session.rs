@@ -12,6 +12,7 @@ use crate::{journal::JournalEntry, project::find_all_project_dirs, Content};
 #[derive(Serialize)]
 pub struct ChatSession {
     pub session_id: String,
+    pub project_dir: String,
     pub title: String,
     pub last_active_at: DateTime<Utc>,
 }
@@ -42,18 +43,12 @@ pub async fn delete_chat_session(
     ssh_user: &str,
     vm_host_key_path: &PathBuf,
     session_id: &str,
-    ssh_user_home: &str,
+    project_dir: &str,
 ) -> Result<()> {
     let mut ssh_handle = connect_ssh(guest_ip, ssh_key_path, ssh_user, vm_host_key_path).await?;
     let sftp = open_sftp_session(&mut ssh_handle).await?;
-    let project_dirs = find_all_project_dirs(&sftp, ssh_user_home).await;
-    for project_dir in &project_dirs {
-        let path = format!("{project_dir}/{session_id}.jsonl");
-        if sftp.open(&path).await.is_ok() {
-            sftp.remove_file(&path).await?;
-            return Ok(());
-        }
-    }
+    let path = format!("{project_dir}/{session_id}.jsonl");
+    sftp.remove_file(&path).await?;
     Ok(())
 }
 
@@ -111,6 +106,7 @@ async fn build_chat_session_with_title(
         .unwrap_or_else(|| session_id.to_owned());
     Ok(ChatSession {
         session_id: session_id.to_owned(),
+        project_dir: project_dir.to_owned(),
         title,
         last_active_at,
     })

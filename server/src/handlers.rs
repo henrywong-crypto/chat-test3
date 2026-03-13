@@ -135,7 +135,7 @@ async fn check_vm_limit_and_create(
     )
     .await?;
     info!("using rootfs");
-    let vm_config = build_vm_config(&state.vm_build_config(), iam_creds, Some(&user_rootfs))?;
+    let vm_config = build_vm_config(&state.vm_build_config(), iam_creds, &user_rootfs)?;
     let vm = create_vm(&vm_config).await?;
     info!("vm started");
     let vm_id = vm.id.clone();
@@ -243,6 +243,7 @@ pub(crate) async fn list_chat_sessions_handler(
 #[derive(Deserialize)]
 pub(crate) struct TranscriptQuery {
     session_id: String,
+    project_dir: String,
 }
 
 pub(crate) async fn get_chat_transcript_handler(
@@ -264,7 +265,7 @@ pub(crate) async fn get_chat_transcript_handler(
         &state.ssh_user,
         &state.vm_host_key_path,
         &query.session_id,
-        &state.ssh_user_home,
+        &query.project_dir,
     )
     .await
     .map(|history| Json(history).into_response())
@@ -278,6 +279,7 @@ pub(crate) async fn get_chat_transcript_handler(
 pub(crate) struct DeleteChatSessionForm {
     csrf_token: String,
     session_id: String,
+    project_dir: String,
 }
 
 pub(crate) async fn delete_chat_session_handler(
@@ -303,7 +305,7 @@ pub(crate) async fn delete_chat_session_handler(
         &state.ssh_user,
         &state.vm_host_key_path,
         &form.session_id,
-        &state.ssh_user_home,
+        &form.project_dir,
     )
     .await?;
     Ok(StatusCode::NO_CONTENT.into_response())

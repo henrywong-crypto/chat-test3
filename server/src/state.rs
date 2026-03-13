@@ -172,7 +172,6 @@ impl AppConfig {
     pub(crate) fn vm_build_config(&self) -> VmBuildConfig {
         VmBuildConfig {
             kernel_path: self.kernel_path.clone(),
-            rootfs_path: self.rootfs_path.clone(),
             net_helper_path: self.net_helper_path.clone(),
             vcpu_count: self.vm_vcpu_count,
             mem_size_mib: self.vm_mem_size_mib,
