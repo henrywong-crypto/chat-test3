@@ -36,9 +36,11 @@ pub async fn list_chat_sessions(
             let Some(session_id) = name.strip_suffix(".jsonl") else {
                 continue;
             };
-            all_chat_sessions.push(
-                build_chat_session_with_title(&sftp, dir_entry, session_id, project_dir).await?,
-            );
+            if let Some(chat_session) =
+                build_chat_session_with_title(&sftp, dir_entry, session_id, project_dir).await?
+            {
+                all_chat_sessions.push(chat_session);
+            }
         }
     }
     all_chat_sessions.sort_by(|a, b| b.last_active_at.cmp(&a.last_active_at));
@@ -110,7 +112,7 @@ async fn build_chat_session_with_title(
     dir_entry: &DirEntry,
     session_id: &str,
     project_dir: &str,
-) -> Result<ChatSession> {
+) -> Result<Option<ChatSession>> {
     let mtime = dir_entry
         .metadata()
         .mtime
@@ -118,15 +120,15 @@ async fn build_chat_session_with_title(
     let last_active_at = DateTime::from_timestamp(mtime as i64, 0)
         .context("mtime is out of range for a timestamp")?;
     let path = format!("{project_dir}/{session_id}.jsonl");
-    let title = fetch_session_title(sftp, &path)
-        .await?
-        .unwrap_or_else(|| session_id.to_owned());
-    Ok(ChatSession {
+    let Some(title) = fetch_session_title(sftp, &path).await? else {
+        return Ok(None);
+    };
+    Ok(Some(ChatSession {
         session_id: session_id.to_owned(),
         project_dir: project_dir.to_owned(),
         title,
         last_active_at,
-    })
+    }))
 }
 
 async fn fetch_session_title(sftp: &SftpSession, path: &str) -> Result<Option<String>> {
