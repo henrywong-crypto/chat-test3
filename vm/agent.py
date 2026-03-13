@@ -107,17 +107,24 @@ async def run_query(content: str, session_id):
 
     async def ask_user_question_hook(input_data, tool_use_id, context):
         global _pending_ask_user_question
-        # Look up the future that process_block_stop created for this tool_use_id.
-        fut = _pending_questions.get(tool_use_id) if tool_use_id else None
+        if not tool_use_id:
+            log("PreToolUse AskUserQuestion: no tool_use_id, cannot block")
+            return {'continue_': True}
+        tool_input = get_field(input_data, 'tool_input') or {}
+        # If the streaming path already registered a future, reuse it; otherwise create one now.
+        # (The SDK may call this hook before or after yielding the content_block_stop event.)
+        if tool_use_id not in _pending_questions:
+            questions = tool_input.get('questions', []) if isinstance(tool_input, dict) else []
+            _emit_ask_user_question(tool_use_id, questions)
+        fut = _pending_questions.get(tool_use_id)
         if not fut:
-            log(f"PreToolUse AskUserQuestion: no pending question  tool_use_id={tool_use_id!r}")
+            log(f"PreToolUse AskUserQuestion: failed to create future  tool_use_id={tool_use_id!r}")
             return {'continue_': True}
         log(f"PreToolUse AskUserQuestion: waiting for answer  request_id={tool_use_id!r}")
         answers = await fut
         _pending_questions.pop(tool_use_id, None)
         _pending_ask_user_question = None
         log(f"PreToolUse AskUserQuestion: answered  request_id={tool_use_id!r}")
-        tool_input = get_field(input_data, 'tool_input') or {}
         return {
             'hookSpecificOutput': {
                 'hookEventName': 'PreToolUse',
