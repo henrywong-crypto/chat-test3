@@ -11,6 +11,6 @@ pub(crate) struct JournalMessage {
 #[derive(Deserialize)]
 pub(crate) struct JournalEntry {
     #[serde(rename = "type")]
-    pub(crate) entry_type: String,
+    pub(crate) type_: String,
     pub(crate) message: JournalMessage,
 }

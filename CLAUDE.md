@@ -5,6 +5,25 @@
 - Use `anyhow` for error handling.
 - Use `clap` for CLI argument parsing.
 
+## Keyword Conflicts
+
+When a field name conflicts with a Rust keyword, use a trailing underscore (`type_`), not a raw identifier (`r#type`) or a prefixed rename (`entry_type`, `block_type`):
+
+```rust
+// Good
+#[serde(rename = "type")]
+pub type_: String,
+
+// Bad
+pub r#type: String,  // raw identifier
+
+#[serde(rename = "type")]
+pub animal_type: String,  // prefixed rename
+
+#[serde(rename = "type")]
+pub cage_type: String,  // prefixed rename
+```
+
 ## Error Handling
 
 When an operation returns `Result`, propagate the error with `?` and add context with `.context("...")`. Never swallow errors by converting them to a default value.

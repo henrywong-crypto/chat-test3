@@ -39,7 +39,7 @@ pub(crate) fn parse_chat_history(contents: &str) -> ChatHistory {
     let messages = contents
         .lines()
         .filter_map(|line| serde_json::from_str::<JournalEntry>(line).ok())
-        .filter(|e| matches!(e.entry_type.as_str(), "user" | "assistant"))
+        .filter(|e| matches!(e.type_.as_str(), "user" | "assistant"))
         .map(build_chat_message)
         .collect();
     ChatHistory { messages }
@@ -85,10 +85,10 @@ mod tests {
     fn test_tool_result_user_messages_are_included() {
         let chat_history = parse_chat_history(FIXTURE_TOOL_RESULT_USER);
         assert_eq!(chat_history.messages.len(), 1);
-        let Content::Blocks(ref blocks) = chat_history.messages[0].content else {
+        let Content::ContentBlocks(ref blocks) = chat_history.messages[0].content else {
             panic!()
         };
-        assert_eq!(blocks[0].block_type, "tool_result");
+        assert_eq!(blocks[0].type_, "tool_result");
     }
 
     #[test]
@@ -106,11 +106,11 @@ mod tests {
         .to_string();
         let chat_history = parse_chat_history(&jsonl);
         assert_eq!(chat_history.messages.len(), 1);
-        let Content::Blocks(ref blocks) = chat_history.messages[0].content else {
+        let Content::ContentBlocks(ref blocks) = chat_history.messages[0].content else {
             panic!()
         };
         assert_eq!(blocks.len(), 2);
-        assert_eq!(blocks[0].block_type, "thinking");
+        assert_eq!(blocks[0].type_, "thinking");
         assert_eq!(blocks[1].text.as_deref(), Some("answer"));
     }
 
