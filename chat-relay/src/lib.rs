@@ -19,14 +19,6 @@ const SETTINGS_CMD: &str = "bash -lc '/usr/local/bin/uv run /opt/settings.py'";
 const HEARTBEAT_SECS: u64 = 60;
 const SEND_TIMEOUT_SECS: u64 = 30;
 
-pub struct ClaudeSettings {
-    pub use_bedrock: bool,
-    pub base_url: Option<String>,
-    pub haiku_model: String,
-    pub sonnet_model: String,
-    pub opus_model: String,
-}
-
 pub struct VmSettings {
     pub has_api_key: bool,
 }
@@ -59,20 +51,6 @@ pub fn build_api_key_settings_json(
     serde_json::json!({
         "$schema": "https://json.schemastore.org/claude-code-settings.json",
         "env": env,
-        "skipWebFetchPreflight": true,
-    })
-    .to_string()
-}
-
-fn build_bedrock_settings_json(claude_settings: &ClaudeSettings) -> String {
-    serde_json::json!({
-        "$schema": "https://json.schemastore.org/claude-code-settings.json",
-        "env": {
-            "CLAUDE_CODE_USE_BEDROCK": "1",
-            "ANTHROPIC_DEFAULT_HAIKU_MODEL": claude_settings.haiku_model,
-            "ANTHROPIC_DEFAULT_SONNET_MODEL": claude_settings.sonnet_model,
-            "ANTHROPIC_DEFAULT_OPUS_MODEL": claude_settings.opus_model,
-        },
         "skipWebFetchPreflight": true,
     })
     .to_string()
@@ -138,20 +116,11 @@ async fn send_settings_command(
     Ok(())
 }
 
-async fn write_claude_settings(
-    ssh_handle: &mut client::Handle<SshClient>,
-    claude_settings: &ClaudeSettings,
-) -> Result<()> {
-    let settings_json = build_bedrock_settings_json(claude_settings);
-    send_settings_command(ssh_handle, &settings_json).await
-}
-
 pub fn start_agent_relay(
     guest_ip: String,
     ssh_key_path: PathBuf,
     ssh_user: String,
     vm_host_key_path: PathBuf,
-    claude_settings: ClaudeSettings,
     inbound: mpsc::Receiver<AgentMessage>,
 ) -> impl Stream<Item = Bytes> {
     let (tx, rx) = mpsc::channel::<Bytes>(1);
@@ -160,7 +129,6 @@ pub fn start_agent_relay(
         ssh_key_path,
         ssh_user,
         vm_host_key_path,
-        claude_settings,
         inbound,
         tx,
     ));
@@ -172,7 +140,6 @@ async fn run_agent_relay(
     ssh_key_path: PathBuf,
     ssh_user: String,
     vm_host_key_path: PathBuf,
-    claude_settings: ClaudeSettings,
     inbound: mpsc::Receiver<AgentMessage>,
     tx: mpsc::Sender<Bytes>,
 ) {
@@ -200,7 +167,6 @@ async fn run_agent_relay(
         &ssh_key_path,
         &ssh_user,
         &vm_host_key_path,
-        &claude_settings,
         inbound,
         tx.clone(),
     )
@@ -225,15 +191,11 @@ async fn connect_agent_relay(
     ssh_key_path: &PathBuf,
     ssh_user: &str,
     vm_host_key_path: &PathBuf,
-    claude_settings: &ClaudeSettings,
     inbound: mpsc::Receiver<AgentMessage>,
     tx: mpsc::Sender<Bytes>,
 ) -> Result<()> {
     let mut ssh_handle = connect_ssh(guest_ip, ssh_key_path, ssh_user, vm_host_key_path).await?;
     info!("agent ssh channel opened");
-    if claude_settings.use_bedrock {
-        write_claude_settings(&mut ssh_handle, claude_settings).await?;
-    }
     let ssh_channel = open_exec_channel(&mut ssh_handle, AGENT_CMD).await?;
     run_relay(ssh_handle, ssh_channel, inbound, tx).await
 }
