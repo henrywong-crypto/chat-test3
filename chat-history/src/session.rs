@@ -99,7 +99,8 @@ pub(crate) fn extract_last_user_title(contents: &str) -> Option<String> {
         .rev()
         .filter_map(|line| serde_json::from_str::<JournalEntry>(line).ok())
         .filter(|e| e.type_ == "user")
-        .filter(|e| !e.is_meta)
+        // Compact summary entries have type "user" but contain the boilerplate
+        // "This session is being continued..." text, not a real user message.
         .filter(|e| !e.is_compact_summary)
         .find_map(|e| extract_user_title(e.message.content))
 }
@@ -107,10 +108,9 @@ pub(crate) fn extract_last_user_title(contents: &str) -> Option<String> {
 fn extract_user_title(content: Content) -> Option<String> {
     match content {
         Content::Text(text)
-            // Matches all <local-command-*> tags (e.g. <local-command-stdout>). The
-            // <local-command-caveat> entries are already excluded via is_meta, but
-            // other variants like <local-command-stdout> lack isMeta so need this check.
-            if !text.starts_with("<command-name>") && !text.starts_with("<local-command-") =>
+            // <local-command-stdout> entries are not marked isMeta and would
+            // otherwise appear as titles.
+            if !text.starts_with("<command-name>") && !text.starts_with("<local-command-stdout>") =>
         {
             Some(text)
         }

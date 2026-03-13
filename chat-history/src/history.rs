@@ -44,7 +44,6 @@ pub(crate) fn parse_chat_history(contents: &str) -> ChatHistory {
         .lines()
         .filter_map(|line| serde_json::from_str::<JournalEntry>(line).ok())
         .filter(|e| matches!(e.type_.as_str(), "user" | "assistant"))
-        .filter(|e| !e.is_meta)
     {
         if entry.is_compact_summary {
             messages.push(build_compact_summary_message(entry));
