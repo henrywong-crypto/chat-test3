@@ -431,6 +431,10 @@ document.getElementById('chat-send-btn').addEventListener('click', () => {
   autoResizeChatInput();
   sendQuery(content);
 });
+document.getElementById('chat-stop-btn').addEventListener('click', stopQuery);
+document.addEventListener('keydown', e => {
+  if (e.key === 'Escape' && chatStreaming) stopQuery();
+});
 document.getElementById('chat-input').addEventListener('keydown', e => {
   if (e.key === 'Enter' && !e.shiftKey) {
     e.preventDefault();
@@ -598,6 +602,15 @@ function prepareForQuery(content) {
   chatStreaming = true;
   lockChatInput();
   showThinkingIndicator();
+}
+
+function stopQuery() {
+  if (!chatStreaming) return;
+  fetch('/sessions/' + vmId + '/chat-stop', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ csrf_token: fmCsrfToken }),
+  }).catch(err => console.error('[chat] stop error', err));
 }
 
 function sendQuery(content) {
@@ -1378,12 +1391,14 @@ function scrollChatToBottom() {
 }
 
 function lockChatInput() {
-  document.getElementById('chat-send-btn').disabled = true;
+  document.getElementById('chat-send-btn').classList.add('hidden');
+  document.getElementById('chat-stop-btn').classList.remove('hidden');
   document.getElementById('chat-input').disabled = true;
 }
 
 function unlockChatInput() {
-  document.getElementById('chat-send-btn').disabled = false;
+  document.getElementById('chat-stop-btn').classList.add('hidden');
+  document.getElementById('chat-send-btn').classList.remove('hidden');
   document.getElementById('chat-input').disabled = false;
 }
 

@@ -27,6 +27,7 @@ pub enum AgentMessage {
         request_id: String,
         answers: serde_json::Value,
     },
+    Interrupt,
 }
 
 pub fn start_agent_relay(
@@ -143,6 +144,12 @@ async fn run_relay(
                         let line = format!("{payload}\n");
                         ssh_channel.data(Bytes::from(line).as_ref()).await?;
                         info!("question answer sent to agent");
+                    }
+                    Some(AgentMessage::Interrupt) => {
+                        info!("sending interrupt to agent");
+                        let line = "{\"type\":\"interrupt\"}\n";
+                        ssh_channel.data(Bytes::from_static(line.as_bytes()).as_ref()).await?;
+                        info!("interrupt sent to agent");
                     }
                 }
             }

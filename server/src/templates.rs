@@ -314,6 +314,7 @@ fn ChatInputArea() -> impl IntoView {
                     rows="1"
                     placeholder="Message Claude\u{2026}"
                 />
+                <button id="chat-stop-btn" class="send-btn hidden" title="Stop (Esc)" style="background:#ef4444">"■"</button>
                 <button id="chat-send-btn" class="send-btn" title="Send">"↑"</button>
             </div>
         </div>

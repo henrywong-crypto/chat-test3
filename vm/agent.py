@@ -36,6 +36,8 @@ _pending_questions: dict[str, asyncio.Future] = {}
 _stdin_queue: asyncio.Queue = asyncio.Queue()
 # Tracks the in-flight AskUserQuestion panel so can_use_tool can await it.
 _pending_ask_user_question: tuple[str, asyncio.Future] | None = None
+# The currently running query task, so it can be cancelled on interrupt.
+_current_query_task: asyncio.Task | None = None
 
 
 async def route_stdin(reader: asyncio.StreamReader) -> None:
@@ -59,11 +61,16 @@ async def route_stdin(reader: asyncio.StreamReader) -> None:
                 fut = _pending_questions.pop(request_id)
                 if not fut.done():
                     fut.set_result(msg.get('answers', {}))
+        elif msg.get('type') == 'interrupt':
+            if _current_query_task and not _current_query_task.done():
+                log("interrupt received, cancelling query task")
+                _current_query_task.cancel()
         else:
             await _stdin_queue.put(msg)
 
 
 async def main():
+    global _current_query_task
     loop = asyncio.get_event_loop()
     reader = asyncio.StreamReader()
     proto = asyncio.StreamReaderProtocol(reader)
@@ -76,7 +83,13 @@ async def main():
             log("stdin closed, exiting")
             break
         if msg.get('type') == 'query':
-            await run_query(msg.get('content', ''), msg.get('session_id'))
+            _current_query_task = asyncio.create_task(
+                run_query(msg.get('content', ''), msg.get('session_id'))
+            )
+            try:
+                await _current_query_task
+            except asyncio.CancelledError:
+                pass
 
 
 async def run_query(content: str, session_id):
@@ -148,6 +161,8 @@ async def run_query(content: str, session_id):
                     emitted_streaming_text = True
             else:
                 process_agent_event(event, emitted_streaming_text)
+    except asyncio.CancelledError:
+        log("query cancelled by interrupt")
     except Exception as exc:
         log(f"query error: {exc}")
         emit_sse('error_event', {'message': str(exc)})

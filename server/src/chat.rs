@@ -136,6 +136,36 @@ pub(crate) async fn handle_chat_question_answer(
     (StatusCode::OK, "").into_response()
 }
 
+#[derive(Deserialize)]
+pub(crate) struct StopBody {
+    csrf_token: String,
+}
+
+pub(crate) async fn handle_chat_stop(
+    _user: User,
+    session: Session,
+    Path(vm_id): Path<String>,
+    State(state): State<AppState>,
+    Json(body): Json<StopBody>,
+) -> Response {
+    if Uuid::parse_str(&vm_id).is_err() {
+        return (StatusCode::NOT_FOUND, "Not found").into_response();
+    }
+    if !validate_csrf(&session, &body.csrf_token).await {
+        return (StatusCode::FORBIDDEN, "Forbidden").into_response();
+    }
+    let Some(agent_tx) = find_agent_sender(&state, &vm_id) else {
+        info!("no active chat stream to stop");
+        return (StatusCode::NOT_FOUND, "No active chat stream").into_response();
+    };
+    if agent_tx.send(AgentMessage::Interrupt).await.is_err() {
+        info!("agent sender closed");
+        return (StatusCode::SERVICE_UNAVAILABLE, "Agent not available").into_response();
+    }
+    info!("interrupt forwarded");
+    (StatusCode::OK, "").into_response()
+}
+
 async fn validate_csrf(session: &Session, submitted: &str) -> bool {
     session
         .get::<String>("csrf_token")
