@@ -8,7 +8,7 @@ use std::path::PathBuf;
 use tokio::sync::mpsc;
 use tokio::time::{interval, timeout, Duration};
 use tokio_stream::wrappers::ReceiverStream;
-use tracing::{error, info};
+use tracing::{debug, error, info};
 
 const AGENT_CMD: &str = "bash -lc '\
     /usr/sbin/logrotate --force --state \"$HOME/.logrotate.status\" /etc/logrotate.d/agent; \
@@ -250,7 +250,7 @@ async fn run_relay(
                         if let Ok(text) = std::str::from_utf8(data) {
                             for stderr_line in text.lines() {
                                 if !stderr_line.is_empty() {
-                                    info!("{stderr_line}");
+                                    debug!("{stderr_line}");
                                 }
                             }
                         }
