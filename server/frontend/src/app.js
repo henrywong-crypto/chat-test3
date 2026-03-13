@@ -438,7 +438,7 @@ document.getElementById('chat-send-btn').addEventListener('click', () => {
 });
 document.getElementById('chat-stop-btn').addEventListener('click', stopQuery);
 document.addEventListener('keydown', e => {
-  if (e.key === 'Escape' && chatStreaming) stopQuery();
+  if (e.key === 'Escape' && chatStreaming && !document.querySelector('[id^="question-panel-"]')) stopQuery();
 });
 document.getElementById('chat-input').addEventListener('keydown', e => {
   if (e.key === 'Enter' && !e.shiftKey) {
@@ -533,22 +533,22 @@ function connectChatSse() {
     if (chatEs.readyState === EventSource.CLOSED) {
       console.log('[chat] SSE closed');
       chatEs = null;
+      runningSessionId = null;
+      chatStreaming = false;
+      streamHadText = false;
+      sealAssistantMessage();
+      applyChatInputState();
     }
-    runningSessionId = null;
-    chatStreaming = false;
-    streamHadText = false;
-    sealAssistantMessage();
-    applyChatInputState();
   };
   chatEs.addEventListener('init', () => {
     console.log('[chat] event: init');
-    if (runningSessionId !== chatSessionId) return;
+    if (runningSessionId !== null && runningSessionId !== chatSessionId) return;
     showThinkingIndicator();
   });
   chatEs.addEventListener('text_delta', e => {
     const payload = JSON.parse(e.data);
     console.log('[chat] event: text_delta  len=' + payload.text.length);
-    if (runningSessionId !== chatSessionId) return;
+    if (runningSessionId !== null && runningSessionId !== chatSessionId) return;
     removeThinkingIndicator();
     streamHadText = true;
     appendToAssistantMessage(payload.text);
@@ -556,13 +556,13 @@ function connectChatSse() {
   chatEs.addEventListener('thinking_delta', e => {
     const payload = JSON.parse(e.data);
     console.log('[chat] event: thinking_delta  len=' + payload.thinking.length);
-    if (runningSessionId !== chatSessionId) return;
+    if (runningSessionId !== null && runningSessionId !== chatSessionId) return;
     appendToThinkingBlock(payload.thinking);
   });
   chatEs.addEventListener('tool_start', e => {
     const payload = JSON.parse(e.data);
     console.log('[chat] event: tool_start  name=' + payload.name);
-    if (runningSessionId !== chatSessionId) return;
+    if (runningSessionId !== null && runningSessionId !== chatSessionId) return;
     // AskUserQuestion is handled interactively via the ask_user_question event.
     if (payload.name === 'AskUserQuestion') return;
     sealAssistantMessage();
@@ -571,7 +571,7 @@ function connectChatSse() {
   chatEs.addEventListener('ask_user_question', e => {
     const payload = JSON.parse(e.data);
     console.log('[chat] event: ask_user_question  request_id=' + payload.request_id);
-    if (runningSessionId !== chatSessionId) return;
+    if (runningSessionId !== null && runningSessionId !== chatSessionId) return;
     removeThinkingIndicator();
     sealAssistantMessage();
     renderQuestionPanel(payload.request_id, payload.questions || []);
@@ -579,7 +579,7 @@ function connectChatSse() {
   chatEs.addEventListener('tool_result', e => {
     const payload = JSON.parse(e.data);
     console.log('[chat] event: tool_result  tool_use_id=' + payload.tool_use_id + '  is_error=' + payload.is_error);
-    if (runningSessionId !== chatSessionId) return;
+    if (runningSessionId !== null && runningSessionId !== chatSessionId) return;
     fillToolResult(payload.tool_use_id, payload.content, payload.is_error);
   });
   chatEs.addEventListener('done', e => {
