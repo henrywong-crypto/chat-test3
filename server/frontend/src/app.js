@@ -562,7 +562,7 @@ function connectChatSse() {
     const payload = JSON.parse(e.data);
     console.log('[chat] event: ask_user_question  request_id=' + payload.request_id);
     removeThinkingIndicator();
-    sealAssistantTurn();
+    sealAssistantMessage();
     renderQuestionPanel(payload.request_id, payload.questions || []);
   });
   chatEs.addEventListener('tool_result', e => {
