@@ -10,6 +10,7 @@ use download::{file::build_streaming_file_response, zip::build_streaming_zip_res
 use serde::Deserialize;
 use sftp_client::open_sftp_session;
 use ssh_client::connect_ssh;
+use std::path::PathBuf;
 use store::upsert_user;
 use uuid::Uuid;
 
@@ -50,30 +51,35 @@ pub(crate) async fn download_file_handler(
     )
     .await?;
     let sftp = open_sftp_session(&mut ssh_handle).await?;
-    let real_path = sftp
-        .canonicalize(&query.path)
-        .await
-        .context("failed to resolve remote path")?;
-    validate_within_dir(&real_path, &state.upload_dir)?;
+    let real_path = PathBuf::from(
+        sftp.canonicalize(&query.path)
+            .await
+            .context("failed to resolve remote path")?,
+    );
+    validate_within_dir(&real_path, &PathBuf::from(&state.upload_dir))?;
+    let real_path_str = real_path
+        .to_str()
+        .context("resolved path is not valid UTF-8")?
+        .to_owned();
     let metadata = sftp
-        .symlink_metadata(&real_path)
+        .symlink_metadata(&real_path_str)
         .await
         .context("failed to stat remote path")?;
     if metadata.is_dir() {
         let dirname = real_path
-            .rsplit('/')
-            .next()
+            .file_name()
+            .and_then(|f| f.to_str())
             .context("path has no final component")?
             .to_owned();
         Ok(build_streaming_zip_response(
             sftp,
             real_path,
-            state.upload_dir.clone(),
+            PathBuf::from(&state.upload_dir),
             &format!("{dirname}.zip"),
         )?)
     } else {
         Ok(
-            build_streaming_file_response(sftp, std::path::Path::new(&real_path))
+            build_streaming_file_response(sftp, &real_path)
                 .await
                 .context("failed to build file response")?,
         )

@@ -417,6 +417,39 @@ async fn stream_animal_import_file(multipart: &mut Multipart, sftp: SftpSession,
 }
 ```
 
+### Path Handling
+
+Use `Path`/`PathBuf` for all path operations. Only convert to `&str` at external API call sites (e.g. SFTP methods that require `&str`). Never manipulate paths as strings — no `format!("{}/{}", ...)`, `trim_end_matches('/')`, or `rsplit('/')`.
+
+```rust
+// Good — path construction uses PathBuf::join, extraction uses Path methods
+let cage_path = PathBuf::from(canonical_parent).join(cage_name);
+let cage_dir = real_path.file_name().and_then(|f| f.to_str()).context("cage path has no final component")?;
+let animal_path = cage_dir.join(&animal_name);
+// Convert to &str only at the SFTP call site
+sftp.open(animal_path.to_str().context("animal path is not valid UTF-8")?).await?;
+
+// Bad — string manipulation for path operations
+let cage_path = format!("{}/{}", canonical_parent.trim_end_matches('/'), cage_name);
+let cage_dir = real_path.rsplit('/').next().context("cage path has no final component")?;
+let animal_path = format!("{}/{}", cage_dir.trim_end_matches('/'), animal_name);
+sftp.open(&animal_path).await?;
+```
+
+Functions that validate or compare paths accept `&Path`, not `&str`:
+
+```rust
+// Good
+fn validate_within_cage_dir(animal_path: &Path, cage_dir: &Path) -> Result<()> {
+    if !animal_path.starts_with(cage_dir) { ... }
+}
+
+// Bad
+fn validate_within_cage_dir(animal_path: &str, cage_dir: &str) -> Result<()> {
+    if !Path::new(animal_path).starts_with(cage_dir) { ... }
+}
+```
+
 ### Versioning
 
 All crate versions use 3-part semver (e.g. `0.1.0`).

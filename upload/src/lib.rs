@@ -1,6 +1,6 @@
-use anyhow::{anyhow, bail, Context, Result};
+use anyhow::{Context, Result};
 use russh_sftp::client::SftpSession;
-use std::path::Path;
+use std::path::{Path, PathBuf};
 use tokio::io::{copy, AsyncRead, AsyncWriteExt};
 
 use common::validate_within_dir;
@@ -11,9 +11,10 @@ pub async fn write_file_via_sftp(
     upload_dir: &str,
     source: &mut (impl AsyncRead + Unpin),
 ) -> Result<()> {
-    let resolved_path = resolve_upload_path(&sftp, remote_path, upload_dir).await?;
+    let resolved = resolve_upload_path(&sftp, remote_path, upload_dir).await?;
+    let resolved_str = resolved.to_str().context("resolved path is not valid UTF-8")?;
     let mut file = sftp
-        .create(&resolved_path)
+        .create(resolved_str)
         .await
         .context("failed to create remote file")?;
     copy(source, &mut file)
@@ -29,7 +30,7 @@ async fn resolve_upload_path(
     sftp: &SftpSession,
     remote_path: &str,
     upload_dir: &str,
-) -> Result<String> {
+) -> Result<PathBuf> {
     let path = Path::new(remote_path);
     let parent = path
         .parent()
@@ -37,16 +38,12 @@ async fn resolve_upload_path(
         .context("upload path has no valid parent directory")?;
     let filename = path
         .file_name()
-        .and_then(|f| f.to_str())
-        .ok_or_else(|| anyhow!("upload path has no filename"))?;
-    if filename == ".." {
-        bail!("upload path has no filename");
-    }
+        .context("upload path has no filename")?;
     let canonical_parent = sftp
         .canonicalize(parent)
         .await
         .context("failed to resolve upload directory")?;
-    let resolved = format!("{}/{}", canonical_parent.trim_end_matches('/'), filename);
-    validate_within_dir(&resolved, upload_dir)?;
+    let resolved = PathBuf::from(canonical_parent).join(filename);
+    validate_within_dir(&resolved, Path::new(upload_dir))?;
     Ok(resolved)
 }

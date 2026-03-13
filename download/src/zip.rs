@@ -6,7 +6,7 @@ use axum::{
 use bytes::Bytes;
 use futures::channel::mpsc;
 use russh_sftp::client::SftpSession;
-use std::io;
+use std::{io, path::PathBuf};
 use tokio::{
     sync::mpsc as tokio_mpsc,
     time::{timeout, Duration},
@@ -28,8 +28,8 @@ enum FileEvent {
 
 pub fn build_streaming_zip_response(
     sftp: SftpSession,
-    dir_path: String,
-    upload_dir: String,
+    dir_path: PathBuf,
+    upload_dir: PathBuf,
     filename: &str,
 ) -> Result<Response<Body>> {
     // zip bytes → HTTP body (bounded for backpressure)
@@ -52,14 +52,18 @@ pub fn build_streaming_zip_response(
 
 async fn collect_zip_files(
     sftp: SftpSession,
-    dir_path: String,
-    upload_dir: String,
+    dir_path: PathBuf,
+    upload_dir: PathBuf,
     file_tx: tokio_mpsc::Sender<FileEvent>,
 ) {
     let mut total_bytes: usize = 0;
-    let mut dirs_to_visit: Vec<(String, usize)> = vec![(dir_path.clone(), 0)];
+    let mut dirs_to_visit: Vec<(PathBuf, usize)> = vec![(dir_path.clone(), 0)];
     while let Some((dir, depth)) = dirs_to_visit.pop() {
-        let read_dir = match sftp.read_dir(&dir).await {
+        let dir_str = match dir.to_str() {
+            Some(s) => s,
+            None => return,
+        };
+        let read_dir = match sftp.read_dir(dir_str).await {
             Ok(entries) => entries,
             Err(_) => return,
         };
@@ -68,7 +72,7 @@ async fn collect_zip_files(
             if name == "." || name == ".." {
                 continue;
             }
-            let child_path = format!("{}/{}", dir.trim_end_matches('/'), name);
+            let child_path = dir.join(&name);
             if entry.file_type().is_symlink() {
                 continue;
             }
@@ -81,11 +85,14 @@ async fn collect_zip_files(
                 }
                 continue;
             }
-            let relative = child_path
+            let relative = match child_path
                 .strip_prefix(&dir_path)
                 .unwrap_or(&child_path)
-                .trim_start_matches('/')
-                .to_owned();
+                .to_str()
+            {
+                Some(s) => s.to_owned(),
+                None => return,
+            };
             match timeout(
                 Duration::from_secs(SEND_TIMEOUT_SECS),
                 file_tx.send(FileEvent::Start(relative)),
@@ -95,7 +102,11 @@ async fn collect_zip_files(
                 Ok(Ok(())) => {}
                 _ => return,
             }
-            if stream_file(&sftp, &child_path, &file_tx, &mut total_bytes)
+            let child_str = match child_path.to_str() {
+                Some(s) => s,
+                None => return,
+            };
+            if stream_file(&sftp, child_str, &file_tx, &mut total_bytes)
                 .await
                 .is_err()
             {

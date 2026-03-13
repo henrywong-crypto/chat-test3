@@ -10,6 +10,7 @@ use russh_sftp::client::{fs::DirEntry, SftpSession};
 use serde::{Deserialize, Serialize};
 use sftp_client::open_sftp_session;
 use ssh_client::connect_ssh;
+use std::path::{Path as StdPath, PathBuf};
 use store::upsert_user;
 use uuid::Uuid;
 
@@ -62,13 +63,18 @@ pub(crate) async fn list_files_handler(
     )
     .await?;
     let sftp = open_sftp_session(&mut ssh_handle).await?;
-    let real_path = sftp
-        .canonicalize(&query.path)
-        .await
-        .context("failed to resolve remote path")?;
-    validate_within_dir(&real_path, &state.upload_dir)?;
+    let real_path = PathBuf::from(
+        sftp.canonicalize(&query.path)
+            .await
+            .context("failed to resolve remote path")?,
+    );
+    validate_within_dir(&real_path, &PathBuf::from(&state.upload_dir))?;
+    let real_path_str = real_path
+        .to_str()
+        .context("resolved path is not valid UTF-8")?
+        .to_owned();
     let read_dir = sftp
-        .read_dir(&real_path)
+        .read_dir(&real_path_str)
         .await
         .context("failed to read remote directory")?;
     let entries = collect_file_entries(&sftp, &real_path, read_dir.collect()).await?;
@@ -77,7 +83,7 @@ pub(crate) async fn list_files_handler(
 
 async fn collect_file_entries(
     sftp: &SftpSession,
-    dir_path: &str,
+    dir_path: &StdPath,
     raw_entries: Vec<DirEntry>,
 ) -> Result<Vec<FileEntry>> {
     let mut dirs: Vec<FileEntry> = Vec::new();
@@ -91,8 +97,11 @@ async fn collect_file_entries(
         let is_dir = if metadata.permissions.is_some() {
             metadata.file_type().is_dir()
         } else {
-            let child_path = format!("{}/{}", dir_path.trim_end_matches('/'), name);
-            sftp.symlink_metadata(&child_path)
+            let child_path = dir_path.join(&name);
+            let child_str = child_path
+                .to_str()
+                .context("child path is not valid UTF-8")?;
+            sftp.symlink_metadata(child_str)
                 .await
                 .map(|m| m.file_type().is_dir())
                 .context("failed to stat directory entry")?

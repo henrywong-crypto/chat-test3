@@ -932,6 +932,13 @@ dependencies = [
 ]
 
 [[package]]
+name = "common"
+version = "0.1.0"
+dependencies = [
+ "anyhow",
+]
+
+[[package]]
 name = "concurrent-queue"
 version = "2.5.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -1391,6 +1398,7 @@ dependencies = [
  "anyhow",
  "axum",
  "bytes",
+ "common",
  "futures",
  "russh",
  "russh-sftp",
@@ -4480,6 +4488,7 @@ dependencies = [
  "chat-history",
  "chat-relay",
  "chrono",
+ "common",
  "config",
  "download",
  "firecracker-manager",
@@ -5730,7 +5739,7 @@ version = "0.1.0"
 dependencies = [
  "anyhow",
  "bytes",
- "download",
+ "common",
  "russh-sftp",
  "tokio",
 ]
