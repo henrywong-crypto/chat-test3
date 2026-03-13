@@ -28,7 +28,6 @@ pub enum AgentMessage {
         content: String,
         session_id: Option<String>,
     },
-    Abort,
 }
 
 pub fn build_api_key_settings_json(
@@ -217,10 +216,6 @@ async fn run_relay(
                 match msg {
                     None => {
                         info!("inbound channel closed, ending relay");
-                        break;
-                    }
-                    Some(AgentMessage::Abort) => {
-                        info!("abort received, ending relay");
                         break;
                     }
                     Some(AgentMessage::Query { content, session_id }) => {

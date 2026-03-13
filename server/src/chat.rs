@@ -95,33 +95,7 @@ pub(crate) async fn handle_chat_query(
     (StatusCode::OK, "").into_response()
 }
 
-#[derive(Deserialize)]
-pub(crate) struct AbortBody {
-    csrf_token: String,
-}
-
-pub(crate) async fn handle_chat_abort(
-    _user: User,
-    session: Session,
-    Path(vm_id): Path<String>,
-    State(state): State<AppState>,
-    Json(body): Json<AbortBody>,
-) -> Response {
-    if Uuid::parse_str(&vm_id).is_err() {
-        return (StatusCode::NOT_FOUND, "Not found").into_response();
-    }
-    if !validate_csrf(&session, &body.csrf_token).await {
-        return (StatusCode::FORBIDDEN, "Forbidden").into_response();
-    }
-    let Some(agent_tx) = find_agent_sender(&state, &vm_id) else {
-        return (StatusCode::NOT_FOUND, "No active chat stream").into_response();
-    };
-    let _ = agent_tx.send(AgentMessage::Abort).await;
-    info!("abort forwarded");
-    (StatusCode::OK, "").into_response()
-}
-
-fn find_agent_sender(state: &AppState, vm_id: &str) -> Option<mpsc::Sender<AgentMessage>> {
+pub(crate) fn find_agent_sender(state: &AppState, vm_id: &str) -> Option<mpsc::Sender<AgentMessage>> {
     state.chat_senders.lock().ok()?.get(vm_id).cloned()
 }
 

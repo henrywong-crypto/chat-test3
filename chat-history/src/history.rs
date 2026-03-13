@@ -5,10 +5,11 @@ use ssh_client::connect_ssh;
 use std::path::PathBuf;
 use tokio::io::AsyncReadExt;
 
-use crate::{journal::JournalEntry, Content};
+use crate::{journal::JournalEntry, session::extract_last_user_title, Content};
 
 #[derive(Serialize)]
 pub struct ChatHistory {
+    pub title: Option<String>,
     pub messages: Vec<ChatMessage>,
 }
 
@@ -34,7 +35,10 @@ pub async fn fetch_chat_history(
     let mut file = sftp.open(&path).await?;
     let mut contents = String::new();
     file.read_to_string(&mut contents).await?;
-    Ok(parse_chat_history(&contents))
+    let title = extract_last_user_title(&contents);
+    let mut chat_history = parse_chat_history(&contents);
+    chat_history.title = title;
+    Ok(chat_history)
 }
 
 pub(crate) fn parse_chat_history(contents: &str) -> ChatHistory {
@@ -72,7 +76,7 @@ pub(crate) fn parse_chat_history(contents: &str) -> ChatHistory {
         skip_next_assistant = false;
         messages.push(build_chat_message(entry));
     }
-    ChatHistory { messages }
+    ChatHistory { title: None, messages }
 }
 
 pub(crate) fn is_slash_command(content: &Content) -> bool {

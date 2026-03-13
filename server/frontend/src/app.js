@@ -145,7 +145,6 @@ document.getElementById('files-toggle-btn').addEventListener('click', toggleFile
 document.addEventListener('keydown', e => {
   if (e.key === 'Escape') {
     closePanel();
-    if (chatStreaming) stopGeneration();
   }
 });
 
@@ -424,7 +423,6 @@ document.getElementById('tab-shell-icon').addEventListener('click', switchToShel
 document.getElementById('tab-chat-icon').addEventListener('click', switchToChat);
 document.getElementById('chat-new-btn').addEventListener('click', startNewSession);
 document.getElementById('chat-history-refresh-btn')?.addEventListener('click', loadChatHistory);
-document.getElementById('chat-stop-btn').addEventListener('click', stopGeneration);
 document.getElementById('chat-send-btn').addEventListener('click', () => {
   const input = document.getElementById('chat-input');
   const content = input.value.trim();
@@ -1258,26 +1256,13 @@ function scrollChatToBottom() {
   scroll.scrollTop = scroll.scrollHeight;
 }
 
-function stopGeneration() {
-  if (!chatStreaming) return;
-  fetch('/sessions/' + vmId + '/chat/abort', {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ csrf_token: fmCsrfToken }),
-  });
-}
-
 function lockChatInput() {
   document.getElementById('chat-send-btn').disabled = true;
-  document.getElementById('chat-send-btn').classList.add('hidden');
-  document.getElementById('chat-stop-btn').classList.remove('hidden');
   document.getElementById('chat-input').disabled = true;
 }
 
 function unlockChatInput() {
   document.getElementById('chat-send-btn').disabled = false;
-  document.getElementById('chat-send-btn').classList.remove('hidden');
-  document.getElementById('chat-stop-btn').classList.add('hidden');
   document.getElementById('chat-input').disabled = false;
 }
 
@@ -1407,6 +1392,7 @@ async function loadAndRenderTranscript(sessionId, projectDir) {
     const res = await fetch(url);
     if (!res.ok) return;
     const transcript = await res.json();
+    if (transcript.title) updateChatTitle(transcript.title);
     renderTranscriptMessages(transcript.messages);
   } catch {}
 }
