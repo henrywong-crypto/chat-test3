@@ -394,22 +394,10 @@ def build_rootfs(ci_version: str) -> None:
                     "npm install -g @anthropic-ai/claude-code",
                 )
 
-                # Claude Code settings
-                claude_dir = squashfs_root / "home" / "ubuntu" / ".claude"
-                sudo("mkdir", "-p", str(claude_dir))
-                sudo_write(
-                    claude_dir / "settings.json",
-                    '{\n'
-                    '  "$schema": "https://json.schemastore.org/claude-code-settings.json",\n'
-                    '  "env": {\n'
-                    '    "ANTHROPIC_DEFAULT_HAIKU_MODEL": "us.anthropic.claude-haiku-4-5-20251001-v1:0",\n'
-                    '    "ANTHROPIC_DEFAULT_OPUS_MODEL": "us.anthropic.claude-opus-4-6-v1",\n'
-                    '    "ANTHROPIC_DEFAULT_SONNET_MODEL": "us.anthropic.claude-sonnet-4-6",\n'
-                    '    "CLAUDE_CODE_USE_BEDROCK": "1"\n'
-                    '  }\n'
-                    '}\n',
-                )
-                sudo("chown", "-R", "1000:1000", str(claude_dir))
+                # Install settings.py script
+                opt_dir = squashfs_root / "opt"
+                opt_dir.mkdir(exist_ok=True)
+                shutil.copy(str(Path(__file__).parent / "vm" / "settings.py"), str(opt_dir / "settings.py"))
 
             finally:
                 for mount_point in reversed(("proc", "sys", "dev")):

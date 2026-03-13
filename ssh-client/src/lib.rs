@@ -17,10 +17,7 @@ impl client::Handler for SshClient {
         &mut self,
         server_public_key: &PublicKey,
     ) -> impl std::future::Future<Output = Result<bool, Self::Error>> + Send {
-        let matches = match &self.vm_host_key {
-            Some(key) => server_public_key == key,
-            None => true,
-        };
+        let matches = self.vm_host_key.as_ref().map_or(true, |key| server_public_key == key);
         async move { Ok(matches) }
     }
 }

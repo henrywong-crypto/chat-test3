@@ -71,6 +71,14 @@ pub(crate) struct AppConfig {
     pub(crate) vm_max_count: usize,
     #[serde(default = "default_true")]
     pub(crate) use_iam_creds: bool,
+    #[serde(default)]
+    pub(crate) anthropic_base_url: Option<String>,
+    #[serde(default = "default_anthropic_default_haiku_model")]
+    pub(crate) anthropic_default_haiku_model: String,
+    #[serde(default = "default_anthropic_default_sonnet_model")]
+    pub(crate) anthropic_default_sonnet_model: String,
+    #[serde(default = "default_anthropic_default_opus_model")]
+    pub(crate) anthropic_default_opus_model: String,
 }
 
 fn default_kernel_path() -> PathBuf {
@@ -129,6 +137,15 @@ fn default_vm_max_count() -> usize {
 }
 fn default_true() -> bool {
     true
+}
+fn default_anthropic_default_haiku_model() -> String {
+    "us.anthropic.claude-haiku-4-5-20251001-v1:0".to_string()
+}
+fn default_anthropic_default_sonnet_model() -> String {
+    "us.anthropic.claude-sonnet-4-6".to_string()
+}
+fn default_anthropic_default_opus_model() -> String {
+    "us.anthropic.claude-opus-4-6-v1".to_string()
 }
 
 pub(crate) fn load_config() -> Result<AppConfig> {

@@ -3,6 +3,7 @@ mod chat;
 mod download;
 mod files;
 mod handlers;
+mod settings;
 mod state;
 mod static_files;
 mod templates;
@@ -37,6 +38,7 @@ use crate::{
         delete_user_rootfs_handler, get_chat_transcript_handler, get_or_create_terminal,
         get_terminal_page, handle_chat_upload, list_chat_sessions_handler,
     },
+    settings::{get_settings_handler, put_settings_handler},
     state::{load_config, AppState},
     static_files::{serve_app_js, serve_styles_css},
     terminal::handle_ws_upgrade,
@@ -105,6 +107,7 @@ fn build_router(app_state: AppState, session_store: PostgresStore) -> Router {
             "/sessions/{id}/chat-upload",
             post(handle_chat_upload).layer(DefaultBodyLimit::max(50 * 1024 * 1024)),
         )
+        .route("/api/settings", get(get_settings_handler).put(put_settings_handler))
         .route("/rootfs/delete", post(delete_user_rootfs_handler))
         .route("/terminal/{id}", get(get_terminal_page))
         .route("/ws/{id}", get(handle_ws_upgrade))

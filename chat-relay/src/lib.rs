@@ -14,9 +14,22 @@ const AGENT_CMD: &str = "bash -lc '\
     /usr/sbin/logrotate --force /etc/logrotate.d/agent; \
     PYTHONUNBUFFERED=1 /usr/local/bin/uv run /opt/agent.py 2> >(tee -a \"$HOME/agent.log\" >&2)\
 '";
+const SETTINGS_CMD: &str = "bash -lc '/usr/local/bin/uv run /opt/settings.py'";
 
 const HEARTBEAT_SECS: u64 = 60;
 const SEND_TIMEOUT_SECS: u64 = 30;
+
+pub struct ClaudeSettings {
+    pub use_bedrock: bool,
+    pub base_url: Option<String>,
+    pub haiku_model: String,
+    pub sonnet_model: String,
+    pub opus_model: String,
+}
+
+pub struct VmSettings {
+    pub has_api_key: bool,
+}
 
 pub enum AgentMessage {
     Query {
@@ -26,11 +39,119 @@ pub enum AgentMessage {
     Abort,
 }
 
+pub fn build_api_key_settings_json(
+    api_key: &str,
+    base_url: Option<&str>,
+    haiku_model: &str,
+    sonnet_model: &str,
+    opus_model: &str,
+) -> String {
+    let mut env = serde_json::json!({
+        "ANTHROPIC_AUTH_TOKEN": api_key,
+        "ANTHROPIC_DEFAULT_HAIKU_MODEL": haiku_model,
+        "ANTHROPIC_DEFAULT_SONNET_MODEL": sonnet_model,
+        "ANTHROPIC_DEFAULT_OPUS_MODEL": opus_model,
+        "CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC": "1",
+    });
+    if let Some(url) = base_url {
+        env["ANTHROPIC_BASE_URL"] = serde_json::Value::String(url.to_string());
+    }
+    serde_json::json!({
+        "$schema": "https://json.schemastore.org/claude-code-settings.json",
+        "env": env,
+        "skipWebFetchPreflight": true,
+    })
+    .to_string()
+}
+
+fn build_bedrock_settings_json(claude_settings: &ClaudeSettings) -> String {
+    serde_json::json!({
+        "$schema": "https://json.schemastore.org/claude-code-settings.json",
+        "env": {
+            "CLAUDE_CODE_USE_BEDROCK": "1",
+            "ANTHROPIC_DEFAULT_HAIKU_MODEL": claude_settings.haiku_model,
+            "ANTHROPIC_DEFAULT_SONNET_MODEL": claude_settings.sonnet_model,
+            "ANTHROPIC_DEFAULT_OPUS_MODEL": claude_settings.opus_model,
+        },
+        "skipWebFetchPreflight": true,
+    })
+    .to_string()
+}
+
+pub async fn get_vm_settings(
+    guest_ip: &str,
+    ssh_key_path: &PathBuf,
+    ssh_user: &str,
+    vm_host_key_path: &PathBuf,
+) -> Result<VmSettings> {
+    let mut ssh_handle = connect_ssh(guest_ip, ssh_key_path, ssh_user, vm_host_key_path).await?;
+    let command = "{\"type\":\"get\"}\n";
+    let mut channel = open_exec_channel(&mut ssh_handle, SETTINGS_CMD).await?;
+    channel.data(Bytes::from(command.as_bytes()).as_ref()).await?;
+    let mut stdout = String::new();
+    loop {
+        match channel.wait().await {
+            Some(ChannelMsg::Data { ref data }) => {
+                stdout.push_str(std::str::from_utf8(data).unwrap_or(""));
+            }
+            Some(ChannelMsg::ExitStatus { .. }) | None => break,
+            _ => {}
+        }
+    }
+    let response: serde_json::Value = serde_json::from_str(&stdout).unwrap_or_default();
+    Ok(VmSettings {
+        has_api_key: response
+            .get("has_api_key")
+            .and_then(|v| v.as_bool())
+            .unwrap_or(false),
+    })
+}
+
+pub async fn set_vm_settings(
+    guest_ip: &str,
+    ssh_key_path: &PathBuf,
+    ssh_user: &str,
+    vm_host_key_path: &PathBuf,
+    content: &str,
+) -> Result<()> {
+    let mut ssh_handle = connect_ssh(guest_ip, ssh_key_path, ssh_user, vm_host_key_path).await?;
+    send_settings_command(&mut ssh_handle, content).await
+}
+
+async fn send_settings_command(
+    ssh_handle: &mut client::Handle<SshClient>,
+    content: &str,
+) -> Result<()> {
+    let command = serde_json::to_string(&serde_json::json!({
+        "type": "set",
+        "content": content,
+    }))?;
+    let cmd_line = format!("{command}\n");
+    let mut channel = open_exec_channel(ssh_handle, SETTINGS_CMD).await?;
+    channel.data(Bytes::from(cmd_line).as_ref()).await?;
+    loop {
+        match channel.wait().await {
+            Some(ChannelMsg::ExitStatus { .. }) | None => break,
+            _ => {}
+        }
+    }
+    Ok(())
+}
+
+async fn write_claude_settings(
+    ssh_handle: &mut client::Handle<SshClient>,
+    claude_settings: &ClaudeSettings,
+) -> Result<()> {
+    let settings_json = build_bedrock_settings_json(claude_settings);
+    send_settings_command(ssh_handle, &settings_json).await
+}
+
 pub fn start_agent_relay(
     guest_ip: String,
     ssh_key_path: PathBuf,
     ssh_user: String,
     vm_host_key_path: PathBuf,
+    claude_settings: ClaudeSettings,
     inbound: mpsc::Receiver<AgentMessage>,
 ) -> impl Stream<Item = Bytes> {
     let (tx, rx) = mpsc::channel::<Bytes>(1);
@@ -39,6 +160,7 @@ pub fn start_agent_relay(
         ssh_key_path,
         ssh_user,
         vm_host_key_path,
+        claude_settings,
         inbound,
         tx,
     ));
@@ -50,6 +172,7 @@ async fn run_agent_relay(
     ssh_key_path: PathBuf,
     ssh_user: String,
     vm_host_key_path: PathBuf,
+    claude_settings: ClaudeSettings,
     inbound: mpsc::Receiver<AgentMessage>,
     tx: mpsc::Sender<Bytes>,
 ) {
@@ -77,6 +200,7 @@ async fn run_agent_relay(
         &ssh_key_path,
         &ssh_user,
         &vm_host_key_path,
+        &claude_settings,
         inbound,
         tx.clone(),
     )
@@ -101,11 +225,15 @@ async fn connect_agent_relay(
     ssh_key_path: &PathBuf,
     ssh_user: &str,
     vm_host_key_path: &PathBuf,
+    claude_settings: &ClaudeSettings,
     inbound: mpsc::Receiver<AgentMessage>,
     tx: mpsc::Sender<Bytes>,
 ) -> Result<()> {
     let mut ssh_handle = connect_ssh(guest_ip, ssh_key_path, ssh_user, vm_host_key_path).await?;
     info!("agent ssh channel opened");
+    if claude_settings.use_bedrock {
+        write_claude_settings(&mut ssh_handle, claude_settings).await?;
+    }
     let ssh_channel = open_exec_channel(&mut ssh_handle, AGENT_CMD).await?;
     run_relay(ssh_handle, ssh_channel, inbound, tx).await
 }

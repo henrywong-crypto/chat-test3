@@ -37,17 +37,7 @@ S3_BUCKET   = "https://s3.amazonaws.com/spec.ccfc.min"
 S3_ARTIFACTS = f"{S3_BUCKET}/firecracker-ci"
 INSTALL_DIR = Path("/var/lib/fc")
 AGENT_PY    = Path(__file__).parent / "agent.py"
-
-CLAUDE_SETTINGS = """\
-{
-  "$schema": "https://json.schemastore.org/claude-code-settings.json",
-  "env": {
-    "ANTHROPIC_DEFAULT_HAIKU_MODEL": "us.anthropic.claude-haiku-4-5-20251001-v1:0",
-    "ANTHROPIC_DEFAULT_OPUS_MODEL":  "us.anthropic.claude-opus-4-6-v1",
-    "ANTHROPIC_DEFAULT_SONNET_MODEL": "us.anthropic.claude-sonnet-4-6",
-    "CLAUDE_CODE_USE_BEDROCK": "1"
-  }
-}
+SETTINGS_PY = Path(__file__).parent / "settings.py"
 """
 
 # Runs as root inside the chroot.
@@ -252,6 +242,7 @@ def install_claude_code(rootfs: Path) -> None:
 def install_agent(rootfs: Path) -> None:
     (rootfs / "opt").mkdir(exist_ok=True)
     shutil.copy(str(AGENT_PY), str(rootfs / "opt/agent.py"))
+    shutil.copy(str(SETTINGS_PY), str(rootfs / "opt/settings.py"))
 
     # Pre-warm the uv dependency cache as the ubuntu user so the first VM
     # startup is instant.  An immediate EOF on stdin causes agent.py to exit
@@ -264,13 +255,6 @@ def install_agent(rootfs: Path) -> None:
     )
     if result.returncode != 0:
         print("warning: uv prewarm failed (agent will cache deps on first run)")
-
-
-def write_claude_settings(rootfs: Path) -> None:
-    claude_dir = rootfs / "home/ubuntu/.claude"
-    claude_dir.mkdir(parents=True, exist_ok=True)
-    (claude_dir / "settings.json").write_text(CLAUDE_SETTINGS)
-    run(["chown", "-R", "1000:1000", str(claude_dir)])
 
 
 def build_ext4_image(workdir: Path, rootfs: Path, ubuntu_name: str) -> Path:
@@ -496,8 +480,6 @@ def main() -> None:
         install_agent(rootfs)
     finally:
         unmount_binds(mounts)
-
-    write_claude_settings(rootfs)
 
     ext4 = build_ext4_image(workdir, rootfs, ubuntu_name)
     kernel_dest, ext4_dest, client_key_dest, host_key_pub_dest = install_artifacts(

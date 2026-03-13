@@ -6,7 +6,7 @@ use axum::{
     response::{IntoResponse, Response},
     Json,
 };
-use chat_relay::{start_agent_relay, AgentMessage};
+use chat_relay::{start_agent_relay, AgentMessage, ClaudeSettings};
 use futures::StreamExt;
 use serde::Deserialize;
 use store::upsert_user;
@@ -40,11 +40,19 @@ pub(crate) async fn handle_chat_stream(
         .lock()
         .map_err(|e| anyhow!("chat senders lock poisoned: {e}"))?
         .insert(vm_id.clone(), agent_tx);
+    let claude_settings = ClaudeSettings {
+        use_bedrock: state.use_iam_creds,
+        base_url: state.anthropic_base_url.clone(),
+        haiku_model: state.anthropic_default_haiku_model.clone(),
+        sonnet_model: state.anthropic_default_sonnet_model.clone(),
+        opus_model: state.anthropic_default_opus_model.clone(),
+    };
     let event_stream = start_agent_relay(
         guest_ip,
         state.ssh_key_path.clone(),
         state.ssh_user.clone(),
         state.vm_host_key_path.clone(),
+        claude_settings,
         agent_rx,
     );
     info!("chat sse stream opened");

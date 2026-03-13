@@ -129,6 +129,7 @@ function initShell() {
 // Default to Chat tab — shell connects lazily on first visit
 document.addEventListener('DOMContentLoaded', () => {
   switchToChat();
+  loadApiSettings();
 });
 
 document.getElementById('reset-btn')?.addEventListener('click', () => {
@@ -1411,4 +1412,89 @@ function renderTranscriptMessages(messages) {
     }
   }
   sealAssistantTurn();
+}
+
+// ── API key settings ──────────────────────────────────────────────────────────
+
+let apiSettingsState = { uses_bedrock: false, has_api_key: false, base_url: null };
+
+async function loadApiSettings() {
+  try {
+    const res = await fetch('/api/settings');
+    if (!res.ok) return;
+    apiSettingsState = await res.json();
+    applyApiSettingsState();
+  } catch {}
+}
+
+function applyApiSettingsState() {
+  const banner = document.getElementById('api-key-banner');
+  if (!apiSettingsState.uses_bedrock && !apiSettingsState.has_api_key) {
+    banner.classList.remove('hidden');
+    banner.classList.add('flex');
+  } else {
+    banner.classList.add('hidden');
+    banner.classList.remove('flex');
+  }
+}
+
+document.getElementById('settings-btn')?.addEventListener('click', openSettingsDialog);
+document.getElementById('api-key-banner-btn')?.addEventListener('click', openSettingsDialog);
+
+function openSettingsDialog() {
+  const dialog = document.getElementById('settings-dialog');
+  const bedrockMsg = document.getElementById('settings-bedrock-msg');
+  const apiKeyForm = document.getElementById('settings-api-key-form');
+  const baseUrlEl = document.getElementById('settings-base-url');
+  const statusEl = document.getElementById('settings-save-status');
+  const saveBtn = document.getElementById('settings-save-btn');
+
+  if (apiSettingsState.uses_bedrock) {
+    bedrockMsg.classList.remove('hidden');
+    apiKeyForm.classList.add('hidden');
+    saveBtn.classList.add('hidden');
+  } else {
+    bedrockMsg.classList.add('hidden');
+    apiKeyForm.classList.remove('hidden');
+    saveBtn.classList.remove('hidden');
+  }
+  baseUrlEl.textContent = apiSettingsState.base_url || 'https://api.anthropic.com';
+  statusEl.textContent = '';
+  statusEl.classList.add('hidden');
+  document.getElementById('settings-api-key-input').value = '';
+  dialog.showModal();
+}
+
+document.getElementById('settings-save-btn')?.addEventListener('click', saveApiSettings);
+
+async function saveApiSettings() {
+  const apiKey = document.getElementById('settings-api-key-input').value.trim();
+  const statusEl = document.getElementById('settings-save-status');
+  if (!apiKey) {
+    statusEl.textContent = 'Please enter an API key.';
+    statusEl.className = 'text-xs mb-2 text-error';
+    statusEl.classList.remove('hidden');
+    return;
+  }
+  try {
+    const res = await fetch('/api/settings', {
+      method: 'PUT',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ api_key: apiKey, csrf_token: fmCsrfToken }),
+    });
+    if (!res.ok) {
+      const msg = await res.text();
+      statusEl.textContent = 'Error: ' + (msg || res.status);
+      statusEl.className = 'text-xs mb-2 text-error';
+      statusEl.classList.remove('hidden');
+      return;
+    }
+    apiSettingsState.has_api_key = true;
+    applyApiSettingsState();
+    document.getElementById('settings-dialog').close();
+  } catch (err) {
+    statusEl.textContent = 'Network error: ' + err.message;
+    statusEl.className = 'text-xs mb-2 text-error';
+    statusEl.classList.remove('hidden');
+  }
 }

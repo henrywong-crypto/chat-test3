@@ -93,6 +93,10 @@ fn TerminalPage(
                         <FilesPanel/>
                     </div>
                     <div id="chat-view" class="flex flex-col flex-1 min-h-0">
+                        <div id="api-key-banner" class="hidden items-center gap-2 px-4 py-2 text-xs border-b border-base-300">
+                            <span class="opacity-60">"No API key configured."</span>
+                            <button id="api-key-banner-btn" class="underline opacity-80 hover:opacity-100">"Configure now"</button>
+                        </div>
                         <div id="chat-scroll" class="flex-1 overflow-y-auto">
                             <div id="chat-messages" class="max-w-3xl mx-auto py-4 px-4 space-y-3"/>
                         </div>
@@ -125,6 +129,45 @@ fn IconRail(csrf_token: String, has_user_rootfs: bool) -> impl IntoView {
                 </svg>
             </button>
             <div class="icon-rail-spacer"/>
+            <button id="settings-btn" class="icon-btn" title="API settings">
+                <svg xmlns="http://www.w3.org/2000/svg" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                    <circle cx="12" cy="12" r="3"/>
+                    <path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 0 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-4 0v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 0 1-2.83-2.83l.06-.06A1.65 1.65 0 0 0 4.68 15a1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1 0-4h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 0 1 2.83-2.83l.06.06A1.65 1.65 0 0 0 9 4.68a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 4 0v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 0 1 2.83 2.83l-.06.06A1.65 1.65 0 0 0 19.4 9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1z"/>
+                </svg>
+            </button>
+            <dialog id="settings-dialog" class="modal">
+                <div class="modal-box" style="max-width:420px">
+                    <h3 class="font-bold text-sm mb-4">"API Settings"</h3>
+                    <div id="settings-bedrock-msg" class="hidden text-xs opacity-60 mb-3">
+                        "Using AWS Bedrock — no API key required."
+                    </div>
+                    <div id="settings-api-key-form">
+                        <div class="mb-3">
+                            <label class="text-xs font-medium opacity-60 block mb-1">"Base URL"</label>
+                            <div id="settings-base-url" class="text-xs font-mono opacity-50 break-all">"https://api.anthropic.com"</div>
+                        </div>
+                        <div class="mb-4">
+                            <label for="settings-api-key-input" class="text-xs font-medium opacity-60 block mb-1">"API Key"</label>
+                            <input
+                                id="settings-api-key-input"
+                                type="password"
+                                placeholder="sk-ant-..."
+                                class="input input-bordered input-sm w-full font-mono text-xs"
+                            />
+                        </div>
+                        <div id="settings-save-status" class="text-xs mb-2 hidden"/>
+                    </div>
+                    <div class="modal-action mt-2">
+                        <form method="dialog">
+                            <button class="btn btn-sm btn-ghost">"Cancel"</button>
+                        </form>
+                        <button id="settings-save-btn" class="btn btn-sm btn-primary">"Save"</button>
+                    </div>
+                </div>
+                <form method="dialog" class="modal-backdrop">
+                    <button>"close"</button>
+                </form>
+            </dialog>
             <button id="theme-toggle-btn" class="icon-btn" title="Toggle theme">
                 <span class="theme-icon sun-icon">
                     <svg xmlns="http://www.w3.org/2000/svg" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
