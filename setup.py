@@ -389,6 +389,7 @@ def build_rootfs(ci_version: str) -> None:
                 info("Installing Node.js + Claude Code inside rootfs (chroot)…")
                 sudo(
                     "chroot", str(squashfs_root), "bash", "-c",
+                    "export DEBIAN_FRONTEND=noninteractive && "
                     "apt-get update -qq && "
                     "apt-get install -y -qq openssh-server nodejs npm && "
                     "npm install -g @anthropic-ai/claude-code",

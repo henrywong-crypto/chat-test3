@@ -42,6 +42,7 @@ SETTINGS_PY = Path(__file__).parent / "settings.py"
 # Runs as root inside the chroot.
 CHROOT_ROOT_SCRIPT = """\
 set -e
+export DEBIAN_FRONTEND=noninteractive
 apt-get update -qq
 apt-get install -y -qq curl logrotate
 curl -LsSf https://astral.sh/uv/install.sh | env UV_INSTALL_DIR=/usr/local/bin sh
