@@ -96,6 +96,7 @@ pub(crate) fn extract_last_user_title(contents: &str) -> Option<String> {
         .filter_map(|line| serde_json::from_str::<JournalEntry>(line).ok())
         .filter(|e| e.type_ == "user")
         .filter(|e| !e.is_meta)
+        .filter(|e| !e.is_compact_summary)
         .find_map(|e| extract_user_title(e.message.content))
 }
 
@@ -188,6 +189,21 @@ mod tests {
     #[test]
     fn test_title_skips_slash_command_entries() {
         let jsonl = [FIXTURE_FIRST_USER, FIXTURE_SLASH_COMMAND_USER].join("\n");
+        assert_eq!(
+            extract_last_user_title(&jsonl).as_deref(),
+            Some("first message")
+        );
+    }
+
+    #[test]
+    fn test_title_skips_compact_summary_entries() {
+        let compact_summary = serde_json::json!({
+            "type": "user",
+            "isCompactSummary": true,
+            "message": { "role": "user", "content": "This session is being continued..." }
+        })
+        .to_string();
+        let jsonl = [FIXTURE_FIRST_USER, &compact_summary].join("\n");
         assert_eq!(
             extract_last_user_title(&jsonl).as_deref(),
             Some("first message")

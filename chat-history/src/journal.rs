@@ -14,5 +14,7 @@ pub(crate) struct JournalEntry {
     pub(crate) type_: String,
     #[serde(rename = "isMeta", default)]
     pub(crate) is_meta: bool,
+    #[serde(rename = "isCompactSummary", default)]
+    pub(crate) is_compact_summary: bool,
     pub(crate) message: JournalMessage,
 }
