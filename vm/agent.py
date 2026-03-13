@@ -136,7 +136,7 @@ async def run_query(content: str, session_id):
         cwd=os.environ.get('HOME', '/root'),
         can_use_tool=handle_tool_permission,
         hooks={
-            'PreToolUse': [HookMatcher(matcher='AskUserQuestion', hooks=[ask_user_question_hook])],
+            'PreToolUse': [HookMatcher(matcher='AskUserQuestion', hooks=[ask_user_question_hook], timeout=86400)],
         },
         **({"resume": session_id} if session_id else {}),
     )
