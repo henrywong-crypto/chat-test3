@@ -40,9 +40,18 @@ pub(crate) fn parse_chat_history(contents: &str) -> ChatHistory {
         .lines()
         .filter_map(|line| serde_json::from_str::<JournalEntry>(line).ok())
         .filter(|e| matches!(e.type_.as_str(), "user" | "assistant"))
+        .filter(|e| !e.is_meta)
+        .filter(|e| !is_slash_command(&e.message.content))
         .map(build_chat_message)
         .collect();
     ChatHistory { messages }
+}
+
+fn is_slash_command(content: &Content) -> bool {
+    match content {
+        Content::Text(text) => text.starts_with("<command-name>"),
+        Content::ContentBlocks(_) => false,
+    }
 }
 
 fn build_chat_message(entry: JournalEntry) -> ChatMessage {

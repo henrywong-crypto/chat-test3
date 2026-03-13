@@ -93,12 +93,14 @@ pub(crate) fn extract_last_user_title(contents: &str) -> Option<String> {
         .rev()
         .filter_map(|line| serde_json::from_str::<JournalEntry>(line).ok())
         .filter(|e| e.type_ == "user")
+        .filter(|e| !e.is_meta)
         .find_map(|e| extract_user_title(e.message.content))
 }
 
 fn extract_user_title(content: Content) -> Option<String> {
     match content {
-        Content::Text(text) => Some(text),
+        Content::Text(text) if !text.starts_with("<command-name>") => Some(text),
+        Content::Text(_) => None,
         Content::ContentBlocks(blocks) => blocks.into_iter().find_map(|b| b.text),
     }
 }

@@ -1313,7 +1313,8 @@ function buildChatSessionItem(chatSession) {
   const item = document.createElement('div');
   item.className = 'session-item' + (isActive ? ' active' : '');
   item.dataset.id = chatSession.session_id;
-  item.onclick = () => resumeSession(chatSession.session_id, chatSession.title);
+  item.dataset.projectDir = chatSession.project_dir;
+  item.onclick = () => resumeSession(chatSession.session_id, chatSession.project_dir, chatSession.title);
 
   const contentEl = document.createElement('div');
   contentEl.className = 'flex-1 min-w-0';
@@ -1336,16 +1337,16 @@ function buildChatSessionItem(chatSession) {
   deleteBtn.innerHTML = '<svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="3 6 5 6 21 6"/><path d="M19 6l-1 14H6L5 6"/><path d="M10 11v6"/><path d="M14 11v6"/><path d="M9 6V4h6v2"/></svg>';
   deleteBtn.onclick = (e) => {
     e.stopPropagation();
-    deleteChatSession(chatSession.session_id, item);
+    deleteChatSession(chatSession.session_id, chatSession.project_dir, item);
   };
   item.appendChild(deleteBtn);
 
   return item;
 }
 
-async function deleteChatSession(sessionId, itemEl) {
+async function deleteChatSession(sessionId, projectDir, itemEl) {
   if (!confirm('Delete this chat session?')) return;
-  const body = new URLSearchParams({ csrf_token: fmCsrfToken, session_id: sessionId });
+  const body = new URLSearchParams({ csrf_token: fmCsrfToken, session_id: sessionId, project_dir: projectDir });
   try {
     const res = await fetch('/sessions/' + vmId + '/chat-transcript', {
       method: 'DELETE',
@@ -1385,7 +1386,7 @@ function updateChatTitle(title) {
   if (el) el.textContent = title ?? 'New Chat';
 }
 
-function resumeSession(sessionId, title) {
+function resumeSession(sessionId, projectDir, title) {
   chatSessionId = sessionId;
   pendingToolUses.clear();
   streamInThinkingBlock = false;
@@ -1397,12 +1398,13 @@ function resumeSession(sessionId, title) {
   const activeItem = document.querySelector(`.session-item[data-id="${sessionId}"]`);
   if (activeItem) activeItem.classList.add('active');
   updateChatTitle(title);
-  loadAndRenderTranscript(sessionId);
+  loadAndRenderTranscript(sessionId, projectDir);
 }
 
-async function loadAndRenderTranscript(sessionId) {
+async function loadAndRenderTranscript(sessionId, projectDir) {
   try {
-    const res = await fetch('/sessions/' + vmId + '/chat-transcript?session_id=' + encodeURIComponent(sessionId));
+    const url = '/sessions/' + vmId + '/chat-transcript?session_id=' + encodeURIComponent(sessionId) + '&project_dir=' + encodeURIComponent(projectDir);
+    const res = await fetch(url);
     if (!res.ok) return;
     const transcript = await res.json();
     renderTranscriptMessages(transcript.messages);
