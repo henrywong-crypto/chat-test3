@@ -924,6 +924,8 @@ function renderQuestionPanel(requestId, questions) {
 
 function submitQuestionAnswer(requestId, answers) {
   console.log('[chat] submitting question answer  request_id=' + requestId);
+  const summary = Object.entries(answers).map(([q, a]) => `${q}\n${a}`).join('\n\n');
+  if (summary) appendUserMessage(summary);
   fetch('/sessions/' + vmId + '/chat-question-answer', {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
