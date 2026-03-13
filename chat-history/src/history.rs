@@ -43,8 +43,13 @@ pub(crate) fn parse_chat_history(contents: &str) -> ChatHistory {
         .filter_map(|line| serde_json::from_str::<JournalEntry>(line).ok())
         .filter(|e| matches!(e.type_.as_str(), "user" | "assistant"))
         .filter(|e| !e.is_meta)
-        .filter(|e| !e.is_compact_summary)
     {
+        if entry.is_compact_summary {
+            if let Some(chat_message) = build_compact_summary_message(entry) {
+                messages.push(chat_message);
+            }
+            continue;
+        }
         if is_slash_command(&entry.message.content) {
             skip_next_assistant = true;
             continue;
@@ -73,6 +78,9 @@ fn is_slash_command(content: &Content) -> bool {
 }
 
 fn is_local_command_output(content: &Content) -> bool {
+    // Matches all <local-command-*> tags (e.g. <local-command-stdout>). The
+    // <local-command-caveat> entries are already excluded via is_meta, but
+    // other variants like <local-command-stdout> lack isMeta so need this check.
     match content {
         Content::Text(text) => text.starts_with("<local-command-"),
         Content::ContentBlocks(_) => false,
@@ -92,6 +100,24 @@ fn build_chat_message(entry: JournalEntry) -> ChatMessage {
     ChatMessage {
         role: entry.message.role,
         content: entry.message.content,
+    }
+}
+
+fn build_compact_summary_message(entry: JournalEntry) -> Option<ChatMessage> {
+    let summary = extract_compact_summary_body(entry.message.content)?;
+    Some(ChatMessage {
+        role: entry.message.role,
+        content: Content::Text(summary),
+    })
+}
+
+fn extract_compact_summary_body(content: Content) -> Option<String> {
+    match content {
+        Content::Text(text) => text
+            .split_once("Summary:\n")
+            .map(|(_, summary)| summary.trim().to_owned())
+            .filter(|s| !s.is_empty()),
+        Content::ContentBlocks(_) => None,
     }
 }
 
@@ -256,11 +282,15 @@ mod tests {
     }
 
     #[test]
-    fn test_compact_summary_entries_are_excluded() {
+    fn test_compact_summary_body_is_shown() {
         let jsonl = [&make_compact_summary_line(), FIXTURE_FIRST_USER].join("\n");
         let chat_history = parse_chat_history(&jsonl);
-        assert_eq!(chat_history.messages.len(), 1);
+        assert_eq!(chat_history.messages.len(), 2);
         let Content::Text(ref text) = chat_history.messages[0].content else {
+            panic!()
+        };
+        assert_eq!(text, "...");
+        let Content::Text(ref text) = chat_history.messages[1].content else {
             panic!()
         };
         assert_eq!(text, "first message");

@@ -129,6 +129,9 @@ fn extract_compact_summary_title(content: Content) -> Option<String> {
 fn extract_user_title(content: Content) -> Option<String> {
     match content {
         Content::Text(text)
+            // Matches all <local-command-*> tags (e.g. <local-command-stdout>). The
+            // <local-command-caveat> entries are already excluded via is_meta, but
+            // other variants like <local-command-stdout> lack isMeta so need this check.
             if !text.starts_with("<command-name>") && !text.starts_with("<local-command-") =>
         {
             Some(text)
