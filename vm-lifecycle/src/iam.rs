@@ -11,16 +11,15 @@ pub struct HostIamCredential {
     pub credential: ImdsCredential,
 }
 
-pub async fn fetch_host_iam_credentials() -> Option<HostIamCredential> {
+pub async fn fetch_host_iam_credentials() -> Result<HostIamCredential> {
     let credentials_chain = DefaultCredentialsChain::builder().build().await;
     let credentials = credentials_chain
         .provide_credentials()
         .await
-        .map_err(|e| warn!("failed to fetch host credentials: {e}"))
-        .ok()?;
+        .context("failed to fetch host IAM credentials")?;
     let role_name = std::env::var("AWS_ROLE_NAME").unwrap_or_else(|_| "vm-role".to_string());
     let expiration = format_credential_expiry(&credentials);
-    Some(HostIamCredential {
+    Ok(HostIamCredential {
         role_name,
         credential: build_imds_credential(&credentials, expiration),
     })

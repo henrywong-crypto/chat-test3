@@ -124,7 +124,7 @@ async fn check_vm_limit_and_create(
     }
 
     let iam_creds = if state.use_iam_creds {
-        fetch_host_iam_credentials().await
+        Some(fetch_host_iam_credentials().await.context("failed to fetch IAM credentials for VM")?)
     } else {
         None
     };

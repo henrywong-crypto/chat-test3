@@ -85,7 +85,9 @@ pub async fn refresh_all_vm_mmds(vms: &VmRegistry, use_iam_creds: bool) {
     if !use_iam_creds {
         return;
     }
-    let Some(host_iam_credential) = fetch_host_iam_credentials().await else {
+    let Some(host_iam_credential) = fetch_host_iam_credentials().await
+        .map_err(|e| warn!("failed to fetch host IAM credentials: {e}"))
+        .ok() else {
         return;
     };
     let vm_socket_paths: HashMap<String, PathBuf> = {
