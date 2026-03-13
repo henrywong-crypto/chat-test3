@@ -38,7 +38,6 @@ S3_ARTIFACTS = f"{S3_BUCKET}/firecracker-ci"
 INSTALL_DIR = Path("/var/lib/fc")
 AGENT_PY    = Path(__file__).parent / "agent.py"
 SETTINGS_PY = Path(__file__).parent / "settings.py"
-"""
 
 # Runs as root inside the chroot.
 CHROOT_ROOT_SCRIPT = """\

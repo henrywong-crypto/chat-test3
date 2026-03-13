@@ -1,4 +1,3 @@
-use anyhow::anyhow;
 use axum::{
     extract::State,
     http::StatusCode,
@@ -83,7 +82,7 @@ pub(crate) async fn put_settings_handler(
     };
     let guest_ip_opt = match find_user_vm_guest_ip(&state.vms, db_user.id) {
         Ok(ip) => ip,
-        Err(e) => return AppError::from(anyhow!(e)).into_response(),
+        Err(e) => return AppError::from(e).into_response(),
     };
     let Some(guest_ip) = guest_ip_opt else {
         return (StatusCode::NOT_FOUND, "No active VM").into_response();
