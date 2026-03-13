@@ -237,6 +237,20 @@ mod tests {
     }
 
     #[test]
+    fn test_title_skips_local_command_stdout_entries() {
+        let local_cmd = serde_json::json!({
+            "type": "user",
+            "message": { "role": "user", "content": "<local-command-stdout>Set model to Default</local-command-stdout>" }
+        })
+        .to_string();
+        let jsonl = [FIXTURE_FIRST_USER, &local_cmd].join("\n");
+        assert_eq!(
+            extract_last_user_title(&jsonl).as_deref(),
+            Some("first message")
+        );
+    }
+
+    #[test]
     fn test_title_skips_interrupted_request_entries() {
         let interrupted = serde_json::json!({
             "type": "user",

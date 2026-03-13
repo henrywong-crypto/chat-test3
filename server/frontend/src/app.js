@@ -1396,6 +1396,20 @@ async function loadAndRenderTranscript(sessionId, projectDir) {
   } catch {}
 }
 
+// Returns true if there is a real user text message between messages[i] and the
+// next assistant message. Tool-result user messages do not count — they are part
+// of the same assistant turn and should not cause a new "Claude" header.
+function hasUserTextBeforeNextAssistant(messages, i) {
+  for (let j = i + 1; j < messages.length; j++) {
+    if (messages[j].role === 'assistant') return false;
+    const content = messages[j].content;
+    const text = typeof content === 'string' ? content
+      : Array.isArray(content) ? content.filter(b => b.type === 'text').map(b => b.text).join('') : '';
+    if (text.trim()) return true;
+  }
+  return true;
+}
+
 function renderTranscriptMessages(messages) {
   for (let i = 0; i < messages.length; i++) {
     const message = messages[i];
@@ -1419,12 +1433,10 @@ function renderTranscriptMessages(messages) {
           appendToolUseBlock(block.id, block.name, block.input);
         }
       }
-      // Keep the turn open if the next message is also assistant
-      const nextIsAssistant = i + 1 < messages.length && messages[i + 1].role === 'assistant';
-      if (nextIsAssistant) {
-        sealAssistantMessage();
-      } else {
+      if (hasUserTextBeforeNextAssistant(messages, i)) {
         sealAssistantTurn();
+      } else {
+        sealAssistantMessage();
       }
     }
   }
