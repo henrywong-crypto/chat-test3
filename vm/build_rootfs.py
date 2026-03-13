@@ -251,15 +251,30 @@ def prepare_rootfs(rootfs: Path) -> None:
 
 
 def mount_binds(rootfs: Path) -> list[Path]:
-    mounts = [rootfs / "proc", rootfs / "sys", rootfs / "dev"]
-    for mount_point in mounts:
+    # Replace any symlink at etc/resolv.conf with a plain file so the bind
+    # mount has a regular file target (bind-mounting onto a symlink fails).
+    resolv_conf = rootfs / "etc/resolv.conf"
+    if resolv_conf.is_symlink():
+        resolv_conf.unlink()
+        resolv_conf.touch()
+
+    mounts = [rootfs / "proc", rootfs / "sys", rootfs / "dev", resolv_conf]
+    for mount_point in mounts[:-1]:
         run(["mount", "--bind", f"/{mount_point.name}", str(mount_point)])
+    run(["mount", "--bind", "/etc/resolv.conf", str(resolv_conf)])
     return mounts
 
 
 def unmount_binds(mounts: list[Path]) -> None:
     for mount_point in reversed(mounts):
         subprocess.run(["umount", str(mount_point)], check=False)
+    # After unmounting, write a static Cloudflare resolv.conf for runtime DNS
+    # and mask systemd-resolved so it cannot recreate the symlink at boot.
+    resolv_conf = mounts[-1]
+    resolv_conf.write_text("nameserver 1.1.1.1\nnameserver 1.0.0.1\n")
+    resolved_mask = resolv_conf.parent.parent / "etc/systemd/system/systemd-resolved.service"
+    if not resolved_mask.exists():
+        resolved_mask.symlink_to("/dev/null")
 
 
 def install_system_packages(rootfs: Path) -> None:
