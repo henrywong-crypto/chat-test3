@@ -329,6 +329,19 @@ fn build_feed_schedule(feed_request: FeedRequest) -> FeedSchedule;  // use &Feed
 fn compute_feed_cost(mut schedule: FeedSchedule) -> f64;  // use &FeedSchedule if not mutated
 ```
 
+### Return Values
+
+Never return a tuple to bundle multiple values. Split into separate focused functions instead — one per value.
+
+```rust
+// Good — two focused functions
+fn load_animal_tag(tag_path: &PathBuf) -> Result<Option<Tag>>;
+fn load_cage_key(key_path: &PathBuf) -> Result<Arc<Key>>;
+
+// Bad — tuple bundles multiple return values
+fn load_cage_data(tag_path: &PathBuf, key_path: &PathBuf) -> Result<(Option<Tag>, Arc<Key>)>;
+```
+
 ### Versioning
 
 All crate versions use 3-part semver (e.g. `0.1.0`).

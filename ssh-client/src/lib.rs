@@ -31,7 +31,8 @@ pub async fn connect_ssh(
     ssh_user: &str,
     vm_host_key_path: &PathBuf,
 ) -> Result<Handle<SshClient>> {
-    let (vm_host_key, ssh_keypair) = load_ssh_keys(ssh_key_path, vm_host_key_path)?;
+    let vm_host_key = load_vm_host_key(vm_host_key_path)?;
+    let ssh_keypair = load_ssh_keypair(ssh_key_path)?;
     let ssh_config = Arc::new(client::Config::default());
     let addr = format!("{guest_ip}:22");
     let connect_deadline = tokio::time::Instant::now() + Duration::from_secs(60);
@@ -51,18 +52,19 @@ pub async fn connect_ssh(
     Ok(ssh_handle)
 }
 
-fn load_ssh_keys(
-    ssh_key_path: &PathBuf,
-    vm_host_key_path: &PathBuf,
-) -> Result<(Option<PublicKey>, Arc<PrivateKey>)> {
-    let vm_host_key = if vm_host_key_path.as_os_str().is_empty() {
-        None
-    } else {
-        Some(load_public_key(vm_host_key_path).context("failed to load VM host key")?)
-    };
+fn load_vm_host_key(vm_host_key_path: &PathBuf) -> Result<Option<PublicKey>> {
+    if vm_host_key_path.as_os_str().is_empty() {
+        return Ok(None);
+    }
+    let vm_host_key =
+        load_public_key(vm_host_key_path).context("failed to load VM host key")?;
+    Ok(Some(vm_host_key))
+}
+
+fn load_ssh_keypair(ssh_key_path: &PathBuf) -> Result<Arc<PrivateKey>> {
     let ssh_keypair =
         Arc::new(load_secret_key(ssh_key_path, None).context("failed to load SSH key")?);
-    Ok((vm_host_key, ssh_keypair))
+    Ok(ssh_keypair)
 }
 
 async fn authenticate_ssh_handle(

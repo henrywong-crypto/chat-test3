@@ -840,6 +840,7 @@ version = "0.1.0"
 dependencies = [
  "anyhow",
  "chrono",
+ "russh-sftp",
  "serde",
  "serde_json",
  "sftp-client",
@@ -4485,6 +4486,7 @@ dependencies = [
  "handlers",
  "leptos",
  "russh",
+ "russh-sftp",
  "serde",
  "serde_json",
  "sftp-client",
