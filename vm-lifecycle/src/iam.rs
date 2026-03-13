@@ -12,7 +12,7 @@ pub struct HostIamCredential {
 }
 
 pub async fn fetch_host_iam_credentials(role_name: &str) -> Result<HostIamCredential> {
-    let config = aws_config::load_defaults(BehaviorVersion::v2023_11_09()).await;
+    let config = aws_config::load_defaults(BehaviorVersion::v2024_03_28()).await;
     let credentials = config
         .credentials_provider()
         .context("no credentials provider configured")?
@@ -42,7 +42,9 @@ fn format_credential_expiry(credentials: &Credentials) -> Result<String> {
 }
 
 fn build_imds_credential(credentials: &Credentials, expiration: String) -> Result<ImdsCredential> {
-    let session_token = credentials.session_token().context("missing session token")?;
+    let session_token = credentials
+        .session_token()
+        .context("missing session token")?;
     Ok(ImdsCredential::new(
         credentials.access_key_id(),
         credentials.secret_access_key(),

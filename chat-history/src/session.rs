@@ -1,7 +1,7 @@
 use anyhow::{Context, Result};
 use chrono::{DateTime, Utc};
-use serde::Serialize;
 use russh_sftp::client::{fs::DirEntry, SftpSession};
+use serde::Serialize;
 use sftp_client::open_sftp_session;
 use ssh_client::connect_ssh;
 use std::path::PathBuf;
@@ -30,8 +30,15 @@ pub async fn list_chat_sessions(
     let mut all_chat_sessions = Vec::new();
     for project_dir in &project_dirs {
         let dir_entries: Vec<DirEntry> = sftp.read_dir(project_dir).await?.collect();
-        let mut chat_sessions = build_chat_sessions(&sftp, dir_entries, project_dir).await?;
-        all_chat_sessions.append(&mut chat_sessions);
+        for dir_entry in &dir_entries {
+            let name = dir_entry.file_name();
+            let Some(session_id) = name.strip_suffix(".jsonl") else {
+                continue;
+            };
+            all_chat_sessions.push(
+                build_chat_session_with_title(&sftp, dir_entry, session_id, project_dir).await?,
+            );
+        }
     }
     all_chat_sessions.sort_by(|a, b| b.last_active_at.cmp(&a.last_active_at));
     Ok(all_chat_sessions)
@@ -49,6 +56,31 @@ pub async fn delete_chat_session(
     let sftp = open_sftp_session(&mut ssh_handle).await?;
     let path = format!("{project_dir}/{session_id}.jsonl");
     sftp.remove_file(&path).await?;
+    delete_session_dir(&sftp, project_dir, session_id).await
+}
+
+async fn delete_session_dir(sftp: &SftpSession, project_dir: &str, session_id: &str) -> Result<()> {
+    let dir_path = format!("{project_dir}/{session_id}");
+    match sftp.try_exists(&dir_path).await {
+        Ok(true) => remove_dir_all(sftp, &dir_path, 2).await,
+        _ => Ok(()),
+    }
+}
+
+async fn remove_dir_all(sftp: &SftpSession, path: &str, max_depth: usize) -> Result<()> {
+    let entries: Vec<DirEntry> = sftp.read_dir(path).await?.collect();
+    for entry in &entries {
+        let entry_path = format!("{path}/{}", entry.file_name());
+        if entry.file_type().is_dir() {
+            if max_depth == 0 {
+                continue;
+            }
+            remove_dir_all(sftp, &entry_path, max_depth - 1).await?;
+        } else {
+            sftp.remove_file(&entry_path).await?;
+        }
+    }
+    sftp.remove_dir(path).await?;
     Ok(())
 }
 
@@ -66,26 +98,6 @@ fn extract_user_title(content: Content) -> Option<String> {
         Content::Text(text) => Some(text),
         Content::ContentBlocks(blocks) => blocks.into_iter().find_map(|b| b.text),
     }
-}
-
-async fn build_chat_sessions(
-    sftp: &SftpSession,
-    dir_entries: Vec<DirEntry>,
-    project_dir: &str,
-) -> Result<Vec<ChatSession>> {
-    let mut chat_sessions = Vec::new();
-    for dir_entry in &dir_entries {
-        let name = dir_entry.file_name();
-        let Some(session_id) = name.strip_suffix(".jsonl") else {
-            continue;
-        };
-        if session_id.starts_with("agent-") {
-            continue;
-        }
-        chat_sessions
-            .push(build_chat_session_with_title(sftp, dir_entry, session_id, project_dir).await?);
-    }
-    Ok(chat_sessions)
 }
 
 async fn build_chat_session_with_title(

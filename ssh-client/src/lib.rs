@@ -17,7 +17,10 @@ impl client::Handler for SshClient {
         &mut self,
         server_public_key: &PublicKey,
     ) -> impl std::future::Future<Output = Result<bool, Self::Error>> + Send {
-        let matches = self.vm_host_key.as_ref().map_or(true, |key| server_public_key == key);
+        let matches = self
+            .vm_host_key
+            .as_ref()
+            .map_or(true, |key| server_public_key == key);
         async move { Ok(matches) }
     }
 }
@@ -53,8 +56,7 @@ fn load_vm_host_key(vm_host_key_path: &PathBuf) -> Result<Option<PublicKey>> {
     if vm_host_key_path.as_os_str().is_empty() {
         return Ok(None);
     }
-    let vm_host_key =
-        load_public_key(vm_host_key_path).context("failed to load VM host key")?;
+    let vm_host_key = load_public_key(vm_host_key_path).context("failed to load VM host key")?;
     Ok(Some(vm_host_key))
 }
 

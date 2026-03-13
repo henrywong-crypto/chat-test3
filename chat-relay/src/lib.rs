@@ -65,7 +65,9 @@ pub async fn get_vm_settings(
     let mut ssh_handle = connect_ssh(guest_ip, ssh_key_path, ssh_user, vm_host_key_path).await?;
     let command = "{\"type\":\"get\"}\n";
     let mut channel = open_exec_channel(&mut ssh_handle, SETTINGS_CMD).await?;
-    channel.data(Bytes::from(command.as_bytes()).as_ref()).await?;
+    channel
+        .data(Bytes::from(command.as_bytes()).as_ref())
+        .await?;
     let mut stdout = String::new();
     loop {
         match channel.wait().await {

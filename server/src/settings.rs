@@ -74,7 +74,11 @@ pub(crate) async fn put_settings_handler(
         return (StatusCode::FORBIDDEN, "Forbidden").into_response();
     }
     if state.use_iam_creds {
-        return (StatusCode::BAD_REQUEST, "API key not applicable in Bedrock mode").into_response();
+        return (
+            StatusCode::BAD_REQUEST,
+            "API key not applicable in Bedrock mode",
+        )
+            .into_response();
     }
     let db_user = match upsert_user(&state.db, &user.email).await {
         Ok(u) => u,

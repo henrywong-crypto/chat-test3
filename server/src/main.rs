@@ -16,7 +16,7 @@ use axum::{
     http::HeaderValue,
     middleware::{self, Next},
     response::Response,
-    routing::{delete, get, post},
+    routing::{get, post},
     Router,
 };
 use firecracker_manager::{cleanup_stale_vms, setup_host_networking};
@@ -107,7 +107,10 @@ fn build_router(app_state: AppState, session_store: PostgresStore) -> Router {
             "/sessions/{id}/chat-upload",
             post(handle_chat_upload).layer(DefaultBodyLimit::max(50 * 1024 * 1024)),
         )
-        .route("/api/settings", get(get_settings_handler).put(put_settings_handler))
+        .route(
+            "/api/settings",
+            get(get_settings_handler).put(put_settings_handler),
+        )
         .route("/rootfs/delete", post(delete_user_rootfs_handler))
         .route("/terminal/{id}", get(get_terminal_page))
         .route("/ws/{id}", get(handle_ws_upgrade))
@@ -209,7 +212,12 @@ fn spawn_mmds_refresh_task(app_state: AppState) -> tokio::task::JoinHandle<()> {
         interval.tick().await;
         loop {
             interval.tick().await;
-            refresh_all_vm_mmds(&app_state.vms, app_state.use_iam_creds, &app_state.iam_role_name).await;
+            refresh_all_vm_mmds(
+                &app_state.vms,
+                app_state.use_iam_creds,
+                &app_state.iam_role_name,
+            )
+            .await;
         }
     })
 }

@@ -45,13 +45,19 @@ mod tests {
 
     #[test]
     fn test_valid_tap_interface_extracted() {
-        assert_eq!(parse_tap_interface_name("5: tap0: <BROADCAST,MULTICAST,UP>"), Some("tap0"));
+        assert_eq!(
+            parse_tap_interface_name("5: tap0: <BROADCAST,MULTICAST,UP>"),
+            Some("tap0")
+        );
         assert_eq!(parse_tap_interface_name("12: tap99: <...>"), Some("tap99"));
     }
 
     #[test]
     fn test_non_tap_interface_returns_none() {
-        assert_eq!(parse_tap_interface_name("3: eth0: <BROADCAST,MULTICAST,UP>"), None);
+        assert_eq!(
+            parse_tap_interface_name("3: eth0: <BROADCAST,MULTICAST,UP>"),
+            None
+        );
         assert_eq!(parse_tap_interface_name("1: lo: <LOOPBACK,UP>"), None);
         assert_eq!(parse_tap_interface_name("4: tun0: <...>"), None);
     }

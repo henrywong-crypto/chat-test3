@@ -1,7 +1,5 @@
 use anyhow::Result;
-use firecracker_manager::{
-    build_mmds_with_iam, put_mmds, JailerConfig, Vm, VmConfig,
-};
+use firecracker_manager::{build_mmds_with_iam, put_mmds, JailerConfig, Vm, VmConfig};
 use std::{
     collections::HashMap,
     path::{Path, PathBuf},
@@ -50,8 +48,7 @@ pub fn build_vm_config(
     user_rootfs: &Path,
 ) -> Result<VmConfig> {
     let vm_id = Uuid::new_v4().to_string();
-    let mmds_metadata =
-        build_mmds_with_iam(&vm_id, &iam_creds.role_name, &iam_creds.credential)?;
+    let mmds_metadata = build_mmds_with_iam(&vm_id, &iam_creds.role_name, &iam_creds.credential)?;
     info!("configured mmds");
     Ok(VmConfig {
         id: vm_id,
@@ -77,9 +74,11 @@ pub async fn refresh_all_vm_mmds(vms: &VmRegistry, use_iam_creds: bool, iam_role
     if !use_iam_creds {
         return;
     }
-    let Some(host_iam_credential) = fetch_host_iam_credentials(iam_role_name).await
+    let Some(host_iam_credential) = fetch_host_iam_credentials(iam_role_name)
+        .await
         .map_err(|e| warn!("failed to fetch host IAM credentials: {e}"))
-        .ok() else {
+        .ok()
+    else {
         return;
     };
     let vm_socket_paths: HashMap<String, PathBuf> = {
@@ -104,8 +103,11 @@ async fn refresh_vm_mmds(
     socket_path: &Path,
     host_iam_credential: &HostIamCredential,
 ) -> Result<()> {
-    let metadata =
-        build_mmds_with_iam(vm_id, &host_iam_credential.role_name, &host_iam_credential.credential)?;
+    let metadata = build_mmds_with_iam(
+        vm_id,
+        &host_iam_credential.role_name,
+        &host_iam_credential.credential,
+    )?;
     put_mmds(socket_path, &metadata).await
 }
 
