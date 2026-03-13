@@ -91,7 +91,7 @@ pub(crate) fn is_local_command_output(content: &Content) -> bool {
     }
 }
 
-fn is_interrupted_request(content: &Content) -> bool {
+pub(crate) fn is_interrupted_request(content: &Content) -> bool {
     match content {
         Content::Text(_) => false,
         Content::ContentBlocks(blocks) => blocks.iter().all(|b| {

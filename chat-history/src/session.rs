@@ -9,7 +9,7 @@ use std::path::PathBuf;
 use tokio::io::AsyncReadExt;
 
 use crate::{
-    history::{is_local_command_output, is_slash_command},
+    history::{is_interrupted_request, is_local_command_output, is_slash_command},
     journal::JournalEntry,
     project::find_all_project_dirs,
     Content,
@@ -112,6 +112,7 @@ pub(crate) fn extract_last_user_title(contents: &str) -> Option<String> {
         .filter(|e| !e.is_compact_summary)
         .filter(|e| !is_slash_command(&e.message.content))
         .filter(|e| !is_local_command_output(&e.message.content))
+        .filter(|e| !is_interrupted_request(&e.message.content))
         .find_map(|e| extract_user_title(e.message.content))
 }
 
@@ -236,13 +237,13 @@ mod tests {
     }
 
     #[test]
-    fn test_title_skips_local_command_stdout_entries() {
-        let local_cmd = serde_json::json!({
+    fn test_title_skips_interrupted_request_entries() {
+        let interrupted = serde_json::json!({
             "type": "user",
-            "message": { "role": "user", "content": "<local-command-stdout>Set model to Default</local-command-stdout>" }
+            "message": { "role": "user", "content": [{ "type": "text", "text": "[Request interrupted by user]" }] }
         })
         .to_string();
-        let jsonl = [FIXTURE_FIRST_USER, &local_cmd].join("\n");
+        let jsonl = [FIXTURE_FIRST_USER, &interrupted].join("\n");
         assert_eq!(
             extract_last_user_title(&jsonl).as_deref(),
             Some("first message")

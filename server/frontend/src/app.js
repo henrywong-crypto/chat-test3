@@ -1400,11 +1400,13 @@ function renderTranscriptMessages(messages) {
   for (let i = 0; i < messages.length; i++) {
     const message = messages[i];
     if (message.role === 'user') {
-      sealAssistantTurn();
       const textContent = Array.isArray(message.content)
         ? message.content.filter(b => b.type === 'text').map(b => b.text).join('')
         : (typeof message.content === 'string' ? message.content : '');
-      if (textContent) appendUserMessage(textContent);
+      if (textContent) {
+        sealAssistantTurn();
+        appendUserMessage(textContent);
+      }
     } else if (message.role === 'assistant') {
       const blocks = Array.isArray(message.content) ? message.content : [];
       for (const block of blocks) {
