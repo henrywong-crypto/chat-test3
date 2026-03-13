@@ -8,7 +8,12 @@ use ssh_client::connect_ssh;
 use std::path::PathBuf;
 use tokio::io::AsyncReadExt;
 
-use crate::{journal::JournalEntry, project::find_all_project_dirs, Content};
+use crate::{
+    history::{is_local_command_output, is_slash_command},
+    journal::JournalEntry,
+    project::find_all_project_dirs,
+    Content,
+};
 
 #[derive(Serialize)]
 pub struct ChatSession {
@@ -99,22 +104,20 @@ pub(crate) fn extract_last_user_title(contents: &str) -> Option<String> {
         .rev()
         .filter_map(|line| serde_json::from_str::<JournalEntry>(line).ok())
         .filter(|e| e.type_ == "user")
+        // isMeta entries (e.g. <local-command-caveat>) are injected by Claude
+        // Code as bookkeeping markers, not real conversation messages.
+        .filter(|e| !e.is_meta)
         // Compact summary entries have type "user" but contain the boilerplate
         // "This session is being continued..." text, not a real user message.
         .filter(|e| !e.is_compact_summary)
+        .filter(|e| !is_slash_command(&e.message.content))
+        .filter(|e| !is_local_command_output(&e.message.content))
         .find_map(|e| extract_user_title(e.message.content))
 }
 
 fn extract_user_title(content: Content) -> Option<String> {
     match content {
-        Content::Text(text)
-            // <local-command-stdout> entries are not marked isMeta and would
-            // otherwise appear as titles.
-            if !text.starts_with("<command-name>") && !text.starts_with("<local-command-stdout>") =>
-        {
-            Some(text)
-        }
-        Content::Text(_) => None,
+        Content::Text(text) => Some(text),
         Content::ContentBlocks(blocks) => blocks.into_iter().find_map(|b| b.text),
     }
 }
@@ -191,6 +194,17 @@ mod tests {
     #[test]
     fn test_title_skips_is_meta_entries() {
         let jsonl = [FIXTURE_IS_META_USER, FIXTURE_FIRST_USER].join("\n");
+        assert_eq!(
+            extract_last_user_title(&jsonl).as_deref(),
+            Some("first message")
+        );
+    }
+
+    #[test]
+    fn test_title_skips_is_meta_entries_when_last() {
+        // is_meta entry is last in file so the reverse iterator encounters it
+        // first — proves it is actually filtered and not just bypassed.
+        let jsonl = [FIXTURE_FIRST_USER, FIXTURE_IS_META_USER].join("\n");
         assert_eq!(
             extract_last_user_title(&jsonl).as_deref(),
             Some("first message")
