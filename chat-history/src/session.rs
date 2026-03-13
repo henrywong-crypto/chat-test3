@@ -1,5 +1,6 @@
 use anyhow::{Context, Result};
 use chrono::{DateTime, Utc};
+use futures::future::BoxFuture;
 use russh_sftp::client::{fs::DirEntry, SftpSession};
 use serde::Serialize;
 use sftp_client::open_sftp_session;
@@ -67,21 +68,23 @@ async fn delete_session_dir(sftp: &SftpSession, project_dir: &str, session_id: &
     }
 }
 
-async fn remove_dir_all(sftp: &SftpSession, path: &str, max_depth: usize) -> Result<()> {
-    let entries: Vec<DirEntry> = sftp.read_dir(path).await?.collect();
-    for entry in &entries {
-        let entry_path = format!("{path}/{}", entry.file_name());
-        if entry.file_type().is_dir() {
-            if max_depth == 0 {
-                continue;
+fn remove_dir_all<'a>(sftp: &'a SftpSession, path: &'a str, max_depth: usize) -> BoxFuture<'a, Result<()>> {
+    Box::pin(async move {
+        let entries: Vec<DirEntry> = sftp.read_dir(path).await?.collect();
+        for entry in &entries {
+            let entry_path = format!("{path}/{}", entry.file_name());
+            if entry.file_type().is_dir() {
+                if max_depth == 0 {
+                    continue;
+                }
+                remove_dir_all(sftp, &entry_path, max_depth - 1).await?;
+            } else {
+                sftp.remove_file(&entry_path).await?;
             }
-            remove_dir_all(sftp, &entry_path, max_depth - 1).await?;
-        } else {
-            sftp.remove_file(&entry_path).await?;
         }
-    }
-    sftp.remove_dir(path).await?;
-    Ok(())
+        sftp.remove_dir(path).await?;
+        Ok(())
+    })
 }
 
 pub(crate) fn extract_last_user_title(contents: &str) -> Option<String> {

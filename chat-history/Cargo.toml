@@ -7,6 +7,7 @@ edition = "2021"
 ssh-client = { path = "../ssh-client" }
 sftp-client = { path = "../sftp-client" }
 anyhow = "1.0.102"
+futures = "0.3"
 russh-sftp = "2.1.1"
 chrono = { version = "0.4", features = ["serde"] }
 serde = { version = "1.0.228", features = ["derive"] }
