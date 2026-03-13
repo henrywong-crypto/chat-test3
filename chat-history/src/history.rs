@@ -50,17 +50,16 @@ pub(crate) fn parse_chat_history(contents: &str) -> ChatHistory {
         .lines()
         .filter_map(|line| serde_json::from_str::<JournalEntry>(line).ok())
         .filter(|e| matches!(e.entry_type.as_str(), "user" | "assistant"))
-        .filter_map(build_chat_message)
+        .map(build_chat_message)
         .collect();
     ChatHistory { messages }
 }
 
-fn build_chat_message(entry: JournalEntry) -> Option<ChatMessage> {
-    let role = entry.message.role.unwrap_or(entry.entry_type);
-    Some(ChatMessage {
-        role,
+fn build_chat_message(entry: JournalEntry) -> ChatMessage {
+    ChatMessage {
+        role: entry.message.role,
         content: entry.message.content,
-    })
+    }
 }
 
 #[cfg(test)]

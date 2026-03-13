@@ -50,7 +50,7 @@ pub async fn delete_chat_session(
     for project_dir in &project_dirs {
         let path = format!("{project_dir}/{session_id}.jsonl");
         if sftp.open(&path).await.is_ok() {
-            sftp.remove(&path).await?;
+            sftp.remove_file(&path).await?;
             return Ok(());
         }
     }

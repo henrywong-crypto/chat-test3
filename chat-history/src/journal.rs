@@ -4,7 +4,7 @@ use crate::Content;
 
 #[derive(Deserialize)]
 pub(crate) struct JournalMessage {
-    pub(crate) role: Option<String>,
+    pub(crate) role: String,
     pub(crate) content: Content,
 }
 
