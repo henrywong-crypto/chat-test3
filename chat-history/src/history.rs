@@ -93,9 +93,11 @@ fn is_local_command_output(content: &Content) -> bool {
 fn is_interrupted_request(content: &Content) -> bool {
     match content {
         Content::Text(_) => false,
-        Content::ContentBlocks(blocks) => blocks
-            .iter()
-            .all(|b| b.text.as_deref().is_some_and(|t| t.starts_with("[Request interrupted by user"))),
+        Content::ContentBlocks(blocks) => blocks.iter().all(|b| {
+            b.text
+                .as_deref()
+                .is_some_and(|t| t.starts_with("[Request interrupted by user"))
+        }),
     }
 }
 
@@ -252,7 +254,13 @@ mod tests {
     #[test]
     fn test_assistant_response_to_slash_command_is_excluded() {
         let assistant_response = make_assistant_line("No response requested.");
-        let jsonl = [FIXTURE_SLASH_COMMAND_USER, &assistant_response, FIXTURE_FIRST_USER, &make_assistant_line("hello")].join("\n");
+        let jsonl = [
+            FIXTURE_SLASH_COMMAND_USER,
+            &assistant_response,
+            FIXTURE_FIRST_USER,
+            &make_assistant_line("hello"),
+        ]
+        .join("\n");
         let chat_history = parse_chat_history(&jsonl);
         assert_eq!(chat_history.messages.len(), 2);
         assert_eq!(chat_history.messages[0].role, "user");

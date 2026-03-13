@@ -70,7 +70,11 @@ async fn delete_session_dir(sftp: &SftpSession, project_dir: &str, session_id: &
     }
 }
 
-fn remove_dir_all<'a>(sftp: &'a SftpSession, path: &'a str, max_depth: usize) -> BoxFuture<'a, Result<()>> {
+fn remove_dir_all<'a>(
+    sftp: &'a SftpSession,
+    path: &'a str,
+    max_depth: usize,
+) -> BoxFuture<'a, Result<()>> {
     Box::pin(async move {
         let entries: Vec<DirEntry> = sftp.read_dir(path).await?.collect();
         for entry in &entries {
@@ -90,11 +94,6 @@ fn remove_dir_all<'a>(sftp: &'a SftpSession, path: &'a str, max_depth: usize) ->
 }
 
 pub(crate) fn extract_last_user_title(contents: &str) -> Option<String> {
-    extract_last_regular_user_title(contents)
-        .or_else(|| extract_last_compact_summary_title(contents))
-}
-
-fn extract_last_regular_user_title(contents: &str) -> Option<String> {
     contents
         .lines()
         .rev()
@@ -103,27 +102,6 @@ fn extract_last_regular_user_title(contents: &str) -> Option<String> {
         .filter(|e| !e.is_meta)
         .filter(|e| !e.is_compact_summary)
         .find_map(|e| extract_user_title(e.message.content))
-}
-
-fn extract_last_compact_summary_title(contents: &str) -> Option<String> {
-    contents
-        .lines()
-        .rev()
-        .filter_map(|line| serde_json::from_str::<JournalEntry>(line).ok())
-        .filter(|e| e.type_ == "user")
-        .filter(|e| !e.is_meta)
-        .filter(|e| e.is_compact_summary)
-        .find_map(|e| extract_compact_summary_title(e.message.content))
-}
-
-fn extract_compact_summary_title(content: Content) -> Option<String> {
-    match content {
-        Content::Text(text) => text
-            .split_once("Summary:\n")
-            .map(|(_, summary)| summary.trim().to_owned())
-            .filter(|s| !s.is_empty()),
-        Content::ContentBlocks(_) => None,
-    }
 }
 
 fn extract_user_title(content: Content) -> Option<String> {
@@ -229,7 +207,7 @@ mod tests {
     }
 
     #[test]
-    fn test_title_skips_compact_summary_when_regular_message_exists() {
+    fn test_title_skips_compact_summary_entries() {
         let compact_summary = serde_json::json!({
             "type": "user",
             "isCompactSummary": true,
@@ -240,20 +218,6 @@ mod tests {
         assert_eq!(
             extract_last_user_title(&jsonl).as_deref(),
             Some("first message")
-        );
-    }
-
-    #[test]
-    fn test_title_uses_compact_summary_as_fallback() {
-        let compact_summary = serde_json::json!({
-            "type": "user",
-            "isCompactSummary": true,
-            "message": { "role": "user", "content": "This session is being continued.\n\nSummary:\nThe user asked about widgets." }
-        })
-        .to_string();
-        assert_eq!(
-            extract_last_user_title(&compact_summary).as_deref(),
-            Some("The user asked about widgets.")
         );
     }
 
