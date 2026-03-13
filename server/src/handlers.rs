@@ -123,14 +123,10 @@ async fn check_vm_limit_and_create(
         return Ok((StatusCode::SERVICE_UNAVAILABLE, "VM limit reached").into_response());
     }
 
-    let iam_creds = if state.use_iam_creds {
-        Some(fetch_host_iam_credentials(&state.iam_role_name).await.context("failed to fetch IAM credentials for VM")?)
-    } else {
-        info!("use_iam_creds=false, skipping IAM credential fetch");
-        None
-    };
-    let has_iam_creds = iam_creds.is_some();
-    info!(has_iam_creds, "building vm config");
+    let iam_creds = fetch_host_iam_credentials(&state.iam_role_name)
+        .await
+        .context("failed to fetch IAM credentials for VM")?;
+    info!("building vm config");
     let user_rootfs = ensure_user_rootfs(
         &state.user_rootfs_dir,
         &state.rootfs_path,
@@ -145,7 +141,7 @@ async fn check_vm_limit_and_create(
     let vm_id = vm.id.clone();
     let vm_entry = VmEntry {
         user_id: db_user.id,
-        has_iam_creds,
+        has_iam_creds: true,
         created_at: Instant::now(),
         ws_connected: false,
         vm,

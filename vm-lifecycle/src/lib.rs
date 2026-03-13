@@ -44,20 +44,13 @@ pub struct VmBuildConfig {
 
 pub fn build_vm_config(
     vm_build_config: &VmBuildConfig,
-    iam_creds: Option<HostIamCredential>,
+    iam_creds: HostIamCredential,
     user_rootfs: Option<&Path>,
 ) -> Result<VmConfig> {
     let vm_id = Uuid::new_v4().to_string();
-    let (mmds_metadata, mmds_imds_compat) = iam_creds
-        .map(|c| build_mmds_with_iam(&vm_id, &c.role_name, &c.credential).map(|m| (m, true)))
-        .transpose()?
-        .unwrap_or_else(|| {
-            (
-                serde_json::json!({ "latest": { "meta-data": { "instance-id": &vm_id } } }),
-                false,
-            )
-        });
-    info!(mmds_imds_compat, "configured mmds");
+    let mmds_metadata =
+        build_mmds_with_iam(&vm_id, &iam_creds.role_name, &iam_creds.credential)?;
+    info!("configured mmds");
     Ok(VmConfig {
         id: vm_id,
         kernel_path: vm_build_config.kernel_path.clone(),
@@ -69,7 +62,7 @@ pub fn build_vm_config(
         mem_size_mib: vm_build_config.mem_size_mib,
         boot_args: "reboot=k panic=1 quiet loglevel=3 selinux=0 8250.nr_uarts=0".to_string(),
         mmds_metadata: Some(mmds_metadata),
-        mmds_imds_compat,
+        mmds_imds_compat: true,
         jailer: JailerConfig {
             jailer_path: vm_build_config.jailer_path.clone(),
             firecracker_path: vm_build_config.firecracker_path.clone(),
