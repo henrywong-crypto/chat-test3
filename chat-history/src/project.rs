@@ -1,5 +1,8 @@
 use russh_sftp::client::{fs::DirEntry, SftpSession};
 
+// Returns all project directories under ~/.claude/projects on the remote VM.
+// Each subdirectory there corresponds to one Claude Code project (named by
+// its encoded working directory path) and contains the session JSONL files.
 pub(crate) async fn find_all_project_dirs(sftp: &SftpSession, ssh_user_home: &str) -> Vec<String> {
     let projects_base = projects_base_path(ssh_user_home);
     // Directory may not exist yet on a fresh VM; treat as empty rather than an error
