@@ -209,7 +209,7 @@ fn spawn_mmds_refresh_task(app_state: AppState) -> tokio::task::JoinHandle<()> {
         interval.tick().await;
         loop {
             interval.tick().await;
-            refresh_all_vm_mmds(&app_state.vms, app_state.use_iam_creds).await;
+            refresh_all_vm_mmds(&app_state.vms, app_state.use_iam_creds, &app_state.iam_role_name).await;
         }
     })
 }

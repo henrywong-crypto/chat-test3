@@ -82,11 +82,11 @@ pub fn build_vm_config(
 
 const CONNECT_TIMEOUT: Duration = Duration::from_secs(60);
 
-pub async fn refresh_all_vm_mmds(vms: &VmRegistry, use_iam_creds: bool) {
+pub async fn refresh_all_vm_mmds(vms: &VmRegistry, use_iam_creds: bool, iam_role_name: &str) {
     if !use_iam_creds {
         return;
     }
-    let Some(host_iam_credential) = fetch_host_iam_credentials().await
+    let Some(host_iam_credential) = fetch_host_iam_credentials(iam_role_name).await
         .map_err(|e| warn!("failed to fetch host IAM credentials: {e}"))
         .ok() else {
         return;

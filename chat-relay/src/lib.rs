@@ -233,7 +233,7 @@ async fn run_relay(
             msg = ssh_channel.wait() => {
                 match msg {
                     Some(ChannelMsg::Data { ref data }) => {
-                        info!("received stdout from agent  bytes={}", data.len());
+                        info!("received stdout from agent");
                         match timeout(Duration::from_secs(SEND_TIMEOUT_SECS), tx.send(Bytes::copy_from_slice(data))).await {
                             Ok(Ok(())) => {}
                             Ok(Err(_)) => {

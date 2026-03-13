@@ -71,6 +71,8 @@ pub(crate) struct AppConfig {
     pub(crate) vm_max_count: usize,
     #[serde(default = "default_true")]
     pub(crate) use_iam_creds: bool,
+    #[serde(default = "default_iam_role_name")]
+    pub(crate) iam_role_name: String,
     #[serde(default)]
     pub(crate) anthropic_base_url: Option<String>,
     #[serde(default = "default_anthropic_default_haiku_model")]
@@ -134,6 +136,9 @@ fn default_vm_mem_size_mib() -> u32 {
 }
 fn default_vm_max_count() -> usize {
     20
+}
+fn default_iam_role_name() -> String {
+    "vm-role".to_string()
 }
 fn default_true() -> bool {
     true
