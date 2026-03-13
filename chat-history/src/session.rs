@@ -102,7 +102,11 @@ pub(crate) fn extract_last_user_title(contents: &str) -> Option<String> {
 
 fn extract_user_title(content: Content) -> Option<String> {
     match content {
-        Content::Text(text) if !text.starts_with("<command-name>") => Some(text),
+        Content::Text(text)
+            if !text.starts_with("<command-name>") && !text.starts_with("<local-command-") =>
+        {
+            Some(text)
+        }
         Content::Text(_) => None,
         Content::ContentBlocks(blocks) => blocks.into_iter().find_map(|b| b.text),
     }
@@ -204,6 +208,20 @@ mod tests {
         })
         .to_string();
         let jsonl = [FIXTURE_FIRST_USER, &compact_summary].join("\n");
+        assert_eq!(
+            extract_last_user_title(&jsonl).as_deref(),
+            Some("first message")
+        );
+    }
+
+    #[test]
+    fn test_title_skips_local_command_stdout_entries() {
+        let local_cmd = serde_json::json!({
+            "type": "user",
+            "message": { "role": "user", "content": "<local-command-stdout>Set model to Default</local-command-stdout>" }
+        })
+        .to_string();
+        let jsonl = [FIXTURE_FIRST_USER, &local_cmd].join("\n");
         assert_eq!(
             extract_last_user_title(&jsonl).as_deref(),
             Some("first message")
