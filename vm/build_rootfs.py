@@ -239,16 +239,6 @@ def setup_host_ssh_key(workdir: Path, rootfs: Path) -> Path:
 
 
 def prepare_rootfs(rootfs: Path) -> None:
-    # Ubuntu 24.04 ships /etc/resolv.conf as a symlink to a systemd-resolved
-    # runtime path under /run — which is a tmpfs and is empty at VM boot.
-    # Remove the symlink and write a real file so DNS works without
-    # systemd-resolved.
-    resolv_conf = rootfs / "etc/resolv.conf"
-    if resolv_conf.is_symlink():
-        resolv_conf.unlink()
-    resolv_conf.write_text("nameserver 1.1.1.1\n")
-    # Mask systemd-resolved so it cannot recreate the symlink at runtime.
-    (rootfs / "etc/systemd/system/systemd-resolved.service").symlink_to("/dev/null")
     run(["chmod", "1777", str(rootfs / "tmp")])
     (rootfs / "var/cache/apt/archives/partial").mkdir(parents=True, exist_ok=True)
     (rootfs / "var/log/apt").mkdir(parents=True, exist_ok=True)
