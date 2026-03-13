@@ -1329,7 +1329,35 @@ function buildChatSessionItem(chatSession) {
   contentEl.appendChild(titleEl);
   contentEl.appendChild(statusEl);
   item.appendChild(contentEl);
+
+  const deleteBtn = document.createElement('button');
+  deleteBtn.className = 'session-menu';
+  deleteBtn.title = 'Delete session';
+  deleteBtn.innerHTML = '<svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="3 6 5 6 21 6"/><path d="M19 6l-1 14H6L5 6"/><path d="M10 11v6"/><path d="M14 11v6"/><path d="M9 6V4h6v2"/></svg>';
+  deleteBtn.onclick = (e) => {
+    e.stopPropagation();
+    deleteChatSession(chatSession.session_id, item);
+  };
+  item.appendChild(deleteBtn);
+
   return item;
+}
+
+async function deleteChatSession(sessionId, itemEl) {
+  if (!confirm('Delete this chat session?')) return;
+  const body = new URLSearchParams({ csrf_token: fmCsrfToken, session_id: sessionId });
+  try {
+    const res = await fetch('/sessions/' + vmId + '/chat-transcript', {
+      method: 'DELETE',
+      headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+      body: body.toString(),
+    });
+    if (!res.ok) throw new Error('Delete failed');
+    itemEl.remove();
+    if (sessionId === chatSessionId) startNewSession();
+  } catch {
+    // leave the item in place if deletion failed
+  }
 }
 
 function formatRelativeTime(isoString) {
