@@ -331,6 +331,11 @@ let chatStreaming = false;
 let streamHadText = false;
 let pendingSessionTitle = null;
 
+// Session running in the background (has an in-flight query).
+let runningSessionId = null;
+// Sessions that completed while the user was viewing a different session.
+const sessionHasNewContent = new Set();
+
 // Current assistant message container (text node inside it)
 let currentAssistantTurnEl = null;
 let currentAssistantTurnRawText = '';
@@ -426,7 +431,7 @@ document.getElementById('chat-history-refresh-btn')?.addEventListener('click', l
 document.getElementById('chat-send-btn').addEventListener('click', () => {
   const input = document.getElementById('chat-input');
   const content = input.value.trim();
-  if (!content || chatStreaming) return;
+  if (!content || runningSessionId !== null) return;
   input.value = '';
   autoResizeChatInput();
   sendQuery(content);
@@ -529,18 +534,21 @@ function connectChatSse() {
       console.log('[chat] SSE closed');
       chatEs = null;
     }
+    runningSessionId = null;
     chatStreaming = false;
     streamHadText = false;
     sealAssistantMessage();
-    unlockChatInput();
+    applyChatInputState();
   };
   chatEs.addEventListener('init', () => {
     console.log('[chat] event: init');
+    if (runningSessionId !== chatSessionId) return;
     showThinkingIndicator();
   });
   chatEs.addEventListener('text_delta', e => {
     const payload = JSON.parse(e.data);
     console.log('[chat] event: text_delta  len=' + payload.text.length);
+    if (runningSessionId !== chatSessionId) return;
     removeThinkingIndicator();
     streamHadText = true;
     appendToAssistantMessage(payload.text);
@@ -548,11 +556,13 @@ function connectChatSse() {
   chatEs.addEventListener('thinking_delta', e => {
     const payload = JSON.parse(e.data);
     console.log('[chat] event: thinking_delta  len=' + payload.thinking.length);
+    if (runningSessionId !== chatSessionId) return;
     appendToThinkingBlock(payload.thinking);
   });
   chatEs.addEventListener('tool_start', e => {
     const payload = JSON.parse(e.data);
     console.log('[chat] event: tool_start  name=' + payload.name);
+    if (runningSessionId !== chatSessionId) return;
     // AskUserQuestion is handled interactively via the ask_user_question event.
     if (payload.name === 'AskUserQuestion') return;
     sealAssistantMessage();
@@ -561,6 +571,7 @@ function connectChatSse() {
   chatEs.addEventListener('ask_user_question', e => {
     const payload = JSON.parse(e.data);
     console.log('[chat] event: ask_user_question  request_id=' + payload.request_id);
+    if (runningSessionId !== chatSessionId) return;
     removeThinkingIndicator();
     sealAssistantMessage();
     renderQuestionPanel(payload.request_id, payload.questions || []);
@@ -568,34 +579,51 @@ function connectChatSse() {
   chatEs.addEventListener('tool_result', e => {
     const payload = JSON.parse(e.data);
     console.log('[chat] event: tool_result  tool_use_id=' + payload.tool_use_id + '  is_error=' + payload.is_error);
+    if (runningSessionId !== chatSessionId) return;
     fillToolResult(payload.tool_use_id, payload.content, payload.is_error);
   });
   chatEs.addEventListener('done', e => {
     const payload = JSON.parse(e.data);
     console.log('[chat] event: done  session_id=' + payload.session_id);
-    if (payload.session_id) chatSessionId = payload.session_id;
+    const completedSessionId = runningSessionId;
+    runningSessionId = null;
     streamHadText = false;
-    sealAssistantTurn();
-    removeThinkingIndicator();
     chatStreaming = false;
-    unlockChatInput();
-    scrollChatToBottom();
-    loadChatHistory();
+    if (completedSessionId !== null && completedSessionId !== chatSessionId) {
+      // Completed in background — mark it and refresh the list.
+      sessionHasNewContent.add(completedSessionId);
+      loadChatHistory();
+    } else {
+      // Completed while viewing this session — normal finish.
+      if (payload.session_id) chatSessionId = payload.session_id;
+      sealAssistantTurn();
+      removeThinkingIndicator();
+      scrollChatToBottom();
+      loadChatHistory();
+    }
+    applyChatInputState();
   });
   chatEs.addEventListener('error_event', e => {
     const payload = JSON.parse(e.data);
     console.log('[chat] event: error_event  message=' + (payload.message ?? String(payload)));
+    const completedSessionId = runningSessionId;
+    runningSessionId = null;
     streamHadText = false;
-    removeThinkingIndicator();
-    sealAssistantMessage();
-    appendErrorMessage(payload.message ?? String(payload));
     chatStreaming = false;
-    unlockChatInput();
-    scrollChatToBottom();
+    if (completedSessionId !== null && completedSessionId !== chatSessionId) {
+      loadChatHistory();
+    } else {
+      removeThinkingIndicator();
+      sealAssistantMessage();
+      appendErrorMessage(payload.message ?? String(payload));
+      scrollChatToBottom();
+    }
+    applyChatInputState();
   });
 }
 
 function prepareForQuery(content) {
+  runningSessionId = chatSessionId;
   appendUserMessage(content);
   sealAssistantTurn();
   streamHadText = false;
@@ -644,16 +672,18 @@ function postQuery(content) {
       res.text().then(msg => {
         sealAssistantMessage();
         appendErrorMessage(msg || `Server error ${res.status}`);
+        runningSessionId = null;
         chatStreaming = false;
-        unlockChatInput();
+        applyChatInputState();
       });
     }
   }).catch(err => {
     console.log('[chat] query fetch error:', err);
     sealAssistantMessage();
     appendErrorMessage('Failed to send message: ' + err.message);
+    runningSessionId = null;
     chatStreaming = false;
-    unlockChatInput();
+    applyChatInputState();
   });
 }
 
@@ -1390,16 +1420,36 @@ function scrollChatToBottom() {
   scroll.scrollTop = scroll.scrollHeight;
 }
 
+function applyChatInputState() {
+  const stopBtn = document.getElementById('chat-stop-btn');
+  const sendBtn = document.getElementById('chat-send-btn');
+  const input = document.getElementById('chat-input');
+  if (runningSessionId !== null && runningSessionId === chatSessionId) {
+    // Viewing the running session — show the stop button.
+    stopBtn.classList.remove('hidden');
+    sendBtn.classList.add('hidden');
+    input.disabled = true;
+  } else if (runningSessionId !== null) {
+    // Viewing a different session while one runs — disable send.
+    stopBtn.classList.add('hidden');
+    sendBtn.classList.remove('hidden');
+    sendBtn.disabled = true;
+    input.disabled = true;
+  } else {
+    // Nothing running — fully enabled.
+    stopBtn.classList.add('hidden');
+    sendBtn.classList.remove('hidden');
+    sendBtn.disabled = false;
+    input.disabled = false;
+  }
+}
+
 function lockChatInput() {
-  document.getElementById('chat-send-btn').classList.add('hidden');
-  document.getElementById('chat-stop-btn').classList.remove('hidden');
-  document.getElementById('chat-input').disabled = true;
+  applyChatInputState();
 }
 
 function unlockChatInput() {
-  document.getElementById('chat-stop-btn').classList.add('hidden');
-  document.getElementById('chat-send-btn').classList.remove('hidden');
-  document.getElementById('chat-input').disabled = false;
+  applyChatInputState();
 }
 
 // ── Chat session history ───────────────────────────────────────────────────────
@@ -1431,6 +1481,8 @@ function renderChatHistory(chatSessions) {
 
 function buildChatSessionItem(chatSession) {
   const isActive = chatSession.session_id === chatSessionId;
+  const isRunning = chatSession.session_id === runningSessionId;
+  const hasNew = sessionHasNewContent.has(chatSession.session_id);
   const item = document.createElement('div');
   item.className = 'session-item' + (isActive ? ' active' : '');
   item.dataset.id = chatSession.session_id;
@@ -1452,15 +1504,27 @@ function buildChatSessionItem(chatSession) {
   contentEl.appendChild(statusEl);
   item.appendChild(contentEl);
 
-  const deleteBtn = document.createElement('button');
-  deleteBtn.className = 'session-menu';
-  deleteBtn.title = 'Delete session';
-  deleteBtn.innerHTML = '<svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="3 6 5 6 21 6"/><path d="M19 6l-1 14H6L5 6"/><path d="M10 11v6"/><path d="M14 11v6"/><path d="M9 6V4h6v2"/></svg>';
-  deleteBtn.onclick = (e) => {
-    e.stopPropagation();
-    deleteChatSession(chatSession.session_id, chatSession.project_dir, item);
-  };
-  item.appendChild(deleteBtn);
+  if (isRunning) {
+    const spinner = document.createElement('div');
+    spinner.className = 'session-spinner';
+    spinner.title = 'Running…';
+    item.appendChild(spinner);
+  } else if (hasNew) {
+    const dot = document.createElement('div');
+    dot.className = 'session-new-dot';
+    dot.title = 'New response';
+    item.appendChild(dot);
+  } else {
+    const deleteBtn = document.createElement('button');
+    deleteBtn.className = 'session-menu';
+    deleteBtn.title = 'Delete session';
+    deleteBtn.innerHTML = '<svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="3 6 5 6 21 6"/><path d="M19 6l-1 14H6L5 6"/><path d="M10 11v6"/><path d="M14 11v6"/><path d="M9 6V4h6v2"/></svg>';
+    deleteBtn.onclick = (e) => {
+      e.stopPropagation();
+      deleteChatSession(chatSession.session_id, chatSession.project_dir, item);
+    };
+    item.appendChild(deleteBtn);
+  }
 
   return item;
 }
@@ -1500,6 +1564,7 @@ function startNewSession() {
   document.getElementById('chat-messages').innerHTML = '';
   document.querySelectorAll('.session-item.active').forEach(el => el.classList.remove('active'));
   updateChatTitle(null);
+  applyChatInputState();
 }
 
 function updateChatTitle(title) {
@@ -1508,6 +1573,7 @@ function updateChatTitle(title) {
 }
 
 function resumeSession(sessionId, projectDir, title) {
+  sessionHasNewContent.delete(sessionId);
   chatSessionId = sessionId;
   pendingToolUses.clear();
   streamInThinkingBlock = false;
@@ -1519,6 +1585,7 @@ function resumeSession(sessionId, projectDir, title) {
   const activeItem = document.querySelector(`.session-item[data-id="${sessionId}"]`);
   if (activeItem) activeItem.classList.add('active');
   updateChatTitle(title);
+  applyChatInputState();
   loadAndRenderTranscript(sessionId, projectDir);
 }
 
