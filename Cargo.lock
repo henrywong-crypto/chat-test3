@@ -4503,6 +4503,7 @@ dependencies = [
  "upload",
  "uuid",
  "vm-lifecycle",
+ "vm-settings",
  "zip",
 ]
 
@@ -5822,7 +5823,12 @@ dependencies = [
  "tokio",
  "tracing",
  "uuid",
+ "vm-settings",
 ]
+
+[[package]]
+name = "vm-settings"
+version = "0.1.0"
 
 [[package]]
 name = "vsimd"
