@@ -549,8 +549,17 @@ function connectChatSse() {
   chatEs.addEventListener('tool_start', e => {
     const payload = JSON.parse(e.data);
     console.log('[chat] event: tool_start  name=' + payload.name);
+    // AskUserQuestion is handled interactively via the ask_user_question event.
+    if (payload.name === 'AskUserQuestion') return;
     sealAssistantMessage();
     appendToolUseBlock(payload.id, payload.name, payload.input ?? {});
+  });
+  chatEs.addEventListener('ask_user_question', e => {
+    const payload = JSON.parse(e.data);
+    console.log('[chat] event: ask_user_question  request_id=' + payload.request_id);
+    removeThinkingIndicator();
+    sealAssistantTurn();
+    renderQuestionPanel(payload.request_id, payload.questions || []);
   });
   chatEs.addEventListener('tool_result', e => {
     const payload = JSON.parse(e.data);
@@ -810,6 +819,118 @@ function getToolCategory(toolName) {
     if (tools.includes(toolName)) return cat;
   }
   return 'default';
+}
+
+// ── AskUserQuestion panel ─────────────────────────────────────────────────────
+
+function renderQuestionPanel(requestId, questions) {
+  const panel = document.createElement('div');
+  panel.id = 'question-panel-' + requestId;
+  panel.className = 'mx-3 my-2 rounded-lg p-4';
+  panel.style.cssText = 'background: #1a1a2e; border: 1px solid #7c3aed;';
+
+  const header = document.createElement('div');
+  header.className = 'flex items-center gap-2 mb-3 text-sm font-medium';
+  header.style.color = '#a855f7';
+  header.textContent = '\u2753 Claude needs your input';
+  panel.appendChild(header);
+
+  // selections[qi] = Set of selected option labels for question qi
+  const selections = new Map();
+  questions.forEach((_, qi) => selections.set(qi, new Set()));
+
+  questions.forEach((q, qi) => {
+    const qDiv = document.createElement('div');
+    qDiv.className = 'mb-4';
+
+    const qText = document.createElement('div');
+    qText.className = 'text-sm mb-2';
+    qText.style.color = '#e2e8f0';
+    qText.textContent = q.question;
+    if (q.multiSelect) {
+      const hint = document.createElement('span');
+      hint.className = 'ml-2 text-xs';
+      hint.style.color = '#94a3b8';
+      hint.textContent = '(select all that apply)';
+      qText.appendChild(hint);
+    }
+    qDiv.appendChild(qText);
+
+    (q.options || []).forEach(opt => {
+      const btn = document.createElement('button');
+      btn.className = 'block w-full text-left px-3 py-2 rounded mb-1 text-sm';
+      btn.style.cssText = 'background: #2d2d3f; color: #cbd5e1; border: 1px solid #374151;';
+
+      const labelEl = document.createElement('span');
+      labelEl.textContent = opt.label;
+      btn.appendChild(labelEl);
+
+      if (opt.description) {
+        const descEl = document.createElement('span');
+        descEl.className = 'block text-xs mt-0.5';
+        descEl.style.color = '#94a3b8';
+        descEl.textContent = opt.description;
+        btn.appendChild(descEl);
+      }
+
+      const applySelectedStyle = (selected) => {
+        btn.style.borderColor = selected ? '#7c3aed' : '#374151';
+        btn.style.background = selected ? '#2e1065' : '#2d2d3f';
+        btn.style.color = selected ? '#e9d5ff' : '#cbd5e1';
+      };
+
+      btn.addEventListener('click', () => {
+        const sel = selections.get(qi);
+        if (q.multiSelect) {
+          if (sel.has(opt.label)) sel.delete(opt.label);
+          else sel.add(opt.label);
+          applySelectedStyle(sel.has(opt.label));
+        } else {
+          sel.clear();
+          sel.add(opt.label);
+          qDiv.querySelectorAll('button').forEach(b => {
+            b.style.borderColor = '#374151';
+            b.style.background = '#2d2d3f';
+            b.style.color = '#cbd5e1';
+          });
+          applySelectedStyle(true);
+        }
+      });
+
+      qDiv.appendChild(btn);
+    });
+
+    panel.appendChild(qDiv);
+  });
+
+  const submitBtn = document.createElement('button');
+  submitBtn.className = 'px-4 py-1.5 rounded text-sm font-medium mt-1';
+  submitBtn.style.cssText = 'background: #7c3aed; color: white;';
+  submitBtn.textContent = 'Submit';
+  submitBtn.addEventListener('click', () => {
+    const answers = {};
+    questions.forEach((q, qi) => {
+      const sel = Array.from(selections.get(qi));
+      if (sel.length > 0) answers[q.question] = sel.join(', ');
+    });
+    panel.remove();
+    submitQuestionAnswer(requestId, answers);
+  });
+  panel.appendChild(submitBtn);
+
+  document.getElementById('chat-messages').appendChild(panel);
+  scrollChatToBottom();
+}
+
+function submitQuestionAnswer(requestId, answers) {
+  console.log('[chat] submitting question answer  request_id=' + requestId);
+  fetch('/sessions/' + vmId + '/chat-question-answer', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ request_id: requestId, answers, csrf_token: fmCsrfToken }),
+  }).catch(err => {
+    console.error('[chat] question answer error', err);
+  });
 }
 
 // ── Tool input rendering ──────────────────────────────────────────────────────
@@ -1429,6 +1550,8 @@ function renderTranscriptMessages(messages) {
         } else if (block.type === 'text' && block.text) {
           appendToAssistantMessage(block.text);
         } else if (block.type === 'tool_use') {
+          // AskUserQuestion is an interactive tool; skip it in history view.
+          if (block.name === 'AskUserQuestion') continue;
           sealAssistantMessage();
           appendToolUseBlock(block.id, block.name, block.input);
         }

@@ -99,6 +99,43 @@ pub(crate) fn find_agent_sender(state: &AppState, vm_id: &str) -> Option<mpsc::S
     state.chat_senders.lock().ok()?.get(vm_id).cloned()
 }
 
+#[derive(Deserialize)]
+pub(crate) struct QuestionAnswerBody {
+    request_id: String,
+    answers: serde_json::Value,
+    csrf_token: String,
+}
+
+pub(crate) async fn handle_chat_question_answer(
+    _user: User,
+    session: Session,
+    Path(vm_id): Path<String>,
+    State(state): State<AppState>,
+    Json(body): Json<QuestionAnswerBody>,
+) -> Response {
+    if Uuid::parse_str(&vm_id).is_err() {
+        return (StatusCode::NOT_FOUND, "Not found").into_response();
+    }
+    if !validate_csrf(&session, &body.csrf_token).await {
+        return (StatusCode::FORBIDDEN, "Forbidden").into_response();
+    }
+    let Some(agent_tx) = find_agent_sender(&state, &vm_id) else {
+        info!("no active chat stream for question answer");
+        return (StatusCode::NOT_FOUND, "No active chat stream").into_response();
+    };
+    let request_id = body.request_id.clone();
+    let agent_message = AgentMessage::QuestionAnswer {
+        request_id: body.request_id,
+        answers: body.answers,
+    };
+    if agent_tx.send(agent_message).await.is_err() {
+        info!("agent sender closed");
+        return (StatusCode::SERVICE_UNAVAILABLE, "Agent not available").into_response();
+    }
+    info!("question answer forwarded  request_id={request_id}");
+    (StatusCode::OK, "").into_response()
+}
+
 async fn validate_csrf(session: &Session, submitted: &str) -> bool {
     session
         .get::<String>("csrf_token")

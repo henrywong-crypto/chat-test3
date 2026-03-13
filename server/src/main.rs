@@ -31,7 +31,7 @@ use crate::{
     auth::{
         get_callback_handler, get_cognito_login_handler, get_login_handler, get_logout_handler,
     },
-    chat::{handle_chat_query, handle_chat_stream},
+    chat::{handle_chat_query, handle_chat_question_answer, handle_chat_stream},
     download::download_file_handler,
     files::list_files_handler,
     handlers::{
@@ -94,6 +94,7 @@ fn build_router(app_state: AppState, session_store: PostgresStore) -> Router {
         )
         .route("/sessions/{id}/chat-stream", get(handle_chat_stream))
         .route("/sessions/{id}/chat", post(handle_chat_query))
+        .route("/sessions/{id}/chat-question-answer", post(handle_chat_question_answer))
         .route(
             "/sessions/{id}/chat-history",
             get(list_chat_sessions_handler),

@@ -9,6 +9,7 @@ import dataclasses
 import json
 import os
 import sys
+import uuid
 
 
 def log(msg: str) -> None:
@@ -30,17 +31,19 @@ def get_field(obj, field, default=None):
     return getattr(obj, field, default)
 
 
-async def main():
-    loop = asyncio.get_event_loop()
-    reader = asyncio.StreamReader()
-    proto = asyncio.StreamReaderProtocol(reader)
-    await loop.connect_read_pipe(lambda: proto, sys.stdin)
-    log("ready, waiting for queries")
+# Pending AskUserQuestion futures keyed by request_id.
+_pending_questions: dict[str, asyncio.Future] = {}
+# Queue for incoming stdin messages (queries, etc.) from the Rust relay.
+_stdin_queue: asyncio.Queue = asyncio.Queue()
+
+
+async def route_stdin(reader: asyncio.StreamReader) -> None:
+    """Read stdin lines and route them: answer_question resolves pending futures; everything else goes to _stdin_queue."""
     while True:
         raw = await reader.readline()
         if not raw:
-            log("stdin closed, exiting")
-            break
+            await _stdin_queue.put(None)
+            return
         line = raw.decode().strip()
         if not line:
             continue
@@ -49,21 +52,67 @@ async def main():
         except json.JSONDecodeError:
             log(f"failed to parse stdin line: {line[:120]}")
             continue
+        if msg.get('type') == 'answer_question':
+            request_id = msg.get('request_id')
+            if request_id and request_id in _pending_questions:
+                fut = _pending_questions.pop(request_id)
+                if not fut.done():
+                    fut.set_result(msg.get('answers', {}))
+        else:
+            await _stdin_queue.put(msg)
+
+
+async def main():
+    loop = asyncio.get_event_loop()
+    reader = asyncio.StreamReader()
+    proto = asyncio.StreamReaderProtocol(reader)
+    await loop.connect_read_pipe(lambda: proto, sys.stdin)
+    log("ready, waiting for queries")
+    asyncio.create_task(route_stdin(reader))
+    while True:
+        msg = await _stdin_queue.get()
+        if msg is None:
+            log("stdin closed, exiting")
+            break
         if msg.get('type') == 'query':
             await run_query(msg.get('content', ''), msg.get('session_id'))
 
 
 async def run_query(content: str, session_id):
-    from claude_agent_sdk import ClaudeAgentOptions, query
+    from claude_agent_sdk import ClaudeAgentOptions, PermissionResultAllow, query
     from claude_agent_sdk.types import StreamEvent
 
     log(f"query start  session_id={session_id!r}  content_len={len(content)}")
 
+    async def handle_tool_permission(tool_name, input_, context):
+        if tool_name != 'AskUserQuestion':
+            return PermissionResultAllow()
+        request_id = str(uuid.uuid4())
+        emit_sse('ask_user_question', {
+            'request_id': request_id,
+            'questions': input_.get('questions', []),
+        })
+        fut = asyncio.get_event_loop().create_future()
+        _pending_questions[request_id] = fut
+        answers = await fut
+        log(f"AskUserQuestion answered  request_id={request_id!r}")
+        return PermissionResultAllow(updated_input={**input_, 'answers': answers})
+
     options = ClaudeAgentOptions(
         cwd=os.environ.get('HOME', '/root'),
-        permission_mode='bypassPermissions',
+        can_use_tool=handle_tool_permission,
         **({"resume": session_id} if session_id else {}),
     )
+
+    # can_use_tool requires AsyncIterable prompt (not a plain string).
+    async def prompt_stream():
+        yield {
+            "type": "user",
+            "session_id": "",
+            "message": {"role": "user", "content": content},
+            "parent_tool_use_id": None,
+        }
+
     captured_session_id = session_id
     # Per-block tracking for streaming deltas: index -> type / tool-info / accumulated-input
     block_types: dict[int, str] = {}
@@ -73,7 +122,7 @@ async def run_query(content: str, session_id):
     # from the full AssistantEvent to avoid duplicates.
     emitted_streaming_text = False
     try:
-        async for event in query(prompt=content, options=options):
+        async for event in query(prompt=prompt_stream(), options=options):
             if hasattr(event, 'session_id') and event.session_id:
                 captured_session_id = event.session_id
             if isinstance(event, StreamEvent):

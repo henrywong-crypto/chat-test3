@@ -28,6 +28,10 @@ pub enum AgentMessage {
         content: String,
         session_id: Option<String>,
     },
+    QuestionAnswer {
+        request_id: String,
+        answers: serde_json::Value,
+    },
 }
 
 pub fn build_api_key_settings_json(
@@ -225,6 +229,13 @@ async fn run_relay(
                         ssh_channel.data(Bytes::from(line).as_ref()).await?;
                         info!("query sent to agent");
                     }
+                    Some(AgentMessage::QuestionAnswer { request_id, answers }) => {
+                        info!("sending question answer to agent  request_id={request_id}");
+                        let payload = build_question_answer_payload(&request_id, &answers)?;
+                        let line = format!("{payload}\n");
+                        ssh_channel.data(Bytes::from(line).as_ref()).await?;
+                        info!("question answer sent to agent");
+                    }
                 }
             }
             msg = ssh_channel.wait() => {
@@ -300,6 +311,23 @@ fn build_query_payload(content: &str, session_id: Option<&str>) -> Result<String
         session_id,
     };
     Ok(serde_json::to_string(&query_payload)?)
+}
+
+#[derive(Serialize)]
+struct QuestionAnswerPayload<'a> {
+    #[serde(rename = "type")]
+    kind: &'a str,
+    request_id: &'a str,
+    answers: &'a serde_json::Value,
+}
+
+fn build_question_answer_payload(request_id: &str, answers: &serde_json::Value) -> Result<String> {
+    let question_answer_payload = QuestionAnswerPayload {
+        kind: "answer_question",
+        request_id,
+        answers,
+    };
+    Ok(serde_json::to_string(&question_answer_payload)?)
 }
 
 #[cfg(test)]
