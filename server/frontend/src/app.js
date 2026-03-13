@@ -1392,7 +1392,6 @@ async function loadAndRenderTranscript(sessionId, projectDir) {
     const res = await fetch(url);
     if (!res.ok) return;
     const transcript = await res.json();
-    if (transcript.title) updateChatTitle(transcript.title);
     renderTranscriptMessages(transcript.messages);
   } catch {}
 }
