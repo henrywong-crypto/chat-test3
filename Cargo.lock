@@ -840,6 +840,7 @@ version = "0.1.0"
 dependencies = [
  "anyhow",
  "chrono",
+ "futures",
  "russh-sftp",
  "serde",
  "serde_json",

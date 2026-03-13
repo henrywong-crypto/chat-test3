@@ -12,7 +12,7 @@ pub struct HostIamCredential {
 }
 
 pub async fn fetch_host_iam_credentials(role_name: &str) -> Result<HostIamCredential> {
-    let config = aws_config::load_defaults(BehaviorVersion::v2025_01_17()).await;
+    let config = aws_config::load_defaults(BehaviorVersion::latest()).await;
     let credentials = config
         .credentials_provider()
         .context("no credentials provider configured")?
