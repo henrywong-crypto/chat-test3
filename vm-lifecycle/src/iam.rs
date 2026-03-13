@@ -1,5 +1,5 @@
 use anyhow::{Context, Result};
-use aws_config::default_provider::credentials::DefaultCredentialsChain;
+use aws_config::BehaviorVersion;
 use aws_credential_types::{provider::ProvideCredentials, Credentials};
 use firecracker_manager::ImdsCredential;
 use std::time::SystemTime;
@@ -12,8 +12,10 @@ pub struct HostIamCredential {
 }
 
 pub async fn fetch_host_iam_credentials(role_name: &str) -> Result<HostIamCredential> {
-    let credentials_chain = DefaultCredentialsChain::builder().build().await;
-    let credentials = credentials_chain
+    let config = aws_config::load_defaults(BehaviorVersion::v2023_11_09()).await;
+    let credentials = config
+        .credentials_provider()
+        .context("no credentials provider configured")?
         .provide_credentials()
         .await
         .context("failed to fetch host IAM credentials")?;
@@ -32,11 +34,11 @@ fn system_time_to_iso8601(t: SystemTime) -> Result<String> {
 }
 
 fn format_credential_expiry(credentials: &Credentials) -> Result<String> {
-    Ok(credentials
+    credentials
         .expiry()
         .map(system_time_to_iso8601)
         .transpose()?
-        .unwrap_or_else(|| "2099-01-01T00:00:00Z".to_string()))
+        .context("missing credential expiry")
 }
 
 fn build_imds_credential(credentials: &Credentials, expiration: String) -> Result<ImdsCredential> {

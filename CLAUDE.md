@@ -85,6 +85,7 @@ Exceptions — these are fine to use inline without a `use` import:
 - `tracing_subscriber::fmt::init()`
 - `std::env::var`
 - `aws_smithy_types::Document::*`
+- `aws_config::load_defaults`
 
 Combine `use` statements that share the same top-level crate into a single `use` with nested paths:
 
