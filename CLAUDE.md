@@ -53,7 +53,10 @@ Every convention exists to maximize readability — code should read like well-w
 
 ### Imports
 
-Always import items at the top of the file with `use` statements instead of using fully qualified paths inline:
+Always import items at the top of the file with `use` statements:
+
+1. No fully qualified paths inline
+2. No reaching through an imported module to access a type; import the type directly
 
 ```rust
 // Good
@@ -62,6 +65,16 @@ let x: Qux = baz();
 
 // Bad
 let x: foo::bar::Qux = foo::bar::baz();
+```
+
+```rust
+// Good — import the type directly
+use transport::conn::Connection;
+fn open(handle: &mut Connection) {}
+
+// Bad — reaches through an imported module
+use transport::conn;
+fn open(handle: &mut conn::Connection) {}
 ```
 
 Exceptions — these are fine to use inline without a `use` import:

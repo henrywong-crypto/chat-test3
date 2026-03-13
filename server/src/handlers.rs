@@ -6,8 +6,9 @@ use axum::{
     Json,
 };
 use firecracker_manager::create_vm;
+use russh_sftp::client::SftpSession;
 use serde::Deserialize;
-use sftp_client::{open_sftp_session, SftpSession};
+use sftp_client::open_sftp_session;
 use ssh_client::connect_ssh;
 use std::time::{Instant, SystemTime, UNIX_EPOCH};
 use store::{upsert_user, User as DbUser};

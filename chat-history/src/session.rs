@@ -1,7 +1,8 @@
 use anyhow::{Context, Result};
 use chrono::{DateTime, Utc};
 use serde::{Deserialize, Serialize};
-use sftp_client::{open_sftp_session, DirEntry, SftpSession};
+use russh_sftp::client::{fs::DirEntry, SftpSession};
+use sftp_client::open_sftp_session;
 use ssh_client::connect_ssh;
 use std::path::PathBuf;
 use tokio::io::AsyncReadExt;

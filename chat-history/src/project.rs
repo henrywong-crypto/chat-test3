@@ -1,4 +1,4 @@
-use sftp_client::{DirEntry, SftpSession};
+use russh_sftp::client::{fs::DirEntry, SftpSession};
 
 pub(crate) async fn find_all_project_dirs(sftp: &SftpSession, ssh_user_home: &str) -> Vec<String> {
     let projects_base = projects_base_path(ssh_user_home);
