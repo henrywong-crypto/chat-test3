@@ -1,11 +1,12 @@
 use serde::{Deserialize, Serialize};
 
 mod history;
+mod journal;
 mod project;
 mod session;
 
 pub use history::{fetch_chat_history, ChatHistory, ChatMessage};
-pub use session::{list_chat_sessions, ChatSession};
+pub use session::{delete_chat_session, list_chat_sessions, ChatSession};
 
 #[derive(Deserialize, Serialize)]
 #[serde(untagged)]

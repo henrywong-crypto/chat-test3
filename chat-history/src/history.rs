@@ -1,11 +1,11 @@
 use anyhow::{Context, Result};
-use serde::{Deserialize, Serialize};
+use serde::Serialize;
 use sftp_client::open_sftp_session;
 use ssh_client::connect_ssh;
 use std::path::PathBuf;
 use tokio::io::AsyncReadExt;
 
-use crate::{project::find_all_project_dirs, Content};
+use crate::{journal::JournalEntry, project::find_all_project_dirs, Content};
 
 #[derive(Serialize)]
 pub struct ChatHistory {
@@ -16,19 +16,6 @@ pub struct ChatHistory {
 pub struct ChatMessage {
     pub role: String,
     pub content: Content,
-}
-
-#[derive(Deserialize)]
-struct JournalMessage {
-    role: Option<String>,
-    content: Content,
-}
-
-#[derive(Deserialize)]
-struct JournalEntry {
-    #[serde(rename = "type")]
-    entry_type: String,
-    message: JournalMessage,
 }
 
 pub async fn fetch_chat_history(

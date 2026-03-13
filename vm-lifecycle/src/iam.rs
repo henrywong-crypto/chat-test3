@@ -19,7 +19,6 @@ pub async fn fetch_host_iam_credentials() -> Result<HostIamCredential> {
         .context("failed to fetch host IAM credentials")?;
     let role_name = std::env::var("AWS_ROLE_NAME").unwrap_or_else(|_| "vm-role".to_string());
     let expiration = format_credential_expiry(&credentials);
-    let key_id_prefix = &credentials.access_key_id()[..4.min(credentials.access_key_id().len())];
     info!("fetched host IAM credentials");
     Ok(HostIamCredential {
         role_name,

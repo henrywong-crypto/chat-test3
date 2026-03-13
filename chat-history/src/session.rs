@@ -1,31 +1,19 @@
 use anyhow::{Context, Result};
 use chrono::{DateTime, Utc};
-use serde::{Deserialize, Serialize};
+use serde::Serialize;
 use russh_sftp::client::{fs::DirEntry, SftpSession};
 use sftp_client::open_sftp_session;
 use ssh_client::connect_ssh;
 use std::path::PathBuf;
 use tokio::io::AsyncReadExt;
 
-use crate::{project::find_all_project_dirs, Content};
+use crate::{journal::JournalEntry, project::find_all_project_dirs, Content};
 
 #[derive(Serialize)]
 pub struct ChatSession {
     pub session_id: String,
     pub title: String,
     pub last_active_at: DateTime<Utc>,
-}
-
-#[derive(Deserialize)]
-struct JournalMessage {
-    content: Content,
-}
-
-#[derive(Deserialize)]
-struct JournalEntry {
-    #[serde(rename = "type")]
-    entry_type: String,
-    message: JournalMessage,
 }
 
 pub async fn list_chat_sessions(
@@ -46,6 +34,27 @@ pub async fn list_chat_sessions(
     }
     all_chat_sessions.sort_by(|a, b| b.last_active_at.cmp(&a.last_active_at));
     Ok(all_chat_sessions)
+}
+
+pub async fn delete_chat_session(
+    guest_ip: &str,
+    ssh_key_path: &PathBuf,
+    ssh_user: &str,
+    vm_host_key_path: &PathBuf,
+    session_id: &str,
+    ssh_user_home: &str,
+) -> Result<()> {
+    let mut ssh_handle = connect_ssh(guest_ip, ssh_key_path, ssh_user, vm_host_key_path).await?;
+    let sftp = open_sftp_session(&mut ssh_handle).await?;
+    let project_dirs = find_all_project_dirs(&sftp, ssh_user_home).await;
+    for project_dir in &project_dirs {
+        let path = format!("{project_dir}/{session_id}.jsonl");
+        if sftp.open(&path).await.is_ok() {
+            sftp.remove(&path).await?;
+            return Ok(());
+        }
+    }
+    Ok(())
 }
 
 pub(crate) fn extract_last_user_title(contents: &str) -> Option<String> {

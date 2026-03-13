@@ -21,7 +21,7 @@ use vm_lifecycle::{
     find_user_rootfs, VmEntry, VmRegistry,
 };
 
-use chat_history::{fetch_chat_history, list_chat_sessions};
+use chat_history::{delete_chat_session, fetch_chat_history, list_chat_sessions};
 
 use crate::{
     auth::User,
@@ -276,6 +276,41 @@ pub(crate) async fn get_chat_transcript_handler(
         error!("fetch_chat_history failed: {e}");
         (StatusCode::NOT_FOUND, "Transcript not found").into_response()
     }))
+}
+
+#[derive(Deserialize)]
+pub(crate) struct DeleteChatSessionForm {
+    csrf_token: String,
+    session_id: String,
+}
+
+pub(crate) async fn delete_chat_session_handler(
+    user: User,
+    Path(vm_id): Path<String>,
+    session: Session,
+    State(state): State<AppState>,
+    Form(form): Form<DeleteChatSessionForm>,
+) -> Result<Response, AppError> {
+    if !validate_vm_id(&vm_id) {
+        return Ok((StatusCode::NOT_FOUND, "Not found").into_response());
+    }
+    if !validate_csrf(&session, &form.csrf_token).await {
+        return Ok((StatusCode::FORBIDDEN, "Forbidden").into_response());
+    }
+    let db_user = upsert_user(&state.db, &user.email).await?;
+    let Some(guest_ip) = find_vm_guest_ip_for_user(&state.vms, &vm_id, db_user.id)? else {
+        return Ok((StatusCode::NOT_FOUND, "Session not found or expired").into_response());
+    };
+    delete_chat_session(
+        &guest_ip,
+        &state.ssh_key_path,
+        &state.ssh_user,
+        &state.vm_host_key_path,
+        &form.session_id,
+        &state.ssh_user_home,
+    )
+    .await?;
+    Ok(StatusCode::NO_CONTENT.into_response())
 }
 
 pub(crate) async fn handle_chat_upload(

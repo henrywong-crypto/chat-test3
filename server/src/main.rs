@@ -16,7 +16,7 @@ use axum::{
     http::HeaderValue,
     middleware::{self, Next},
     response::Response,
-    routing::{get, post},
+    routing::{delete, get, post},
     Router,
 };
 use firecracker_manager::{cleanup_stale_vms, setup_host_networking};
@@ -35,8 +35,8 @@ use crate::{
     download::download_file_handler,
     files::list_files_handler,
     handlers::{
-        delete_user_rootfs_handler, get_chat_transcript_handler, get_or_create_terminal,
-        get_terminal_page, handle_chat_upload, list_chat_sessions_handler,
+        delete_chat_session_handler, delete_user_rootfs_handler, get_chat_transcript_handler,
+        get_or_create_terminal, get_terminal_page, handle_chat_upload, list_chat_sessions_handler,
     },
     settings::{get_settings_handler, put_settings_handler},
     state::{load_config, AppState},
@@ -101,7 +101,7 @@ fn build_router(app_state: AppState, session_store: PostgresStore) -> Router {
         )
         .route(
             "/sessions/{id}/chat-transcript",
-            get(get_chat_transcript_handler),
+            get(get_chat_transcript_handler).delete(delete_chat_session_handler),
         )
         .route(
             "/sessions/{id}/chat-upload",
