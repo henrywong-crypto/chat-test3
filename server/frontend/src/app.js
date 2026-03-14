@@ -327,15 +327,18 @@ document.getElementById('fm-file-input').addEventListener('change', function() {
 // All mutable chat state in one place.  Never add new globals for chat — put
 // them here so view switches can clear everything atomically.
 const chatState = {
-  viewSessionId:        null,  // session the user sees; null = new-chat view
-  runningSessionId:     null,  // key of the in-flight query; null = idle
-  es:                   null,  // live EventSource
-  esPending:            null,  // content to POST once ES connects
-  streaming:            false,
-  streamHadText:        false,
-  pendingTitle:         null,
-  sessionHasNewContent: new Set(),
-  render:               newRenderContext(), // cleared atomically on every view switch
+  viewSessionId:          null,     // session the user sees; null = new-chat view
+  runningSessionId:       null,     // key of the in-flight query; null = idle
+  es:                     null,     // live EventSource
+  esPending:              null,     // content to POST once ES connects
+  streaming:              false,
+  streamHadText:          false,
+  pendingTitle:           null,
+  sessionHasNewContent:   new Set(),
+  render:                 newRenderContext(), // cleared atomically on every view switch
+  sessionDomCache:        new Map(), // sessionId → <div> holding that session's messages
+  sessionRenderContexts:  new Map(), // sessionId → renderContext (DOM refs for active stream)
+  sessionFetchControllers: new Map(), // sessionId → AbortController for in-flight transcript fetch
 };
 
 // Per-view rendering context.  Replaced wholesale by switchView() so stale DOM
@@ -365,8 +368,41 @@ function runningMatchesView() {
          chatState.runningSessionId === viewKey();
 }
 
+// Move the departing session's DOM nodes into its cache entry.
+function saveCurrentSession() {
+  const key = chatState.viewSessionId;
+  if (key === null) return; // never cache __new__ state
+  let container = chatState.sessionDomCache.get(key);
+  if (!container) {
+    container = document.createElement('div');
+    chatState.sessionDomCache.set(key, container);
+  }
+  const messages = document.getElementById('chat-messages');
+  while (messages.firstChild) container.appendChild(messages.firstChild);
+  chatState.sessionRenderContexts.set(key, chatState.render);
+}
+
+// Restore a cached session into #chat-messages.  Returns true on cache hit.
+function restoreSession(sessionId) {
+  const key = sessionId ?? '__new__';
+  const ctrl = chatState.sessionFetchControllers.get(key);
+  if (ctrl) { ctrl.abort(); chatState.sessionFetchControllers.delete(key); }
+
+  const container = chatState.sessionDomCache.get(key);
+  if (!container) {
+    chatState.render = newRenderContext();
+    return false;
+  }
+  const messages = document.getElementById('chat-messages');
+  while (container.firstChild) messages.appendChild(container.firstChild);
+  chatState.render = chatState.sessionRenderContexts.get(key) ?? newRenderContext();
+  chatState.sessionRenderContexts.delete(key);
+  return true;
+}
+
 // Switch the visible session and wipe all per-view render state atomically.
 function switchView(sessionId) {
+  saveCurrentSession();
   chatState.viewSessionId = sessionId;
   removeThinkingIndicator();
   chatState.render = newRenderContext();
@@ -553,6 +589,9 @@ function connectChatSse() {
     console.log('[chat] SSE error  readyState=' + chatState.es.readyState, e);
     if (chatState.es.readyState === EventSource.CLOSED) {
       console.log('[chat] SSE closed');
+      const disconnectedSession = chatState.runningSessionId;
+      chatState.sessionDomCache.delete(disconnectedSession ?? '__new__');
+      chatState.sessionRenderContexts.delete(disconnectedSession ?? '__new__');
       chatState.es = null;
       chatState.runningSessionId = null;
       chatState.streaming = false;
@@ -612,7 +651,9 @@ function connectChatSse() {
     chatState.streaming = false;
     const currentViewKey = viewKey();
     if (completedSessionId !== null && completedSessionId !== currentViewKey) {
-      // Completed in background — mark it and refresh the list.
+      // Completed in background — invalidate cache and mark it for list refresh.
+      chatState.sessionDomCache.delete(completedSessionId);
+      chatState.sessionRenderContexts.delete(completedSessionId);
       chatState.sessionHasNewContent.add(completedSessionId);
       loadChatHistory();
     } else {
@@ -1561,6 +1602,8 @@ async function deleteChatSession(sessionId, projectDir, itemEl) {
     });
     if (!res.ok) throw new Error('Delete failed');
     itemEl.remove();
+    chatState.sessionDomCache.delete(sessionId);
+    chatState.sessionRenderContexts.delete(sessionId);
     if (sessionId === chatState.viewSessionId) startNewSession();
   } catch {
     // leave the item in place if deletion failed
@@ -1595,25 +1638,38 @@ function resumeSession(sessionId, projectDir, title) {
   switchView(sessionId);
   chatAttachments = [];
   renderAttachmentChips();
-  document.getElementById('chat-messages').innerHTML = '';
   document.querySelectorAll('.session-item.active').forEach(el => el.classList.remove('active'));
   const activeItem = document.querySelector(`.session-item[data-id="${sessionId}"]`);
   if (activeItem) activeItem.classList.add('active');
   updateChatTitle(title);
   applyChatInputState();
-  loadAndRenderTranscript(sessionId, projectDir);
+  const wasCached = restoreSession(sessionId);
+  if (wasCached) {
+    scrollChatToBottom();
+  } else {
+    loadAndRenderTranscript(sessionId, projectDir);
+  }
 }
 
 async function loadAndRenderTranscript(sessionId, projectDir) {
+  const key = sessionId ?? '__new__';
+  const ctrl = new AbortController();
+  chatState.sessionFetchControllers.set(key, ctrl);
   try {
     const url = '/sessions/' + vmId + '/chat-transcript?session_id=' + encodeURIComponent(sessionId) + '&project_dir=' + encodeURIComponent(projectDir);
-    const res = await fetch(url);
+    const res = await fetch(url, { signal: ctrl.signal });
     if (!res.ok) return;
     if (chatState.viewSessionId !== sessionId) return;  // view switched while loading
     const transcript = await res.json();
     if (chatState.viewSessionId !== sessionId) return;  // view switched while parsing
+    document.getElementById('chat-messages').innerHTML = '';
     renderTranscriptMessages(transcript.messages);
-  } catch {}
+  } catch (e) {
+    if (e.name !== 'AbortError') throw e;
+  } finally {
+    if (chatState.sessionFetchControllers.get(key) === ctrl)
+      chatState.sessionFetchControllers.delete(key);
+  }
 }
 
 // Returns true if there is a real user text message between messages[i] and the
