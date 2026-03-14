@@ -1,5 +1,7 @@
 # CLAUDE.md
 
+> This project models a cattle ranch. Ranchers manage **livestock** across **barns** and **pastures**, track animals by **brand number**, and schedule **feeding rounds**. All code examples use this domain.
+
 ## Crates
 
 - Use `anyhow` for error handling.
@@ -12,20 +14,20 @@ Put utilities in `common` when they are used by two or more crates and carry no 
 ```rust
 // Good — shared utility lives in common, each crate imports it directly
 // common/src/lib.rs
-pub fn parse_tag_number(raw: &str) -> Option<TagNumber> { ... }
+pub fn parse_brand_number(raw: &str) -> Option<BrandNumber> { ... }
 
 // feeding/src/lib.rs
-use common::parse_tag_number;
+use common::parse_brand_number;
 
-// habitat/src/lib.rs
-use common::parse_tag_number;
+// pasture/src/lib.rs
+use common::parse_brand_number;
 
 // Bad — utility defined in one domain crate and imported by another
 // feeding/src/lib.rs
-pub fn parse_tag_number(raw: &str) -> Option<TagNumber> { ... }  // belongs in common
+pub fn parse_brand_number(raw: &str) -> Option<BrandNumber> { ... }  // belongs in common
 
-// habitat/src/lib.rs
-use feeding::parse_tag_number;  // habitat should not depend on feeding
+// pasture/src/lib.rs
+use feeding::parse_brand_number;  // pasture should not depend on feeding
 ```
 
 ## Keyword Conflicts
@@ -41,10 +43,10 @@ pub type_: String,
 pub r#type: String,  // raw identifier
 
 #[serde(rename = "type")]
-pub animal_type: String,  // prefixed rename
+pub livestock_type: String,  // prefixed rename
 
 #[serde(rename = "type")]
-pub cage_type: String,  // prefixed rename
+pub barn_type: String,  // prefixed rename
 ```
 
 ## Error Handling
@@ -53,17 +55,17 @@ When an operation returns `Result`, propagate the error with `?` and add context
 
 ```rust
 // Good — fail with context
-let cage_dir = path.parent().context("cage path has no parent")?;
-let weight = metadata.weight.context("missing animal weight")?;
-let tag = HeaderValue::from_str(&value).context("invalid cage tag header")?;
+let barn_dir = path.parent().context("barn path has no parent")?;
+let weight = livestock.weight.context("missing livestock weight")?;
+let brand = BrandTag::from_str(&value).context("invalid brand tag")?;
 
 // Bad — silently substitute a default
-let cage_dir = path.parent().unwrap_or(".");
-let weight = metadata.weight.unwrap_or(0);
-let tag = HeaderValue::from_str(&value).unwrap_or(HeaderValue::from_static("fallback"));
+let barn_dir = path.parent().unwrap_or(".");
+let weight = livestock.weight.unwrap_or(0);
+let brand = BrandTag::from_str(&value).unwrap_or(BrandTag::default());
 ```
 
-Use `Option` only for values that are genuinely absent as part of normal logic (e.g. "animal has no cage", "search found no match"). Use `Result` for anything that can fail due to I/O, missing data, or invalid input.
+Use `Option` only for values that are genuinely absent as part of normal logic (e.g. "livestock has no barn", "search found no match"). Use `Result` for anything that can fail due to I/O, missing data, or invalid input.
 
 ## Channel Sends
 
@@ -71,7 +73,7 @@ Always wrap `mpsc::Sender::send` with `tokio::time::timeout`. A send with no tim
 
 ```rust
 // Good — distinguishes receiver-dropped from consumer-stuck
-match timeout(Duration::from_secs(SEND_TIMEOUT_SECS), tx.send(payload)).await {
+match timeout(Duration::from_secs(SEND_TIMEOUT_SECS), tx.send(feed_delivery)).await {
     Ok(Ok(())) => {}
     Ok(Err(_)) => {
         info!("receiver dropped, ending relay");
@@ -84,7 +86,7 @@ match timeout(Duration::from_secs(SEND_TIMEOUT_SECS), tx.send(payload)).await {
 }
 
 // Bad — blocks forever if consumer stalls
-tx.send(payload).await?;
+tx.send(feed_delivery).await?;
 ```
 
 Define the timeout duration as a named const at the top of the file (e.g. `const SEND_TIMEOUT_SECS: u64 = 30`).
@@ -177,40 +179,40 @@ Start every function name with a verb. The nouns in the name must match the type
 
 ```rust
 // Good — verb first, noun matches return type
-fn get_animal(id: &str) -> Option<Animal>;
-fn list_wild_animals(region: &str) -> Vec<WildAnimal>;
-fn count_animals() -> i64;
-fn create_animal(params: &AnimalParams) -> Animal;
-fn update_animal(id: &str, params: &AnimalParams) -> Result<()>;
-fn delete_animal(id: &str) -> Result<()>;
-fn clear_animals() -> Result<()>;
+fn get_livestock(id: &str) -> Option<Livestock>;
+fn list_open_range_cattle(pasture: &str) -> Vec<OpenRangeCattle>;
+fn count_livestock() -> i64;
+fn create_livestock(params: &LivestockParams) -> Livestock;
+fn update_livestock(id: &str, params: &LivestockParams) -> Result<()>;
+fn delete_livestock(id: &str) -> Result<()>;
+fn clear_livestock() -> Result<()>;
 
 // Good — single-field setter names the entity and field
-fn set_animal_name(id: &str, name: &str) -> Result<()>;
-fn set_cage_temperature(id: &str, temp: f64) -> Result<()>;
+fn set_livestock_name(id: &str, name: &str) -> Result<()>;
+fn set_barn_temperature(id: &str, temp: f64) -> Result<()>;
 
 // Good — transform / produce / convert
-fn build_feed_schedule(animals: &[Animal]) -> FeedSchedule;
-fn parse_tag_number(raw: &str) -> Option<TagNumber>;
-fn validate_cage_size(cage: &Cage) -> Result<(), CageError>;
-fn encode_payload(data: &Payload) -> Vec<u8>;
-fn decode_payload(raw: &[u8]) -> Result<Payload>;
-fn extract_metadata(raw: &[u8]) -> Metadata;
-fn compute_feed_cost(schedule: &FeedSchedule) -> f64;
-fn format_animal_report(animal: &Animal) -> String;
-fn render_animals_view(animals: &[Animal]) -> String;
-fn render_new_animal_form(species: &[Species]) -> String;
+fn build_grazing_schedule(livestock: &[Livestock]) -> GrazingSchedule;
+fn parse_brand_number(raw: &str) -> Option<BrandNumber>;
+fn validate_barn_capacity(barn: &Barn) -> Result<(), BarnError>;
+fn encode_herd_record(record: &HerdRecord) -> Vec<u8>;
+fn decode_herd_record(raw: &[u8]) -> Result<HerdRecord>;
+fn extract_brand_metadata(raw: &[u8]) -> BrandMetadata;
+fn compute_feed_cost(schedule: &GrazingSchedule) -> f64;
+fn format_livestock_report(livestock: &Livestock) -> String;
+fn render_livestock_view(livestock: &[Livestock]) -> String;
+fn render_new_livestock_form(breeds: &[Breed]) -> String;
 
 // Bad — noun doesn't match return type
-fn list_animals() -> Vec<WildAnimal>;  // returns WildAnimal, not Animal
-fn get_cage(id: &str) -> Option<CageStatus>;  // returns CageStatus, not Cage
+fn list_livestock() -> Vec<OpenRangeCattle>;  // returns OpenRangeCattle, not Livestock
+fn get_barn(id: &str) -> Option<BarnStatus>;  // returns BarnStatus, not Barn
 
 // Bad — missing verb
-fn animals(region: &str) -> Vec<Animal>;
-fn animal_name(id: &str) -> String;
+fn livestock(pasture: &str) -> Vec<Livestock>;
+fn livestock_name(id: &str) -> String;
 
 // Bad — ambiguous setter (which field?)
-fn set_animal(id: &str, name: &str) -> Result<()>;  // use set_animal_name
+fn set_livestock(id: &str, name: &str) -> Result<()>;  // use set_livestock_name
 ```
 
 ### Variable Naming
@@ -219,22 +221,22 @@ Name variables and parameters after their type in snake_case. For primitives and
 
 ```rust
 // Good — name matches the type
-let feed_schedule: FeedSchedule = build_feed_schedule(&feed_request);
-let cage_report: CageReport = build_cage_report(&cage);
-let animals: Vec<Animal> = list_animals(db);
-let cage: Cage = get_cage(cage_id)?;
+let grazing_schedule: GrazingSchedule = build_grazing_schedule(&feed_order);
+let barn_report: BarnReport = build_barn_report(&barn);
+let livestock: Vec<Livestock> = list_livestock(db);
+let barn: Barn = get_barn(barn_id)?;
 
 // Good — primitives use a descriptive domain noun
-let feed_cost: f64 = compute_feed_cost(&feed_schedule);
-let animal_count: i64 = count_animals(db);
-let cage_name: &str = extract_cage_name(&cage);
+let feed_cost: f64 = compute_feed_cost(&grazing_schedule);
+let livestock_count: i64 = count_livestock(db);
+let barn_name: &str = extract_barn_name(&barn);
 
 // Bad — generic names that don't reflect the type or domain
-let schedule: FeedSchedule = build_feed_schedule(&feed_request);  // use feed_schedule
-let result: CageReport = build_cage_report(&cage);  // use cage_report
-let data: Vec<Animal> = list_animals(db);  // use animals
-let n: i64 = count_animals(db);  // use animal_count
-let val: f64 = compute_feed_cost(&feed_schedule);  // use feed_cost
+let schedule: GrazingSchedule = build_grazing_schedule(&feed_order);  // use grazing_schedule
+let result: BarnReport = build_barn_report(&barn);  // use barn_report
+let data: Vec<Livestock> = list_livestock(db);  // use livestock
+let n: i64 = count_livestock(db);  // use livestock_count
+let val: f64 = compute_feed_cost(&grazing_schedule);  // use feed_cost
 ```
 
 ### Function Boundaries
@@ -245,27 +247,27 @@ Keep each function at **one level of abstraction**. When a function has distinct
 
 ```rust
 // Good — each phase is a small, testable function
-fn handle_feed_request(feed_request: &FeedRequest, db: &Db) -> Result<FeedResponse> {
-    let feed_request = validate_feed_request(feed_request)?;
-    let feed_schedule = build_feed_schedule(&feed_request);
-    let feed_cost = compute_feed_cost(&feed_schedule);
-    let feed_receipt = store_feed_receipt(db, &feed_schedule, feed_cost)?;
-    build_feed_response(&feed_receipt)
+fn handle_feed_order(feed_order: &FeedOrder, db: &Db) -> Result<FeedConfirmation> {
+    let feed_order = validate_feed_order(feed_order)?;
+    let grazing_schedule = build_grazing_schedule(&feed_order);
+    let feed_cost = compute_feed_cost(&grazing_schedule);
+    let feed_receipt = store_feed_receipt(db, &grazing_schedule, feed_cost)?;
+    build_feed_confirmation(&feed_receipt)
 }
 
-fn validate_feed_request(feed_request: &FeedRequest) -> Result<FeedRequest> { /* 10–20 lines */ }
-fn build_feed_schedule(feed_request: &FeedRequest) -> FeedSchedule { /* 10–20 lines */ }
-fn compute_feed_cost(feed_schedule: &FeedSchedule) -> f64 { /* 5–10 lines */ }
-fn store_feed_receipt(db: &Db, feed_schedule: &FeedSchedule, feed_cost: f64) -> Result<FeedReceipt> { /* 10 lines */ }
-fn build_feed_response(feed_receipt: &FeedReceipt) -> Result<FeedResponse> { /* 5–10 lines */ }
+fn validate_feed_order(feed_order: &FeedOrder) -> Result<FeedOrder> { /* 10–20 lines */ }
+fn build_grazing_schedule(feed_order: &FeedOrder) -> GrazingSchedule { /* 10–20 lines */ }
+fn compute_feed_cost(grazing_schedule: &GrazingSchedule) -> f64 { /* 5–10 lines */ }
+fn store_feed_receipt(db: &Db, grazing_schedule: &GrazingSchedule, feed_cost: f64) -> Result<FeedReceipt> { /* 10 lines */ }
+fn build_feed_confirmation(feed_receipt: &FeedReceipt) -> Result<FeedConfirmation> { /* 5–10 lines */ }
 
 // Bad — one giant function doing validation, building, costing, storing, responding
-fn handle_feed_request(feed_request: &FeedRequest, db: &Db) -> Result<FeedResponse> {
+fn handle_feed_order(feed_order: &FeedOrder, db: &Db) -> Result<FeedConfirmation> {
     // ... 30 lines of validation ...
     // ... 20 lines building schedule ...
     // ... 15 lines computing cost ...
     // ... 10 lines storing to db ...
-    // ... 10 lines building response ...
+    // ... 10 lines building confirmation ...
 }
 ```
 
@@ -273,28 +275,28 @@ fn handle_feed_request(feed_request: &FeedRequest, db: &Db) -> Result<FeedRespon
 
 ```rust
 // Good — loop body is its own function
-fn build_inspection_reports(cages: &[Cage], db: &Db) -> Vec<InspectionReport> {
-    cages.iter().map(|cage| build_inspection_report(cage, db)).collect()
+fn build_barn_inspection_reports(barns: &[Barn], db: &Db) -> Vec<BarnInspectionReport> {
+    barns.iter().map(|barn| build_barn_inspection_report(barn, db)).collect()
 }
 
-fn build_inspection_report(cage: &Cage, db: &Db) -> InspectionReport {
-    let cage_temperature = measure_cage_temperature(cage);
-    let cage_cleanliness = evaluate_cage_cleanliness(cage);
-    let cage_animals = list_cage_animals(db, cage.id);
-    InspectionReport { cage_temperature, cage_cleanliness, cage_animals }
+fn build_barn_inspection_report(barn: &Barn, db: &Db) -> BarnInspectionReport {
+    let barn_temperature = measure_barn_temperature(barn);
+    let barn_cleanliness = evaluate_barn_cleanliness(barn);
+    let barn_livestock = list_barn_livestock(db, barn.id);
+    BarnInspectionReport { barn_temperature, barn_cleanliness, barn_livestock }
 }
 
 // Bad — everything inlined inside the loop
-fn build_inspection_reports(cages: &[Cage], db: &Db) -> Vec<InspectionReport> {
-    let mut inspection_reports = Vec::new();
-    for cage in cages {
+fn build_barn_inspection_reports(barns: &[Barn], db: &Db) -> Vec<BarnInspectionReport> {
+    let mut barn_inspection_reports = Vec::new();
+    for barn in barns {
         // ... 15 lines measuring temperature ...
         // ... 15 lines evaluating cleanliness ...
-        // ... 10 lines querying animals ...
+        // ... 10 lines querying livestock ...
         // ... 10 lines building report ...
-        inspection_reports.push(inspection_report);
+        barn_inspection_reports.push(barn_inspection_report);
     }
-    inspection_reports
+    barn_inspection_reports
 }
 ```
 
@@ -302,25 +304,25 @@ fn build_inspection_reports(cages: &[Cage], db: &Db) -> Vec<InspectionReport> {
 
 ```rust
 // Good — parent composes named section renderers
-fn render_cage_detail_view(cage: &Cage, cage_animals: &[CageAnimal]) -> String {
-    let cage_breadcrumb = render_cage_breadcrumb(cage);
-    let cage_info_section = render_cage_info_section(cage);
-    let cage_animal_list = render_cage_animal_list(cage_animals);
-    let cage_controls = render_cage_controls(cage);
-    format!("{cage_breadcrumb}{cage_info_section}{cage_animal_list}{cage_controls}")
+fn render_barn_detail_view(barn: &Barn, barn_livestock: &[BarnLivestock]) -> String {
+    let barn_breadcrumb = render_barn_breadcrumb(barn);
+    let barn_info_section = render_barn_info_section(barn);
+    let barn_livestock_list = render_barn_livestock_list(barn_livestock);
+    let barn_controls = render_barn_controls(barn);
+    format!("{barn_breadcrumb}{barn_info_section}{barn_livestock_list}{barn_controls}")
 }
 
-fn render_cage_breadcrumb(cage: &Cage) -> String { /* 10 lines */ }
-fn render_cage_info_section(cage: &Cage) -> String { /* 15 lines */ }
-fn render_cage_animal_list(cage_animals: &[CageAnimal]) -> String { /* 20 lines */ }
-fn render_cage_controls(cage: &Cage) -> String { /* 15 lines */ }
+fn render_barn_breadcrumb(barn: &Barn) -> String { /* 10 lines */ }
+fn render_barn_info_section(barn: &Barn) -> String { /* 15 lines */ }
+fn render_barn_livestock_list(barn_livestock: &[BarnLivestock]) -> String { /* 20 lines */ }
+fn render_barn_controls(barn: &Barn) -> String { /* 15 lines */ }
 
 // Bad — one function with 80+ lines of concatenated HTML
-fn render_cage_detail_view(cage: &Cage, cage_animals: &[CageAnimal]) -> String {
+fn render_barn_detail_view(barn: &Barn, barn_livestock: &[BarnLivestock]) -> String {
     let mut html = String::new();
     // ... 10 lines breadcrumb ...
     // ... 15 lines info section ...
-    // ... 20 lines animal list ...
+    // ... 20 lines livestock list ...
     // ... 15 lines controls ...
     html
 }
@@ -330,28 +332,28 @@ fn render_cage_detail_view(cage: &Cage, cage_animals: &[CageAnimal]) -> String {
 
 ```rust
 // Good — each variant handled by its own function
-fn render_enclosure_block(enclosure_block: &EnclosureBlock) -> String {
-    match enclosure_block {
-        EnclosureBlock::Habitat(habitat) => render_habitat_block(habitat),
-        EnclosureBlock::FeedStation(feed_station) => render_feed_station_block(feed_station),
-        EnclosureBlock::Observation(observation) => render_observation_block(observation),
+fn render_pasture_block(pasture_block: &PastureBlock) -> String {
+    match pasture_block {
+        PastureBlock::Barn(barn) => render_barn_block(barn),
+        PastureBlock::WaterTrough(water_trough) => render_water_trough_block(water_trough),
+        PastureBlock::GrazingObservation(observation) => render_grazing_observation_block(observation),
     }
 }
 
-fn render_habitat_block(habitat: &Habitat) -> String { /* 15 lines */ }
-fn render_feed_station_block(feed_station: &FeedStation) -> String { /* 20 lines */ }
-fn render_observation_block(observation: &Observation) -> String { /* 15 lines */ }
+fn render_barn_block(barn: &Barn) -> String { /* 15 lines */ }
+fn render_water_trough_block(water_trough: &WaterTrough) -> String { /* 20 lines */ }
+fn render_grazing_observation_block(observation: &GrazingObservation) -> String { /* 15 lines */ }
 
 // Bad — all branches inlined in one long match
-fn render_enclosure_block(enclosure_block: &EnclosureBlock) -> String {
-    match enclosure_block {
-        EnclosureBlock::Habitat(habitat) => {
+fn render_pasture_block(pasture_block: &PastureBlock) -> String {
+    match pasture_block {
+        PastureBlock::Barn(barn) => {
             // ... 15 lines ...
         }
-        EnclosureBlock::FeedStation(feed_station) => {
+        PastureBlock::WaterTrough(water_trough) => {
             // ... 20 lines ...
         }
-        EnclosureBlock::Observation(observation) => {
+        PastureBlock::GrazingObservation(observation) => {
             // ... 15 lines ...
         }
     }
@@ -364,12 +366,12 @@ Prefer references (`&`) over owned values in function arguments. Do not use `mut
 
 ```rust
 // Good — borrows where possible, no unnecessary mut
-fn build_feed_schedule(feed_request: &FeedRequest) -> FeedSchedule;
-fn apply_filters(data: &mut Value, filters: &[String]);  // mut needed: modifies data in place
+fn build_grazing_schedule(feed_order: &FeedOrder) -> GrazingSchedule;
+fn apply_brand_filters(herd: &mut HerdRecord, filters: &[String]);  // mut needed: modifies herd in place
 
 // Bad — takes ownership or uses mut unnecessarily
-fn build_feed_schedule(feed_request: FeedRequest) -> FeedSchedule;  // use &FeedRequest
-fn compute_feed_cost(mut schedule: FeedSchedule) -> f64;  // use &FeedSchedule if not mutated
+fn build_grazing_schedule(feed_order: FeedOrder) -> GrazingSchedule;  // use &FeedOrder
+fn compute_feed_cost(mut schedule: GrazingSchedule) -> f64;  // use &GrazingSchedule if not mutated
 ```
 
 ### Return Values
@@ -378,11 +380,11 @@ Never return a tuple to bundle multiple values. Split into separate focused func
 
 ```rust
 // Good — two focused functions
-fn load_animal_tag(tag_path: &PathBuf) -> Result<Option<Tag>>;
-fn load_cage_key(key_path: &PathBuf) -> Result<Arc<Key>>;
+fn load_livestock_brand(brand_path: &Path) -> Result<Option<Brand>>;
+fn load_barn_key(key_path: &Path) -> Result<Arc<Key>>;
 
 // Bad — tuple bundles multiple return values
-fn load_cage_data(tag_path: &PathBuf, key_path: &PathBuf) -> Result<(Option<Tag>, Arc<Key>)>;
+fn load_barn_data(brand_path: &Path, key_path: &Path) -> Result<(Option<Brand>, Arc<Key>)>;
 ```
 
 ### Streaming Multipart Uploads
@@ -393,24 +395,24 @@ The file data flows: multipart TCP socket → `Field` stream → `StreamReader` 
 
 ```rust
 // Good — file streamed directly to destination
-async fn stream_animal_import_file(multipart: &mut Multipart, sftp: SftpSession, cage_path: &Path, upload_dir: &Path) -> Result<()> {
+async fn stream_livestock_import_file(multipart: &mut Multipart, sftp: SftpSession, barn_path: &Path, pasture_dir: &Path) -> Result<()> {
     while let Some(field) = multipart.next_field().await.context("failed to read multipart field")? {
         if field.name().unwrap_or("") == "file" {
             let mut reader = StreamReader::new(
                 field.map_err(|e| IoError::new(ErrorKind::Other, e)),
             );
-            return write_animal_file_via_sftp(sftp, cage_path, upload_dir, &mut reader).await;
+            return write_livestock_file_via_sftp(sftp, barn_path, pasture_dir, &mut reader).await;
         }
     }
     Err(anyhow!("missing 'file' field"))
 }
 
 // Bad — buffers entire file into memory before writing
-async fn stream_animal_import_file(multipart: &mut Multipart, sftp: SftpSession, cage_path: &Path, upload_dir: &Path) -> Result<()> {
+async fn stream_livestock_import_file(multipart: &mut Multipart, sftp: SftpSession, barn_path: &Path, pasture_dir: &Path) -> Result<()> {
     while let Some(field) = multipart.next_field().await.context("failed to read multipart field")? {
         if field.name().unwrap_or("") == "file" {
             let data = field.bytes().await.context("failed to read file")?;  // entire file in memory
-            return write_animal_file_via_sftp(sftp, cage_path, upload_dir, &data).await;
+            return write_livestock_file_via_sftp(sftp, barn_path, pasture_dir, &data).await;
         }
     }
     Err(anyhow!("missing 'file' field"))
@@ -419,51 +421,31 @@ async fn stream_animal_import_file(multipart: &mut Multipart, sftp: SftpSession,
 
 ### Path Handling
 
-Use `Path`/`PathBuf` for all path operations. Functions that receive or compare paths take `&Path`, not `&str`. Convert strings to `&Path` at the boundary where they enter (e.g. from a multipart field or config value) and only convert back to `&str` at external API call sites (e.g. SFTP methods that require `&str`). Never manipulate paths as strings — no `format!("{}/{}", ...)`, `trim_end_matches('/')`, or `rsplit('/')`.
+Use `Path`/`PathBuf` for all path operations — no string manipulation for paths. Functions that receive paths take `&Path`; functions that construct a new path return `PathBuf`. Convert strings to `&Path` once at the entry boundary.
 
 ```rust
-// Good — &Path flows through all internal functions; strings converted at the edges
-async fn handle_animal_import(multipart: &mut Multipart, cage_path_str: String, upload_dir: &str) -> Result<()> {
-    // convert at the entry boundary
-    stream_animal_import_file(multipart, sftp, Path::new(&cage_path_str), Path::new(upload_dir)).await
+// Good — &Path in, PathBuf out; Path::new() once at the entry point
+fn register_livestock_handler(...) {
+    let livestock_path_str = /* read from request */;
+    store_livestock_record(Path::new(&livestock_path_str), Path::new(&state.barn_dir));
 }
 
-async fn stream_animal_import_file(multipart: &mut Multipart, sftp: SftpSession, cage_path: &Path, upload_dir: &Path) -> Result<()> {
-    // ...
-    write_animal_file_via_sftp(sftp, cage_path, upload_dir, &mut reader).await
+fn store_livestock_record(livestock_path: &Path, barn_dir: &Path) { ... }
+
+fn resolve_livestock_path(livestock_path: &Path, barn_dir: &Path) -> Result<PathBuf> {
+    let resolved = PathBuf::from(canonical).join(livestock_path.file_name().context("livestock path has no filename")?);
+    validate_within_barn_dir(&resolved, barn_dir)?;
+    Ok(resolved)
 }
 
-async fn write_animal_file_via_sftp(sftp: SftpSession, cage_path: &Path, upload_dir: &Path, source: &mut impl AsyncRead) -> Result<()> {
-    let resolved = resolve_animal_path(&sftp, cage_path, upload_dir).await?;
-    // convert to &str only at the SFTP call site
-    sftp.create(resolved.to_str().context("resolved path is not valid UTF-8")?).await?;
-    // ...
+// Bad — &str throughout, string manipulation, Path::new() buried inside helpers
+fn store_livestock_record(livestock_path: &str, barn_dir: &str) { ... }
+
+fn resolve_livestock_path(livestock_path: &str, barn_dir: &str) -> Result<String> {
+    let resolved = format!("{}/{}", canonical.trim_end_matches('/'), livestock_name);
+    if !Path::new(&resolved).starts_with(barn_dir) { ... }
+    Ok(resolved)
 }
-
-// Bad — &str passed through every layer, Path::new() scattered throughout
-async fn stream_animal_import_file(multipart: &mut Multipart, sftp: SftpSession, cage_path: &str, upload_dir: &str) -> Result<()> {
-    // ...
-    write_animal_file_via_sftp(sftp, cage_path, upload_dir, &mut reader).await
-}
-
-async fn write_animal_file_via_sftp(sftp: SftpSession, cage_path: &str, upload_dir: &str, source: &mut impl AsyncRead) -> Result<()> {
-    if !Path::new(&resolved).starts_with(upload_dir) { ... }  // Path::new buried inside
-    // ...
-}
-```
-
-Use `PathBuf::join` for path construction and `Path` methods for component extraction:
-
-```rust
-// Good
-let cage_path = PathBuf::from(canonical_parent).join(cage_name);
-let cage_dir = real_path.file_name().and_then(|f| f.to_str()).context("cage path has no final component")?;
-let animal_path = cage_dir.join(&animal_name);
-
-// Bad
-let cage_path = format!("{}/{}", canonical_parent.trim_end_matches('/'), cage_name);
-let cage_dir = real_path.rsplit('/').next().context("cage path has no final component")?;
-let animal_path = format!("{}/{}", cage_dir.trim_end_matches('/'), animal_name);
 ```
 
 ### Versioning

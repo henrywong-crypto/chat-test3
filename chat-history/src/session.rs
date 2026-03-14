@@ -5,7 +5,7 @@ use russh_sftp::client::{fs::DirEntry, SftpSession};
 use serde::Serialize;
 use sftp_client::open_sftp_session;
 use ssh_client::connect_ssh;
-use std::path::PathBuf;
+use std::path::Path;
 use tokio::io::AsyncReadExt;
 
 use crate::{
@@ -25,9 +25,9 @@ pub struct ChatSession {
 
 pub async fn list_chat_sessions(
     guest_ip: &str,
-    ssh_key_path: &PathBuf,
+    ssh_key_path: &Path,
     ssh_user: &str,
-    vm_host_key_path: &PathBuf,
+    vm_host_key_path: &Path,
     ssh_user_home: &str,
 ) -> Result<Vec<ChatSession>> {
     let mut ssh_handle = connect_ssh(guest_ip, ssh_key_path, ssh_user, vm_host_key_path).await?;
@@ -54,9 +54,9 @@ pub async fn list_chat_sessions(
 
 pub async fn delete_chat_session(
     guest_ip: &str,
-    ssh_key_path: &PathBuf,
+    ssh_key_path: &Path,
     ssh_user: &str,
-    vm_host_key_path: &PathBuf,
+    vm_host_key_path: &Path,
     session_id: &str,
     project_dir: &str,
 ) -> Result<()> {

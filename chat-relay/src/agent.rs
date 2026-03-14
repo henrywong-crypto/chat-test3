@@ -4,9 +4,11 @@ use futures::stream::Stream;
 use russh::{client, Channel, ChannelMsg};
 use serde::Serialize;
 use ssh_client::{connect_ssh, open_exec_channel, SshClient};
-use std::path::PathBuf;
-use tokio::sync::mpsc;
-use tokio::time::{interval, timeout, Duration};
+use std::{path::{Path, PathBuf}, str::from_utf8};
+use tokio::{
+    sync::mpsc,
+    time::{interval, timeout, Duration},
+};
 use tokio_stream::wrappers::ReceiverStream;
 use tracing::{debug, error, info};
 
@@ -32,17 +34,17 @@ pub enum AgentMessage {
 
 pub fn start_agent_relay(
     guest_ip: String,
-    ssh_key_path: PathBuf,
+    ssh_key_path: &Path,
     ssh_user: String,
-    vm_host_key_path: PathBuf,
+    vm_host_key_path: &Path,
     inbound: mpsc::Receiver<AgentMessage>,
 ) -> impl Stream<Item = Bytes> {
     let (tx, rx) = mpsc::channel::<Bytes>(1);
     tokio::spawn(run_agent_relay(
         guest_ip,
-        ssh_key_path,
+        ssh_key_path.to_path_buf(),
         ssh_user,
-        vm_host_key_path,
+        vm_host_key_path.to_path_buf(),
         inbound,
         tx,
     ));
@@ -102,9 +104,9 @@ async fn run_agent_relay(
 
 async fn connect_agent_relay(
     guest_ip: &str,
-    ssh_key_path: &PathBuf,
+    ssh_key_path: &Path,
     ssh_user: &str,
-    vm_host_key_path: &PathBuf,
+    vm_host_key_path: &Path,
     inbound: mpsc::Receiver<AgentMessage>,
     tx: mpsc::Sender<Bytes>,
 ) -> Result<()> {
@@ -170,7 +172,7 @@ async fn run_relay(
                         }
                     }
                     Some(ChannelMsg::ExtendedData { ref data, .. }) => {
-                        if let Ok(text) = std::str::from_utf8(data) {
+                        if let Ok(text) = from_utf8(data) {
                             for stderr_line in text.lines() {
                                 if !stderr_line.is_empty() {
                                     debug!("{stderr_line}");
@@ -213,7 +215,7 @@ async fn run_relay(
 #[derive(Serialize)]
 struct QueryPayload<'a> {
     #[serde(rename = "type")]
-    kind: &'a str,
+    type_: &'a str,
     content: &'a str,
     #[serde(skip_serializing_if = "Option::is_none")]
     session_id: Option<&'a str>,
@@ -221,7 +223,7 @@ struct QueryPayload<'a> {
 
 fn build_query_payload(content: &str, session_id: Option<&str>) -> Result<String> {
     let query_payload = QueryPayload {
-        kind: "query",
+        type_: "query",
         content,
         session_id,
     };
@@ -231,14 +233,14 @@ fn build_query_payload(content: &str, session_id: Option<&str>) -> Result<String
 #[derive(Serialize)]
 struct QuestionAnswerPayload<'a> {
     #[serde(rename = "type")]
-    kind: &'a str,
+    type_: &'a str,
     request_id: &'a str,
     answers: &'a serde_json::Value,
 }
 
 fn build_question_answer_payload(request_id: &str, answers: &serde_json::Value) -> Result<String> {
     let question_answer_payload = QuestionAnswerPayload {
-        kind: "answer_question",
+        type_: "answer_question",
         request_id,
         answers,
     };

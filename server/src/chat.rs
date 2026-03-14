@@ -9,6 +9,7 @@ use axum::{
 use chat_relay::{start_agent_relay, AgentMessage};
 use futures::StreamExt;
 use serde::Deserialize;
+use std::convert::Infallible;
 use store::upsert_user;
 use tokio::sync::mpsc;
 use tower_sessions::Session;
@@ -42,13 +43,13 @@ pub(crate) async fn handle_chat_stream(
         .insert(vm_id.clone(), agent_tx);
     let event_stream = start_agent_relay(
         guest_ip,
-        state.ssh_key_path.clone(),
+        &state.ssh_key_path,
         state.ssh_user.clone(),
-        state.vm_host_key_path.clone(),
+        &state.vm_host_key_path,
         agent_rx,
     );
     info!("chat sse stream opened");
-    let body = Body::from_stream(event_stream.map(Ok::<_, std::convert::Infallible>));
+    let body = Body::from_stream(event_stream.map(Ok::<_, Infallible>));
     Response::builder()
         .header(header::CONTENT_TYPE, "text/event-stream")
         .header(header::CACHE_CONTROL, "no-cache")

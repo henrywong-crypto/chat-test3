@@ -2,7 +2,7 @@ use anyhow::Result;
 use serde::Serialize;
 use sftp_client::open_sftp_session;
 use ssh_client::connect_ssh;
-use std::path::PathBuf;
+use std::path::Path;
 use tokio::io::AsyncReadExt;
 
 use crate::{journal::JournalEntry, Content};
@@ -22,9 +22,9 @@ pub struct ChatMessage {
 
 pub async fn fetch_chat_history(
     guest_ip: &str,
-    ssh_key_path: &PathBuf,
+    ssh_key_path: &Path,
     ssh_user: &str,
-    vm_host_key_path: &PathBuf,
+    vm_host_key_path: &Path,
     session_id: &str,
     project_dir: &str,
 ) -> Result<ChatHistory> {

@@ -6,8 +6,9 @@ use axum::{
 use bytes::Bytes;
 use futures::channel::mpsc;
 use russh_sftp::client::SftpSession;
-use std::{io, path::PathBuf};
+use std::{io::{Error as IoError, Write}, path::PathBuf};
 use tokio::{
+    io::AsyncReadExt,
     sync::mpsc as tokio_mpsc,
     time::{timeout, Duration},
 };
@@ -33,7 +34,7 @@ pub fn build_streaming_zip_response(
     filename: &str,
 ) -> Result<Response<Body>> {
     // zip bytes → HTTP body (bounded for backpressure)
-    let (zip_tx, zip_rx) = mpsc::channel::<Result<Bytes, io::Error>>(8);
+    let (zip_tx, zip_rx) = mpsc::channel::<Result<Bytes, IoError>>(8);
     // file events → zip writer (bounded to limit SFTP read-ahead)
     let (file_tx, file_rx) = tokio_mpsc::channel::<FileEvent>(4);
 
@@ -122,7 +123,6 @@ async fn stream_file(
     file_tx: &tokio_mpsc::Sender<FileEvent>,
     total_bytes: &mut usize,
 ) -> Result<()> {
-    use tokio::io::AsyncReadExt;
     let mut file = sftp
         .open(path)
         .await
@@ -156,7 +156,7 @@ async fn stream_file(
 
 fn write_zip_to_channel(
     mut file_rx: tokio_mpsc::Receiver<FileEvent>,
-    zip_tx: mpsc::Sender<Result<Bytes, io::Error>>,
+    zip_tx: mpsc::Sender<Result<Bytes, IoError>>,
 ) {
     let options = SimpleFileOptions::default().compression_method(zip::CompressionMethod::Deflated);
     let mut writer = SeekableChannelWriter::new(zip_tx);
@@ -172,7 +172,7 @@ fn write_zip_to_channel(
                     }
                 }
                 FileEvent::Chunk(data) => {
-                    if io::Write::write_all(&mut zip, &data).is_err() {
+                    if Write::write_all(&mut zip, &data).is_err() {
                         ok = false;
                         break;
                     }

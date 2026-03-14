@@ -5,14 +5,20 @@ use axum::{
     response::{Html, IntoResponse, Redirect, Response},
     Json,
 };
+use chat_history::{delete_chat_session, fetch_chat_history, list_chat_sessions};
 use firecracker_manager::create_vm;
+use futures::TryStreamExt;
 use russh_sftp::client::SftpSession;
 use serde::Deserialize;
 use sftp_client::open_sftp_session;
 use ssh_client::connect_ssh;
-use std::time::{Instant, SystemTime, UNIX_EPOCH};
+use std::{
+    io::{Error as IoError, ErrorKind},
+    time::{Instant, SystemTime, UNIX_EPOCH},
+};
 use store::{upsert_user, User as DbUser};
-use tokio::io::AsyncWriteExt;
+use tokio::io::{AsyncRead, AsyncWriteExt};
+use tokio_util::io::StreamReader;
 use tower_sessions::Session;
 use tracing::{error, info};
 use uuid::Uuid;
@@ -20,8 +26,6 @@ use vm_lifecycle::{
     build_user_rootfs_path, build_vm_config, ensure_user_rootfs, fetch_host_iam_credentials,
     find_user_rootfs, VmEntry, VmRegistry,
 };
-
-use chat_history::{delete_chat_session, fetch_chat_history, list_chat_sessions};
 
 use crate::{
     auth::User,
@@ -311,25 +315,28 @@ pub(crate) async fn delete_chat_session_handler(
     Ok(StatusCode::NO_CONTENT.into_response())
 }
 
+struct ChatUploadMetadata {
+    csrf_token: String,
+}
+
 pub(crate) async fn handle_chat_upload(
     user: User,
     session: Session,
     Path(vm_id): Path<String>,
     State(state): State<AppState>,
-    multipart: Multipart,
+    mut multipart: Multipart,
 ) -> Result<Response, AppError> {
     if !validate_vm_id(&vm_id) {
         return Ok((StatusCode::NOT_FOUND, "Not found").into_response());
     }
     let db_user = upsert_user(&state.db, &user.email).await?;
-    let (csrf_token, filename, file_bytes) = extract_chat_upload_fields(multipart).await?;
-    if !validate_csrf(&session, &csrf_token).await {
+    let chat_upload_metadata = extract_chat_upload_metadata(&mut multipart).await?;
+    if !validate_csrf(&session, &chat_upload_metadata.csrf_token).await {
         return Ok((StatusCode::FORBIDDEN, "Forbidden").into_response());
     }
     let Some(guest_ip) = find_vm_guest_ip_for_user(&state.vms, &vm_id, db_user.id)? else {
         return Ok((StatusCode::NOT_FOUND, "Session not found or expired").into_response());
     };
-    let remote_path = build_chat_upload_path(&filename);
     info!("uploading chat attachment via sftp");
     let mut ssh_handle = connect_ssh(
         &guest_ip,
@@ -339,31 +346,47 @@ pub(crate) async fn handle_chat_upload(
     )
     .await?;
     let sftp = open_sftp_session(&mut ssh_handle).await?;
-    write_chat_file_via_sftp(sftp, &remote_path, &file_bytes).await?;
+    let remote_path = stream_chat_attachment(&mut multipart, sftp).await?;
     Ok(Json(serde_json::json!({"path": remote_path})).into_response())
 }
 
-async fn extract_chat_upload_fields(mut multipart: Multipart) -> Result<(String, String, Vec<u8>)> {
-    let mut csrf_token: Option<String> = None;
-    let mut filename: Option<String> = None;
-    let mut file_bytes: Option<Vec<u8>> = None;
-    while let Some(field) = multipart.next_field().await.map_err(|e| anyhow!("{e}"))? {
+async fn extract_chat_upload_metadata(multipart: &mut Multipart) -> Result<ChatUploadMetadata> {
+    while let Some(field) = multipart
+        .next_field()
+        .await
+        .context("failed to read multipart field")?
+    {
         let name = field.name().unwrap_or("").to_owned();
         if name == "csrf_token" {
-            csrf_token = Some(field.text().await.map_err(|e| anyhow!("{e}"))?);
-        } else if name == "file" {
-            let orig_name = field
+            let csrf_token = field
+                .text()
+                .await
+                .context("failed to read csrf_token field")?;
+            return Ok(ChatUploadMetadata { csrf_token });
+        }
+    }
+    Err(anyhow!("missing 'csrf_token' field"))
+}
+
+async fn stream_chat_attachment(multipart: &mut Multipart, sftp: SftpSession) -> Result<String> {
+    while let Some(field) = multipart
+        .next_field()
+        .await
+        .context("failed to read multipart field")?
+    {
+        if field.name().unwrap_or("") == "file" {
+            let filename = field
                 .file_name()
                 .context("file upload missing filename")?
                 .to_owned();
-            filename = Some(orig_name);
-            file_bytes = Some(field.bytes().await.map_err(|e| anyhow!("{e}"))?.to_vec());
+            let remote_path = build_chat_upload_path(&filename);
+            let mut reader =
+                StreamReader::new(field.map_err(|e| IoError::new(ErrorKind::Other, e)));
+            write_chat_file_via_sftp(sftp, &remote_path, &mut reader).await?;
+            return Ok(remote_path);
         }
     }
-    let csrf_token = csrf_token.ok_or_else(|| anyhow!("missing csrf_token field"))?;
-    let filename = filename.ok_or_else(|| anyhow!("missing file field"))?;
-    let file_bytes = file_bytes.ok_or_else(|| anyhow!("missing file bytes"))?;
-    Ok((csrf_token, filename, file_bytes))
+    Err(anyhow!("missing 'file' field"))
 }
 
 fn build_chat_upload_path(filename: &str) -> String {
@@ -384,14 +407,18 @@ fn build_chat_upload_path(filename: &str) -> String {
     format!("/tmp/{ts}_{safe_name}")
 }
 
-async fn write_chat_file_via_sftp(sftp: SftpSession, path: &str, data: &[u8]) -> Result<()> {
+async fn write_chat_file_via_sftp(
+    sftp: SftpSession,
+    path: &str,
+    reader: &mut (impl AsyncRead + Unpin),
+) -> Result<()> {
     let mut file = sftp
         .create(path)
         .await
         .map_err(|e| anyhow!("sftp create: {e}"))?;
-    file.write_all(data)
+    tokio::io::copy(reader, &mut file)
         .await
-        .map_err(|e| anyhow!("sftp write: {e}"))?;
+        .context("failed to write chat file via sftp")?;
     file.shutdown()
         .await
         .map_err(|e| anyhow!("sftp shutdown: {e}"))?;

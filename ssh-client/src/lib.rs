@@ -4,7 +4,7 @@ use russh::{
     keys::{load_public_key, load_secret_key, PrivateKey, PrivateKeyWithHashAlg, PublicKey},
     Channel,
 };
-use std::{path::PathBuf, sync::Arc, time::Duration};
+use std::{path::Path, sync::Arc, time::Duration};
 
 pub struct SshClient {
     vm_host_key: Option<PublicKey>,
@@ -27,9 +27,9 @@ impl client::Handler for SshClient {
 
 pub async fn connect_ssh(
     guest_ip: &str,
-    ssh_key_path: &PathBuf,
+    ssh_key_path: &Path,
     ssh_user: &str,
-    vm_host_key_path: &PathBuf,
+    vm_host_key_path: &Path,
 ) -> Result<Handle<SshClient>> {
     let vm_host_key = load_vm_host_key(vm_host_key_path)?;
     let ssh_keypair = load_ssh_keypair(ssh_key_path)?;
@@ -52,7 +52,7 @@ pub async fn connect_ssh(
     Ok(ssh_handle)
 }
 
-fn load_vm_host_key(vm_host_key_path: &PathBuf) -> Result<Option<PublicKey>> {
+fn load_vm_host_key(vm_host_key_path: &Path) -> Result<Option<PublicKey>> {
     if vm_host_key_path.as_os_str().is_empty() {
         return Ok(None);
     }
@@ -60,7 +60,7 @@ fn load_vm_host_key(vm_host_key_path: &PathBuf) -> Result<Option<PublicKey>> {
     Ok(Some(vm_host_key))
 }
 
-fn load_ssh_keypair(ssh_key_path: &PathBuf) -> Result<Arc<PrivateKey>> {
+fn load_ssh_keypair(ssh_key_path: &Path) -> Result<Arc<PrivateKey>> {
     let ssh_keypair =
         Arc::new(load_secret_key(ssh_key_path, None).context("failed to load SSH key")?);
     Ok(ssh_keypair)

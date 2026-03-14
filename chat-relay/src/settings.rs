@@ -1,8 +1,8 @@
-use anyhow::Result;
+use anyhow::{Context, Result};
 use bytes::Bytes;
 use russh::{client, ChannelMsg};
 use ssh_client::{connect_ssh, open_exec_channel, SshClient};
-use std::path::PathBuf;
+use std::{path::Path, str::from_utf8};
 
 const SETTINGS_CMD: &str = "bash -lc '/usr/local/bin/uv run /opt/settings.py'";
 
@@ -37,9 +37,9 @@ pub fn build_api_key_settings_json(
 
 pub async fn get_vm_settings(
     guest_ip: &str,
-    ssh_key_path: &PathBuf,
+    ssh_key_path: &Path,
     ssh_user: &str,
-    vm_host_key_path: &PathBuf,
+    vm_host_key_path: &Path,
 ) -> Result<VmSettings> {
     let mut ssh_handle = connect_ssh(guest_ip, ssh_key_path, ssh_user, vm_host_key_path).await?;
     let command = "{\"type\":\"get\"}\n";
@@ -51,13 +51,14 @@ pub async fn get_vm_settings(
     loop {
         match channel.wait().await {
             Some(ChannelMsg::Data { ref data }) => {
-                stdout.push_str(std::str::from_utf8(data).unwrap_or(""));
+                stdout.push_str(from_utf8(data).unwrap_or(""));
             }
             Some(ChannelMsg::ExitStatus { .. }) | None => break,
             _ => {}
         }
     }
-    let response: serde_json::Value = serde_json::from_str(&stdout).unwrap_or_default();
+    let response: serde_json::Value =
+        serde_json::from_str(&stdout).context("failed to parse settings response")?;
     Ok(VmSettings {
         has_api_key: response
             .get("has_api_key")
@@ -68,9 +69,9 @@ pub async fn get_vm_settings(
 
 pub async fn set_vm_settings(
     guest_ip: &str,
-    ssh_key_path: &PathBuf,
+    ssh_key_path: &Path,
     ssh_user: &str,
-    vm_host_key_path: &PathBuf,
+    vm_host_key_path: &Path,
     content: &str,
 ) -> Result<()> {
     let mut ssh_handle = connect_ssh(guest_ip, ssh_key_path, ssh_user, vm_host_key_path).await?;
