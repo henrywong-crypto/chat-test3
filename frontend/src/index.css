@@ -1,159 +1,143 @@
+@import url('https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;500&family=IBM+Plex+Sans:ital,wght@0,400;0,500;0,600;1,400&display=swap');
 @import "@xterm/xterm/css/xterm.css";
 
 @tailwind base;
 @tailwind components;
 @tailwind utilities;
 
+/* ── Dark mode (default) ──────────────────────────────────────── */
 :root {
-  --background: 222.2 84% 4.9%;
-  --foreground: 210 40% 98%;
-  --card: 217.2 91.2% 8%;
-  --card-foreground: 210 40% 98%;
-  --primary: 217.2 91.2% 59.8%;
-  --primary-foreground: 222.2 47.4% 11.2%;
-  --secondary: 217.2 32.6% 17.5%;
-  --secondary-foreground: 210 40% 98%;
-  --muted: 217.2 32.6% 17.5%;
-  --muted-foreground: 215 20.2% 65.1%;
-  --accent: 217.2 32.6% 17.5%;
-  --accent-foreground: 210 40% 98%;
-  --destructive: 0 62.8% 30.6%;
-  --destructive-foreground: 210 40% 98%;
-  --border: 217.2 32.6% 17.5%;
-  --input: 220 13% 46%;
-  --ring: 217.2 91.2% 59.8%;
-  --nav-glass-bg: 217.2 91.2% 8% / 0.55;
-  --nav-glass-blur: 24px;
-  --nav-glass-saturate: 1.6;
-  --nav-tab-glow: 217.2 91.2% 59.8% / 0.25;
-  --nav-tab-ring: 217.2 91.2% 59.8% / 0.15;
-  --nav-float-shadow: 0 0% 0% / 0.35;
-  --nav-float-ring: 217.2 32.6% 17.5% / 0.3;
-  --nav-divider-color: 217.2 32.6% 17.5% / 0.5;
-  --nav-input-bg: 217.2 32.6% 17.5% / 0.5;
-  --nav-input-focus-ring: 217.2 91.2% 59.8% / 0.25;
-  --radius: 0.5rem;
+  --background:         220 26%  7%;
+  --foreground:         213 31% 91%;
+  --card:               215 28% 10%;
+  --card-foreground:    213 31% 91%;
+  --primary:            212 100% 67%;
+  --primary-foreground: 220 26%  7%;
+  --secondary:          215 14% 15%;
+  --secondary-foreground: 213 31% 91%;
+  --muted:              215 14% 15%;
+  --muted-foreground:   215 13% 55%;
+  --accent:             215 14% 18%;
+  --accent-foreground:  213 31% 91%;
+  --destructive:        0   63% 40%;
+  --destructive-foreground: 213 31% 91%;
+  --border:             215 19% 15%;
+  --input:              215 14% 20%;
+  --ring:               212 100% 67%;
+  --radius:             0.5rem;
 }
 
+/* ── Light mode ───────────────────────────────────────────────── */
 .light {
-  --background: 0 0% 100%;
-  --foreground: 222.2 84% 4.9%;
-  --card: 0 0% 100%;
-  --card-foreground: 222.2 84% 4.9%;
-  --primary: 221.2 83.2% 53.3%;
-  --primary-foreground: 210 40% 98%;
-  --secondary: 210 40% 96.1%;
-  --secondary-foreground: 222.2 47.4% 11.2%;
-  --muted: 210 40% 96.1%;
-  --muted-foreground: 215.4 16.3% 46.9%;
-  --accent: 210 40% 96.1%;
-  --accent-foreground: 222.2 47.4% 11.2%;
-  --destructive: 0 84.2% 60.2%;
-  --destructive-foreground: 210 40% 98%;
-  --border: 214.3 31.8% 91.4%;
-  --input: 214.3 31.8% 91.4%;
-  --ring: 221.2 83.2% 53.3%;
+  --background:         0   0% 100%;
+  --foreground:         215 28% 17%;
+  --card:               210 17% 97%;
+  --card-foreground:    215 28% 17%;
+  --primary:            213 94% 40%;
+  --primary-foreground: 0   0% 100%;
+  --secondary:          213 17% 93%;
+  --secondary-foreground: 215 28% 17%;
+  --muted:              213 17% 93%;
+  --muted-foreground:   215 18% 47%;
+  --accent:             213 17% 91%;
+  --accent-foreground:  215 28% 17%;
+  --destructive:        0   84% 60%;
+  --destructive-foreground: 0 0% 100%;
+  --border:             213 25% 88%;
+  --input:              213 25% 88%;
+  --ring:               213 94% 40%;
 }
 
-* {
+/* ── Base ─────────────────────────────────────────────────────── */
+*, ::before, ::after {
   border-color: hsl(var(--border));
   box-sizing: border-box;
-}
-button, a, input, textarea, select, [role="button"], .transition-all {
-  transition: all 150ms cubic-bezier(0.4, 0, 0.2, 1);
 }
 
 body {
   background-color: hsl(var(--background));
   color: hsl(var(--foreground));
-  font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Oxygen, Ubuntu, sans-serif;
+  font-family: 'IBM Plex Sans', -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+  line-height: 1.6;
 }
 
-/* Custom scrollbar */
-::-webkit-scrollbar {
-  width: 6px;
-}
-::-webkit-scrollbar-track {
-  background: transparent;
-}
-::-webkit-scrollbar-thumb {
-  background: rgba(107, 114, 128, 0.5);
-  border-radius: 3px;
-}
-::-webkit-scrollbar-thumb:hover {
-  background: rgba(107, 114, 128, 0.7);
+code, pre, kbd, samp {
+  font-family: 'IBM Plex Mono', 'Fira Code', ui-monospace, monospace;
 }
 
-@layer utilities {
-  .nav-glass {
-    background: hsl(var(--nav-glass-bg));
-    backdrop-filter: blur(var(--nav-glass-blur)) saturate(var(--nav-glass-saturate));
-    -webkit-backdrop-filter: blur(var(--nav-glass-blur)) saturate(var(--nav-glass-saturate));
-  }
-  .nav-tab-active {
-    box-shadow: 0 1px 8px hsl(var(--nav-tab-glow)), 0 0 0 1px hsl(var(--nav-tab-ring));
-  }
-  .sidebar-transition {
-    transition: transform 300ms cubic-bezier(0.4, 0, 0.2, 1), opacity 300ms ease-in-out;
-  }
-  .scrollbar-thin {
-    scrollbar-width: thin;
-    scrollbar-color: rgba(156, 163, 175, 0.5) transparent;
-  }
-  .scrollbar-thin::-webkit-scrollbar {
-    width: 6px;
-  }
-  .scrollbar-thin::-webkit-scrollbar-thumb {
-    background-color: rgba(156, 163, 175, 0.5);
-    border-radius: 3px;
-  }
+/* ── Transitions (interactive elements only) ──────────────────── */
+button, a, input, textarea, select, [role="button"] {
+  transition: background-color 140ms ease, border-color 140ms ease,
+              color 140ms ease, opacity 140ms ease, box-shadow 140ms ease,
+              transform 100ms ease;
 }
 
-@media (prefers-reduced-motion: reduce) {
-  *, ::before, ::after {
-    animation-duration: 0.01ms !important;
-    transition-duration: 0.01ms !important;
-  }
-}
+/* ── Scrollbars ───────────────────────────────────────────────── */
+::-webkit-scrollbar          { width: 5px; height: 5px; }
+::-webkit-scrollbar-track    { background: transparent; }
+::-webkit-scrollbar-thumb    { background: rgba(127,137,156,.28); border-radius: 10px; }
+::-webkit-scrollbar-thumb:hover { background: rgba(127,137,156,.5); }
+*                            { scrollbar-width: thin; scrollbar-color: rgba(127,137,156,.28) transparent; }
 
-/* Markdown prose adjustments */
+/* ── Prose ────────────────────────────────────────────────────── */
 .prose pre {
-  background-color: hsl(220 13% 10%);
+  background-color: hsl(var(--muted));
   border: 1px solid hsl(var(--border));
   border-radius: 0.5rem;
   overflow-x: auto;
+  font-size: 0.8125rem;
+  line-height: 1.7;
 }
-.prose table {
-  display: block;
-  overflow-x: auto;
-  white-space: nowrap;
-}
+
 .prose code {
   font-size: 0.875em;
 }
+
 .prose :not(pre) > code {
   background-color: hsl(var(--muted));
-  padding: 0.125rem 0.25rem;
+  padding: 0.15em 0.4em;
   border-radius: 0.25rem;
+  font-size: 0.8125em;
+  border: 1px solid hsl(var(--border));
+}
+
+.prose table {
+  display: block;
+  overflow-x: auto;
   font-size: 0.875em;
 }
 
-/* Chat thinking indicator animation */
-@keyframes chatDot {
-  0%, 60%, 100% { transform: translateY(0); opacity: 0.4; }
-  30% { transform: translateY(-4px); opacity: 1; }
-}
-.thinking-dot {
-  animation: chatDot 1.2s ease-in-out infinite;
-}
-.thinking-dot:nth-child(2) { animation-delay: 0.2s; }
-.thinking-dot:nth-child(3) { animation-delay: 0.4s; }
+.prose a { color: hsl(var(--primary)); text-decoration: underline; text-underline-offset: 3px; }
+.prose blockquote { border-left-color: hsl(var(--primary) / 0.4); }
+.prose hr { border-color: hsl(var(--border)); }
 
-/* Message slide in */
+/* ── Animations ───────────────────────────────────────────────── */
+@keyframes chatDot {
+  0%, 60%, 100% { transform: translateY(0); opacity: .4; }
+  30%            { transform: translateY(-4px); opacity: 1; }
+}
+.thinking-dot                  { animation: chatDot 1.2s ease-in-out infinite; }
+.thinking-dot:nth-child(2)     { animation-delay: .2s; }
+.thinking-dot:nth-child(3)     { animation-delay: .4s; }
+
 @keyframes messageSlideIn {
   from { opacity: 0; transform: translateY(8px); }
-  to { opacity: 1; transform: translateY(0); }
+  to   { opacity: 1; transform: translateY(0); }
 }
-.message-slide-in {
-  animation: messageSlideIn 200ms ease-out forwards;
+.message-slide-in { animation: messageSlideIn 180ms ease-out forwards; }
+
+@keyframes fadeIn {
+  from { opacity: 0; }
+  to   { opacity: 1; }
+}
+.fade-in { animation: fadeIn 200ms ease-out forwards; }
+
+/* ── Reduced motion ───────────────────────────────────────────── */
+@media (prefers-reduced-motion: reduce) {
+  *, ::before, ::after {
+    animation-duration: .01ms !important;
+    transition-duration: .01ms !important;
+  }
 }

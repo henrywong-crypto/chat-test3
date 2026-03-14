@@ -11,7 +11,7 @@ interface ToolRendererProps {
 
 export default function ToolRenderer({ toolName, toolInput, toolResult }: ToolRendererProps) {
   return (
-    <div className="my-1 rounded-lg border border-border/50 bg-card/80 backdrop-blur-sm">
+    <div className="my-0.5 overflow-hidden rounded-lg border border-border bg-card shadow-sm">
       <ToolHeader toolName={toolName} toolInput={toolInput} toolResult={toolResult} />
     </div>
   );
@@ -23,23 +23,33 @@ function isEditTool(toolName: string): boolean {
   return toolName === "Edit" || toolName === "Write" || toolName === "ApplyPatch";
 }
 
-function getDiffProps(toolName: string, input: Record<string, unknown>): { oldContent: string; newContent: string; filePath: string; badge: DiffBadge } | null {
+function getDiffProps(
+  toolName: string,
+  input: Record<string, unknown>,
+): { oldContent: string; newContent: string; filePath: string; badge: DiffBadge } | null {
   if (toolName === "Edit") {
-    const filePath = String(input.file_path ?? "");
-    const oldContent = String(input.old_string ?? "");
-    const newContent = String(input.new_string ?? "");
-    return { oldContent, newContent, filePath, badge: "Edit" };
+    return {
+      filePath: String(input.file_path ?? ""),
+      oldContent: String(input.old_string ?? ""),
+      newContent: String(input.new_string ?? ""),
+      badge: "Edit",
+    };
   }
   if (toolName === "Write") {
-    const filePath = String(input.file_path ?? "");
-    const newContent = String(input.content ?? "");
-    return { oldContent: "", newContent, filePath, badge: "New" };
+    return {
+      filePath: String(input.file_path ?? ""),
+      oldContent: "",
+      newContent: String(input.content ?? ""),
+      badge: "New",
+    };
   }
   if (toolName === "ApplyPatch") {
-    const filePath = String(input.file_path ?? input.path ?? "");
-    const oldContent = String(input.old ?? input.original ?? "");
-    const newContent = String(input.new ?? input.patched ?? "");
-    return { oldContent, newContent, filePath, badge: "Patch" };
+    return {
+      filePath: String(input.file_path ?? input.path ?? ""),
+      oldContent: String(input.old ?? input.original ?? ""),
+      newContent: String(input.new ?? input.patched ?? ""),
+      badge: "Patch",
+    };
   }
   return null;
 }
@@ -55,26 +65,28 @@ function ToolHeader({
 }) {
   const diffProps = isEditTool(toolName) ? getDiffProps(toolName, toolInput) : null;
   const [open, setOpen] = React.useState(diffProps !== null);
-
   const summary = buildSummary(toolName, toolInput);
 
   return (
     <div>
       <button
         onClick={() => setOpen((v) => !v)}
-        className="flex w-full items-center gap-2 px-3 py-2 text-left transition-colors hover:bg-accent/40 active:bg-accent/60"
+        className="flex w-full items-center gap-2 px-3 py-2 text-left hover:bg-accent/50 active:bg-accent/70"
       >
-        <Wrench className="h-3.5 w-3.5 flex-shrink-0 text-muted-foreground" />
-        <span className="flex-1 truncate text-xs font-medium text-foreground">
-          <span className="text-muted-foreground">{toolName}</span>
-          {summary && <span className="ml-2 text-foreground/70">{summary}</span>}
+        <Wrench className="h-3 w-3 flex-shrink-0 text-muted-foreground/70" />
+        <span className="flex-1 truncate text-xs">
+          <span className="font-medium text-muted-foreground">{toolName}</span>
+          {summary && (
+            <span className="ml-2 font-mono text-[11px] text-foreground/60">{summary}</span>
+          )}
         </span>
         {open ? (
-          <ChevronDown className="h-3.5 w-3.5 flex-shrink-0 text-muted-foreground" />
+          <ChevronDown className="h-3 w-3 flex-shrink-0 text-muted-foreground/50" />
         ) : (
-          <ChevronRight className="h-3.5 w-3.5 flex-shrink-0 text-muted-foreground" />
+          <ChevronRight className="h-3 w-3 flex-shrink-0 text-muted-foreground/50" />
         )}
       </button>
+
       {open && diffProps && (
         <ToolDiffViewer
           oldContent={diffProps.oldContent}
@@ -95,24 +107,12 @@ function ToolHeader({
 }
 
 function ToolInputBody({ toolName, toolInput }: { toolName: string; toolInput: Record<string, unknown> }) {
-  if (toolName === "Bash" || toolName === "shell") {
-    return <BashInputBody toolInput={toolInput} />;
-  }
-  if (toolName === "Grep") {
-    return <GrepInputBody toolInput={toolInput} />;
-  }
-  if (toolName === "Glob") {
-    return <GlobInputBody toolInput={toolInput} />;
-  }
-  if (toolName === "WebFetch") {
-    return <WebFetchInputBody toolInput={toolInput} />;
-  }
-  if (toolName === "WebSearch") {
-    return <WebSearchInputBody toolInput={toolInput} />;
-  }
-  if (toolName === "TodoWrite" || toolName === "TodoRead") {
-    return <TodoInputBody toolInput={toolInput} />;
-  }
+  if (toolName === "Bash" || toolName === "shell") return <BashInputBody toolInput={toolInput} />;
+  if (toolName === "Grep")      return <GrepInputBody toolInput={toolInput} />;
+  if (toolName === "Glob")      return <GlobInputBody toolInput={toolInput} />;
+  if (toolName === "WebFetch")  return <WebFetchInputBody toolInput={toolInput} />;
+  if (toolName === "WebSearch") return <WebSearchInputBody toolInput={toolInput} />;
+  if (toolName === "TodoWrite" || toolName === "TodoRead") return <TodoInputBody toolInput={toolInput} />;
   return (
     <pre className="overflow-x-auto text-xs text-muted-foreground">
       {JSON.stringify(toolInput, null, 2)}
@@ -126,7 +126,9 @@ function BashInputBody({ toolInput }: { toolInput: Record<string, unknown> }) {
   return (
     <div>
       {typeof cmd === "string" && (
-        <pre className="overflow-x-auto whitespace-pre-wrap break-all text-xs text-foreground/80">{cmd}</pre>
+        <pre className="overflow-x-auto whitespace-pre-wrap break-all font-mono text-xs text-foreground/80">
+          {cmd}
+        </pre>
       )}
       {typeof desc === "string" && (
         <p className="mt-1 text-[11px] text-muted-foreground">{desc}</p>
@@ -141,10 +143,10 @@ function GrepInputBody({ toolInput }: { toolInput: Record<string, unknown> }) {
   return (
     <div className="flex flex-wrap items-center gap-2 text-xs">
       {typeof pattern === "string" && (
-        <code className="rounded bg-muted px-1.5 py-0.5 text-foreground/80">/{pattern}/</code>
+        <code className="rounded bg-muted px-1.5 py-0.5 font-mono text-foreground/80">/{pattern}/</code>
       )}
       {typeof path === "string" && (
-        <span className="text-muted-foreground">{path}</span>
+        <span className="font-mono text-muted-foreground">{path}</span>
       )}
     </div>
   );
@@ -156,10 +158,10 @@ function GlobInputBody({ toolInput }: { toolInput: Record<string, unknown> }) {
   return (
     <div className="flex flex-wrap items-center gap-2 text-xs">
       {typeof pattern === "string" && (
-        <code className="rounded bg-muted px-1.5 py-0.5 text-foreground/80">{pattern}</code>
+        <code className="rounded bg-muted px-1.5 py-0.5 font-mono text-foreground/80">{pattern}</code>
       )}
       {typeof path === "string" && (
-        <span className="text-muted-foreground">{path}</span>
+        <span className="font-mono text-muted-foreground">{path}</span>
       )}
     </div>
   );
@@ -191,7 +193,9 @@ function TodoInputBody({ toolInput }: { toolInput: Record<string, unknown> }) {
               : String(todo)}
           </li>
         ))}
-        {todos.length > 5 && <li className="text-muted-foreground/60">+{todos.length - 5} more</li>}
+        {todos.length > 5 && (
+          <li className="text-muted-foreground/50">+{todos.length - 5} more</li>
+        )}
       </ul>
     );
   }
@@ -207,23 +211,25 @@ function ToolResultView({ result }: { result: ToolResult }) {
   const isLong = result.content.length > 200;
 
   return (
-    <div className={`border-t border-border px-3 py-2 ${result.isError ? "bg-red-950/10" : ""}`}>
+    <div className={`border-t border-border px-3 py-2 ${result.isError ? "bg-destructive/5" : "bg-muted/30"}`}>
       {result.isError && (
-        <div className="mb-1 text-[10px] font-medium uppercase tracking-wide text-red-400">Error</div>
+        <div className="mb-1 text-[10px] font-semibold uppercase tracking-widest text-destructive">
+          Error
+        </div>
       )}
       {isLong ? (
         <div>
           <div className="relative overflow-hidden">
             <pre
-              className={`whitespace-pre-wrap break-words text-xs ${
-                result.isError ? "text-red-300" : "text-muted-foreground"
+              className={`whitespace-pre-wrap break-words font-mono text-xs ${
+                result.isError ? "text-destructive" : "text-muted-foreground"
               } ${!open ? "max-h-24" : ""}`}
               style={{ overflow: open ? "auto" : "hidden" }}
             >
               {result.content}
             </pre>
             {!open && (
-              <div className="absolute bottom-0 left-0 right-0 h-8 bg-gradient-to-t from-card/80 to-transparent" />
+              <div className="absolute bottom-0 left-0 right-0 h-8 bg-gradient-to-t from-card to-transparent" />
             )}
           </div>
           <button
@@ -235,8 +241,8 @@ function ToolResultView({ result }: { result: ToolResult }) {
         </div>
       ) : (
         <pre
-          className={`whitespace-pre-wrap break-words text-xs ${
-            result.isError ? "text-red-300" : "text-muted-foreground"
+          className={`whitespace-pre-wrap break-words font-mono text-xs ${
+            result.isError ? "text-destructive" : "text-muted-foreground"
           }`}
         >
           {result.content}
@@ -251,7 +257,7 @@ function buildSummary(toolName: string, input: Record<string, unknown>): string 
     const cmd = input.command ?? input.cmd;
     if (typeof cmd === "string") return cmd.slice(0, 80);
   }
-  if (toolName === "Read" || toolName === "Write" || toolName === "Edit" || toolName === "Glob") {
+  if (["Read", "Write", "Edit", "Glob"].includes(toolName)) {
     const path = input.file_path ?? input.path ?? input.pattern;
     if (typeof path === "string") return path.slice(0, 80);
   }

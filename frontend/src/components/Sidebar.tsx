@@ -22,21 +22,23 @@ export default function Sidebar({
   onDeleteSession,
 }: SidebarProps) {
   return (
-    <div className="flex w-64 flex-col border-r border-border bg-card">
-      <div className="flex items-center justify-between border-b border-border px-3 py-2">
-        <span className="text-sm font-semibold text-foreground">Chats</span>
+    <div className="flex w-60 flex-col border-r border-border bg-card">
+      <div className="flex h-11 items-center justify-between border-b border-border px-3">
+        <span className="text-xs font-semibold uppercase tracking-wider text-muted-foreground">
+          Conversations
+        </span>
         <button
           title="Refresh"
           onClick={onRefresh}
-          className="flex h-7 w-7 items-center justify-center rounded-md text-muted-foreground transition-colors hover:bg-accent hover:text-accent-foreground"
+          className="flex h-6 w-6 items-center justify-center rounded text-muted-foreground hover:bg-accent hover:text-foreground"
         >
-          <RefreshCw className="h-3.5 w-3.5" />
+          <RefreshCw className="h-3 w-3" />
         </button>
       </div>
 
-      <div className="flex-1 overflow-y-auto py-1">
+      <div className="flex-1 overflow-y-auto py-1.5">
         {sessions.length === 0 ? (
-          <div className="px-3 py-4 text-center text-xs text-muted-foreground">No chats yet</div>
+          <p className="px-3 py-8 text-center text-xs text-muted-foreground">No conversations yet</p>
         ) : (
           sessions.map((session) => (
             <SessionRow
@@ -51,10 +53,10 @@ export default function Sidebar({
         )}
       </div>
 
-      <div className="border-t border-border px-2 py-2">
+      <div className="border-t border-border p-2">
         <button
           onClick={onNewChat}
-          className="flex w-full items-center justify-center gap-2 rounded-lg bg-primary/10 px-3 py-2 text-sm font-medium text-primary transition-colors hover:bg-primary/20"
+          className="flex w-full items-center justify-center gap-2 rounded-lg bg-primary/10 px-3 py-2 text-sm font-medium text-primary hover:bg-primary/20 active:scale-[.98]"
         >
           <Plus className="h-4 w-4" />
           New Chat
@@ -78,15 +80,14 @@ function SessionRow({
   onDelete: () => void;
 }) {
   const [hovered, setHovered] = React.useState(false);
-
   const title = session.title || `Session ${session.session_id.slice(0, 8)}`;
 
   return (
     <div
-      className={`group relative flex cursor-pointer items-center gap-2 px-3 py-2 transition-colors ${
+      className={`group relative flex cursor-pointer items-center gap-2 px-3 py-2 text-xs ${
         isActive
-          ? "bg-accent text-accent-foreground"
-          : "text-muted-foreground hover:bg-accent/50 hover:text-foreground"
+          ? "border-l-2 border-primary bg-primary/8 pl-[10px] text-foreground"
+          : "text-muted-foreground hover:bg-accent hover:text-foreground"
       }`}
       onClick={onSelect}
       onMouseEnter={() => setHovered(true)}
@@ -98,13 +99,13 @@ function SessionRow({
           <span className="relative inline-flex h-1.5 w-1.5 rounded-full bg-primary" />
         </span>
       )}
-      <span className="flex-1 truncate text-xs">{title}</span>
+      <span className="flex-1 truncate leading-snug">{title}</span>
       {hovered && (
         <button
           onClick={(e) => { e.stopPropagation(); onDelete(); }}
-          className="flex h-5 w-5 flex-shrink-0 items-center justify-center rounded text-muted-foreground opacity-0 transition-opacity group-hover:opacity-100 hover:text-destructive"
+          className="flex h-5 w-5 flex-shrink-0 items-center justify-center rounded text-muted-foreground hover:text-destructive"
         >
-          <Trash2 className="h-3.5 w-3.5" />
+          <Trash2 className="h-3 w-3" />
         </button>
       )}
     </div>

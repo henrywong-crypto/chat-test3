@@ -15,6 +15,21 @@ function AppContent() {
   const [selectedSession, setSelectedSession] = useState<ChatSession | null>(null);
   const [showSettings, setShowSettings] = useState(false);
   const [runningSessionId, setRunningSessionId] = useState<string | null>(null);
+  const [darkMode, setDarkMode] = useState<boolean>(() => {
+    const saved = localStorage.getItem("ui-theme");
+    return saved ? saved === "dark" : true;
+  });
+
+  useEffect(() => {
+    if (darkMode) {
+      document.documentElement.classList.remove("light");
+    } else {
+      document.documentElement.classList.add("light");
+    }
+    localStorage.setItem("ui-theme", darkMode ? "dark" : "light");
+  }, [darkMode]);
+
+  const toggleDarkMode = useCallback(() => setDarkMode((m) => !m), []);
 
   useEffect(() => {
     loadHistory().then(setSessions).catch(console.error);
@@ -38,13 +53,15 @@ function AppContent() {
   }, [loadHistory]);
 
   return (
-    <div className="flex h-screen w-screen overflow-hidden">
+    <div className="flex h-screen w-screen overflow-hidden bg-background">
       <IconRail
         activeTab={activeTab}
         onTabChange={setActiveTab}
         hasUserRootfs={hasUserRootfs}
         csrfToken={csrfToken}
         onSettingsOpen={() => setShowSettings(true)}
+        darkMode={darkMode}
+        onToggleDarkMode={toggleDarkMode}
       />
 
       {activeTab === "chat" && (
@@ -61,7 +78,12 @@ function AppContent() {
 
       <main className="flex min-w-0 flex-1 flex-col overflow-hidden">
         {activeTab === "chat" && (
-          <ChatInterface sessions={sessions} setSessions={setSessions} selectedSession={selectedSession} onRunningSessionChange={setRunningSessionId} />
+          <ChatInterface
+            sessions={sessions}
+            setSessions={setSessions}
+            selectedSession={selectedSession}
+            onRunningSessionChange={setRunningSessionId}
+          />
         )}
         <div
           style={{ display: activeTab === "terminal" ? "flex" : "none" }}
@@ -76,6 +98,7 @@ function AppContent() {
           <FileManager />
         </div>
       </main>
+
       {showSettings && <SettingsPanel onClose={() => setShowSettings(false)} />}
     </div>
   );

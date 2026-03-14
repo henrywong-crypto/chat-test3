@@ -18,25 +18,26 @@ const MessageComponent = memo(({ message, prevMessage }: MessageComponentProps) 
     !message.isToolUse &&
     !prevMessage.isToolUse;
 
-  const formattedTime = new Date(message.timestamp).toLocaleTimeString();
+  const formattedTime = new Date(message.timestamp).toLocaleTimeString([], {
+    hour: "2-digit",
+    minute: "2-digit",
+  });
   const [hovered, setHovered] = useState(false);
 
   if (message.type === "user") {
     return (
       <div
-        className="flex justify-end px-3 py-0.5"
+        className="flex justify-end px-4 py-0.5"
         onMouseEnter={() => setHovered(true)}
         onMouseLeave={() => setHovered(false)}
       >
-        <div className="max-w-xs sm:max-w-md lg:max-w-lg xl:max-w-xl">
-          <div className="rounded-2xl rounded-br-md bg-blue-600 px-3 py-2 text-sm text-white shadow-sm">
-            <div className="whitespace-pre-wrap break-words">{message.content}</div>
-            <div className="mt-1 flex items-center justify-end gap-2">
-              {hovered && (
-                <MessageCopyControl content={message.content} messageType="user" />
-              )}
-              <span className="text-[10px] text-blue-100">{formattedTime}</span>
-            </div>
+        <div className="max-w-[75%] sm:max-w-lg">
+          <div className="rounded-2xl rounded-br-sm bg-primary px-4 py-2.5 text-sm text-primary-foreground shadow-sm">
+            <div className="whitespace-pre-wrap break-words leading-relaxed">{message.content}</div>
+          </div>
+          <div className="mt-1 flex items-center justify-end gap-2 pr-1">
+            {hovered && <MessageCopyControl content={message.content} messageType="user" />}
+            <span className="text-[10px] text-muted-foreground/50">{formattedTime}</span>
           </div>
         </div>
       </div>
@@ -45,8 +46,8 @@ const MessageComponent = memo(({ message, prevMessage }: MessageComponentProps) 
 
   if (message.type === "error") {
     return (
-      <div className="px-3 py-0.5">
-        <div className="rounded-lg border border-red-500/30 bg-red-950/20 px-3 py-2 text-sm text-red-300">
+      <div className="px-4 py-0.5">
+        <div className="rounded-xl border border-destructive/30 bg-destructive/8 px-4 py-2.5 text-sm text-destructive">
           <span className="font-medium">Error: </span>{message.content}
         </div>
       </div>
@@ -56,15 +57,15 @@ const MessageComponent = memo(({ message, prevMessage }: MessageComponentProps) 
   if (message.isThinking) {
     if (!message.content) {
       return (
-        <div className="px-3 py-0.5">
+        <div className="px-4 py-1">
           <ThinkingIndicator />
         </div>
       );
     }
     return (
-      <div className="px-3 py-0.5">
+      <div className="px-4 py-0.5">
         <details className="group">
-          <summary className="flex cursor-pointer list-none items-center gap-2 text-xs font-medium text-muted-foreground hover:text-foreground">
+          <summary className="flex cursor-pointer list-none items-center gap-1.5 text-xs font-medium text-muted-foreground hover:text-foreground">
             <svg
               className="h-3 w-3 transition-transform group-open:rotate-90"
               fill="none"
@@ -75,7 +76,7 @@ const MessageComponent = memo(({ message, prevMessage }: MessageComponentProps) 
             </svg>
             Thinking…
           </summary>
-          <div className="mt-2 border-l-2 border-muted pl-3 text-xs text-muted-foreground">
+          <div className="mt-2 border-l-2 border-border pl-3 text-xs leading-relaxed text-muted-foreground">
             <div className="whitespace-pre-wrap">{message.content}</div>
           </div>
         </details>
@@ -85,7 +86,7 @@ const MessageComponent = memo(({ message, prevMessage }: MessageComponentProps) 
 
   if (message.isToolUse) {
     return (
-      <div className="px-3 py-0.5">
+      <div className="px-4 py-0.5">
         <ToolRenderer
           toolName={message.toolName ?? ""}
           toolInput={message.toolInput ?? {}}
@@ -98,29 +99,27 @@ const MessageComponent = memo(({ message, prevMessage }: MessageComponentProps) 
   // Regular assistant message
   return (
     <div
-      className={twMerge("px-3", isGrouped ? "py-0.5" : "py-1")}
+      className={twMerge("px-4", isGrouped ? "py-0.5" : "py-1")}
       onMouseEnter={() => setHovered(true)}
       onMouseLeave={() => setHovered(false)}
     >
       {!isGrouped && (
-        <div className="mb-1.5 flex items-center gap-2">
-          <div className="flex h-6 w-6 flex-shrink-0 items-center justify-center rounded-full bg-primary text-[10px] font-bold text-primary-foreground">
-            C
+        <div className="mb-2 flex items-center gap-2.5">
+          <div className="flex h-6 w-6 flex-shrink-0 items-center justify-center rounded-full bg-primary text-[9px] font-bold tracking-wider text-primary-foreground shadow-sm">
+            AI
           </div>
-          <span className="text-xs font-medium text-foreground">Claude</span>
-          <span className="text-[10px] text-muted-foreground">{formattedTime}</span>
+          <span className="text-xs font-semibold text-foreground">Claude</span>
+          <span className="text-[10px] text-muted-foreground/60">{formattedTime}</span>
           <div className="ml-auto">
-            {hovered && (
-              <MessageCopyControl content={message.content} messageType="assistant" />
-            )}
+            {hovered && <MessageCopyControl content={message.content} messageType="assistant" />}
           </div>
         </div>
       )}
-      <div className={twMerge("min-w-0 overflow-x-auto text-sm text-foreground", isGrouped ? "" : "pl-8")}>
+      <div className={twMerge("min-w-0 overflow-x-auto text-sm leading-relaxed text-foreground", isGrouped ? "" : "pl-[34px]")}>
         <MarkdownContent content={message.content} />
       </div>
       {isGrouped && hovered && (
-        <div className="flex justify-end pt-0.5">
+        <div className="flex justify-end pt-0.5 pl-[34px]">
           <MessageCopyControl content={message.content} messageType="assistant" />
         </div>
       )}
@@ -145,11 +144,11 @@ function MarkdownContent({ content }: { content: string }) {
 
 function ThinkingIndicator() {
   return (
-    <div className="flex items-center gap-2 py-1">
-      <div className="flex h-6 w-6 flex-shrink-0 items-center justify-center rounded-full bg-primary text-[10px] font-bold text-primary-foreground">
-        C
+    <div className="flex items-center gap-2.5">
+      <div className="flex h-6 w-6 flex-shrink-0 items-center justify-center rounded-full bg-primary text-[9px] font-bold tracking-wider text-primary-foreground">
+        AI
       </div>
-      <div className="flex items-center gap-1">
+      <div className="flex items-center gap-1 rounded-full bg-muted px-3 py-1.5">
         <span className="thinking-dot h-1.5 w-1.5 rounded-full bg-muted-foreground" />
         <span className="thinking-dot h-1.5 w-1.5 rounded-full bg-muted-foreground" />
         <span className="thinking-dot h-1.5 w-1.5 rounded-full bg-muted-foreground" />
