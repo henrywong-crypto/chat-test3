@@ -17,7 +17,7 @@ use tracing::{debug, error, info};
 
 const AGENT_CMD: &str = "bash -lc '\
     /usr/sbin/logrotate --force --state \"$HOME/.logrotate.status\" /etc/logrotate.d/agent; \
-    PYTHONUNBUFFERED=1 /usr/local/bin/uv run /opt/agent.py 2> >(tee -a \"$HOME/agent.log\" >&2)\
+    PYTHONUNBUFFERED=1 exec /usr/bin/python3 /opt/connector.py 2> >(tee -a \"$HOME/agent.log\" >&2)\
 '";
 
 const HEARTBEAT_SECS: u64 = 60;

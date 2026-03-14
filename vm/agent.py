@@ -10,6 +10,8 @@ import json
 import os
 import sys
 
+SOCKET_PATH = "/tmp/agent.sock"
+
 
 def log(msg: str) -> None:
     """Write a log line to stderr so it appears in server logs without polluting the stdout protocol."""
@@ -18,9 +20,11 @@ def log(msg: str) -> None:
 
 
 def emit_sse(event_name: str, data: dict) -> None:
-    """Write a properly formatted SSE event to stdout."""
-    sys.stdout.write(f"event: {event_name}\ndata: {json.dumps(data, cls=_Encoder)}\n\n")
-    sys.stdout.flush()
+    """Write a properly formatted SSE event to the current writer."""
+    if _current_writer is None or _current_writer.is_closing():
+        return
+    payload = f"event: {event_name}\ndata: {json.dumps(data, cls=_Encoder)}\n\n"
+    _current_writer.write(payload.encode())
 
 
 def get_field(obj, field, default=None):
@@ -30,20 +34,23 @@ def get_field(obj, field, default=None):
     return getattr(obj, field, default)
 
 
-# Pending AskUserQuestion futures keyed by request_id.
-_pending_questions: dict[str, asyncio.Future] = {}
-# Queue for incoming stdin messages (queries, etc.) from the Rust relay.
+# Pending AskUserQuestion future (at most one active at a time).
+_pending_question: asyncio.Future | None = None
+# Data for the pending question — re-emitted to reconnecting clients.
+_pending_question_data: dict | None = None
+# Queue for incoming messages (queries, etc.) from connected clients.
 _stdin_queue: asyncio.Queue = asyncio.Queue()
 # The currently running query task, so it can be cancelled on interrupt.
 _current_query_task: asyncio.Task | None = None
+# The active writer for the current client connection.
+_current_writer: asyncio.StreamWriter | None = None
 
 
-async def route_stdin(reader: asyncio.StreamReader) -> None:
-    """Read stdin lines and route them: answer_question resolves pending futures; everything else goes to _stdin_queue."""
+async def route_connection(reader: asyncio.StreamReader) -> None:
+    """Read lines from a connected client and route them; return on EOF without exiting."""
     while True:
         raw = await reader.readline()
         if not raw:
-            await _stdin_queue.put(None)
             return
         line = raw.decode().strip()
         if not line:
@@ -51,14 +58,11 @@ async def route_stdin(reader: asyncio.StreamReader) -> None:
         try:
             msg = json.loads(line)
         except json.JSONDecodeError:
-            log(f"failed to parse stdin line: {line[:120]}")
+            log(f"failed to parse line: {line[:120]}")
             continue
         if msg.get('type') == 'answer_question':
-            request_id = msg.get('request_id')
-            if request_id and request_id in _pending_questions:
-                fut = _pending_questions.pop(request_id)
-                if not fut.done():
-                    fut.set_result(msg.get('answers', {}))
+            if _pending_question and not _pending_question.done():
+                _pending_question.set_result(msg.get('answers', {}))
         elif msg.get('type') == 'interrupt':
             if _current_query_task and not _current_query_task.done():
                 log("interrupt received, cancelling query task")
@@ -67,19 +71,27 @@ async def route_stdin(reader: asyncio.StreamReader) -> None:
             await _stdin_queue.put(msg)
 
 
-async def main():
+async def handle_connection(reader: asyncio.StreamReader, writer: asyncio.StreamWriter) -> None:
+    """Handle a single client connection."""
+    global _current_writer
+    log("client connected")
+    _current_writer = writer
+    if _pending_question_data:
+        log("re-emitting pending question to reconnected client")
+        emit_sse('ask_user_question', _pending_question_data)
+    await route_connection(reader)
+    if _current_writer is writer:
+        _current_writer = None
+    writer.close()
+    await writer.wait_closed()
+    log("client disconnected")
+
+
+async def process_query_queue() -> None:
+    """Consume _stdin_queue and run queries sequentially."""
     global _current_query_task
-    loop = asyncio.get_event_loop()
-    reader = asyncio.StreamReader()
-    proto = asyncio.StreamReaderProtocol(reader)
-    await loop.connect_read_pipe(lambda: proto, sys.stdin)
-    log("ready, waiting for queries")
-    asyncio.create_task(route_stdin(reader))
     while True:
         msg = await _stdin_queue.get()
-        if msg is None:
-            log("stdin closed, exiting")
-            break
         if msg.get('type') == 'query':
             _current_query_task = asyncio.create_task(
                 run_query(msg.get('content', ''), msg.get('session_id'))
@@ -88,6 +100,18 @@ async def main():
                 await _current_query_task
             except asyncio.CancelledError:
                 pass
+
+
+async def main():
+    try:
+        os.unlink(SOCKET_PATH)
+    except FileNotFoundError:
+        pass
+    server = await asyncio.start_unix_server(handle_connection, path=SOCKET_PATH)
+    log("agent daemon ready")
+    asyncio.create_task(process_query_queue())
+    async with server:
+        await server.serve_forever()
 
 
 async def run_query(content: str, session_id):
@@ -101,18 +125,17 @@ async def run_query(content: str, session_id):
         return PermissionResultAllow()
 
     async def ask_user_question_hook(input_data, tool_use_id, context):
-        if not tool_use_id:
-            log("PreToolUse AskUserQuestion: no tool_use_id, cannot block")
-            return {'continue_': True}
+        global _pending_question, _pending_question_data
         tool_input = get_field(input_data, 'tool_input') or {}
         questions = tool_input.get('questions', []) if isinstance(tool_input, dict) else []
-        fut = asyncio.get_running_loop().create_future()
-        _pending_questions[tool_use_id] = fut
+        _pending_question = asyncio.get_running_loop().create_future()
+        _pending_question_data = {'request_id': tool_use_id, 'questions': questions}
         emit_sse('ask_user_question', {'request_id': tool_use_id, 'questions': questions})
-        log(f"PreToolUse AskUserQuestion: waiting for answer  request_id={tool_use_id!r}")
-        answers = await fut
-        _pending_questions.pop(tool_use_id, None)
-        log(f"PreToolUse AskUserQuestion: answered  request_id={tool_use_id!r}")
+        log(f"PreToolUse AskUserQuestion: waiting for answer")
+        answers = await _pending_question
+        _pending_question = None
+        _pending_question_data = None
+        log(f"PreToolUse AskUserQuestion: answered")
         return {
             'hookSpecificOutput': {
                 'hookEventName': 'PreToolUse',
@@ -162,7 +185,9 @@ async def run_query(content: str, session_id):
         log(f"query error: {exc}")
         emit_sse('error_event', {'message': str(exc)})
     finally:
-        _pending_questions.clear()
+        global _pending_question, _pending_question_data
+        _pending_question = None
+        _pending_question_data = None
     log(f"query done  session_id={captured_session_id!r}")
     emit_sse('done', {'session_id': captured_session_id})
 

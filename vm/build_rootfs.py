@@ -36,8 +36,9 @@ from pathlib import Path
 S3_BUCKET   = "https://s3.amazonaws.com/spec.ccfc.min"
 S3_ARTIFACTS = f"{S3_BUCKET}/firecracker-ci"
 INSTALL_DIR = Path("/var/lib/fc")
-AGENT_PY    = Path(__file__).parent / "agent.py"
-SETTINGS_PY = Path(__file__).parent / "settings.py"
+AGENT_PY      = Path(__file__).parent / "agent.py"
+CONNECTOR_PY  = Path(__file__).parent / "connector.py"
+SETTINGS_PY   = Path(__file__).parent / "settings.py"
 
 CLAUDE_SETTINGS = """\
 {
@@ -288,6 +289,7 @@ def install_claude_code(rootfs: Path) -> None:
 def install_agent(rootfs: Path) -> None:
     (rootfs / "opt").mkdir(exist_ok=True)
     shutil.copy(str(AGENT_PY), str(rootfs / "opt/agent.py"))
+    shutil.copy(str(CONNECTOR_PY), str(rootfs / "opt/connector.py"))
     shutil.copy(str(SETTINGS_PY), str(rootfs / "opt/settings.py"))
 
     # Pre-warm the uv dependency cache as the ubuntu user so the first VM
