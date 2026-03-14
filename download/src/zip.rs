@@ -37,9 +37,7 @@ pub fn build_streaming_zip_response(
     upload_dir: &Path,
     filename: &str,
 ) -> Result<Response<Body>> {
-    // zip bytes → HTTP body (bounded for backpressure)
-    let (zip_tx, zip_rx) = mpsc::channel::<Result<Bytes, IoError>>(8);
-    // file events → zip writer (bounded to limit SFTP read-ahead)
+    let (zip_tx, zip_rx) = mpsc::channel::<Result<Bytes, IoError>>(4);
     let (file_tx, file_rx) = tokio_mpsc::channel::<FileEvent>(4);
 
     tokio::spawn(collect_zip_files(sftp, dir_path.to_owned(), upload_dir.to_owned(), file_tx));
