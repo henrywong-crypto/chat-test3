@@ -126,6 +126,7 @@ export default function ChatInterface({ sessions, setSessions, selectedSession, 
   // Reset to a blank new chat when the user explicitly clicks "New Chat"
   useEffect(() => {
     if (newChatKey === 0) return;
+    setMessages(null, []);
     setViewSessionId(null);
   }, [newChatKey]); // eslint-disable-line react-hooks/exhaustive-deps
 

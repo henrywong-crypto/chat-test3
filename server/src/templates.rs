@@ -4,7 +4,7 @@ pub(crate) fn render_login_page() -> String {
 <head>
 <meta charset="utf-8"/>
 <meta name="viewport" content="width=device-width, initial-scale=1"/>
-<title>WebCode</title>
+<title>Web</title>
 </head>
 <body style="display:flex;align-items:center;justify-content:center;min-height:100vh;margin:0;background:#0f0f0f;color:#fff;font-family:sans-serif">
 <div style="text-align:center">
@@ -33,7 +33,7 @@ pub(crate) fn render_terminal_page(
 <head>
 <meta charset="utf-8"/>
 <meta name="viewport" content="width=device-width, initial-scale=1"/>
-<title>WebCode</title>
+<title>Web</title>
 <link rel="stylesheet" href="{styles_css_href}"/>
 </head>
 <body class="flex h-screen overflow-hidden bg-background text-foreground">
