@@ -77,12 +77,13 @@ async fn delete_session_dir(
     session_id: &str,
 ) -> Result<()> {
     let dir_path = project_dir.join(session_id);
-    match sftp
+    if let Ok(true) = sftp
         .try_exists(dir_path.to_str().expect("path is valid UTF-8"))
         .await
     {
-        Ok(true) => remove_dir_all(sftp, &dir_path, 2).await,
-        _ => Ok(()),
+        remove_dir_all(sftp, &dir_path, 2).await
+    } else {
+        Ok(())
     }
 }
 
