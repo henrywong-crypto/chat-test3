@@ -1,8 +1,8 @@
 use axum::{http::header, response::IntoResponse};
 use std::sync::OnceLock;
 
-const APP_JS: &[u8] = include_bytes!("../frontend/dist/app.js");
-const STYLES_CSS: &[u8] = include_bytes!("../frontend/dist/styles.css");
+const APP_JS: &[u8] = include_bytes!("../../frontend/dist/app.js");
+const STYLES_CSS: &[u8] = include_bytes!("../../frontend/dist/styles.css");
 
 static APP_JS_HASH: OnceLock<String> = OnceLock::new();
 static STYLES_CSS_HASH: OnceLock<String> = OnceLock::new();
