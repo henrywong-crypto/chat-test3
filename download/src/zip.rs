@@ -1,34 +1,20 @@
 use anyhow::{Context, Result, bail};
+use async_zip::{Compression, ZipEntryBuilder};
+use async_zip::tokio::write::ZipFileWriter;
 use axum::{
     body::Body,
     http::{HeaderValue, Response, header},
 };
-use bytes::Bytes;
-use futures::channel::mpsc;
+use futures_lite::io::AsyncWriteExt;
 use russh_sftp::client::SftpSession;
-use std::{
-    io::{Error as IoError, Write},
-    path::{Path, PathBuf},
-};
-use tokio::{
-    io::AsyncReadExt,
-    sync::mpsc as tokio_mpsc,
-    time::{Duration, timeout},
-};
-use zip::write::SimpleFileOptions;
-
-use crate::seekable_channel_writer::SeekableChannelWriter;
+use std::path::{Path, PathBuf};
+use tokio::io::{AsyncReadExt, DuplexStream};
+use tokio_util::io::ReaderStream;
 use common::validate_within_dir;
 
 const MAX_DOWNLOAD_BYTES: usize = 100 * 1024 * 1024; // 100 MB
 const MAX_ZIP_DEPTH: usize = 10;
 const FILE_CHUNK_SIZE: usize = 64 * 1024; // 64 KB
-const FILE_EVENT_SEND_TIMEOUT_SECS: u64 = 30;
-
-enum FileEvent {
-    Start(String),
-    Chunk(Bytes),
-}
 
 pub fn build_streaming_zip_response(
     // owned because it is moved into the tokio::spawn future, which requires 'static — a
@@ -38,28 +24,20 @@ pub fn build_streaming_zip_response(
     upload_dir: &Path,
     filename: &str,
 ) -> Result<Response<Body>> {
-    let (zip_tx, zip_rx) = mpsc::channel::<Result<Bytes, IoError>>(4);
-    let (file_tx, file_rx) = tokio_mpsc::channel::<FileEvent>(4);
-
-    tokio::spawn(collect_zip_files(sftp, dir_path.to_owned(), upload_dir.to_owned(), file_tx));
-    tokio::task::spawn_blocking(move || write_zip_to_channel(file_rx, zip_tx));
-
+    let (zip_writer, zip_reader) = tokio::io::duplex(FILE_CHUNK_SIZE);
+    tokio::spawn(write_zip(sftp, dir_path.to_owned(), upload_dir.to_owned(), zip_writer));
     let content_disposition =
         HeaderValue::from_str(&format!("attachment; filename=\"{filename}\""))
             .context("failed to build content disposition header")?;
     Response::builder()
         .header(header::CONTENT_TYPE, "application/zip")
         .header(header::CONTENT_DISPOSITION, content_disposition)
-        .body(Body::from_stream(zip_rx))
+        .body(Body::from_stream(ReaderStream::new(zip_reader)))
         .context("failed to build zip response")
 }
 
-async fn collect_zip_files(
-    sftp: SftpSession,
-    dir_path: PathBuf,
-    upload_dir: PathBuf,
-    file_tx: tokio_mpsc::Sender<FileEvent>,
-) {
+async fn write_zip(sftp: SftpSession, dir_path: PathBuf, upload_dir: PathBuf, writer: DuplexStream) {
+    let mut zip = ZipFileWriter::with_tokio(writer);
     let mut total_bytes: usize = 0;
     let mut dirs_to_visit: Vec<(PathBuf, usize)> = vec![(dir_path.clone(), 0)];
     while let Some((dir, depth)) = dirs_to_visit.pop() {
@@ -94,16 +72,7 @@ async fn collect_zip_files(
                 Some(s) => s.to_owned(),
                 None => return,
             };
-            match timeout(
-                Duration::from_secs(FILE_EVENT_SEND_TIMEOUT_SECS),
-                file_tx.send(FileEvent::Start(relative)),
-            )
-            .await
-            {
-                Ok(Ok(())) => {}
-                _ => return,
-            }
-            if stream_file(&sftp, &child_path, &file_tx, &mut total_bytes)
+            if stream_sftp_file_to_zip_entry(&sftp, &child_path, &relative, &mut zip, &mut total_bytes)
                 .await
                 .is_err()
             {
@@ -111,25 +80,23 @@ async fn collect_zip_files(
             }
         }
     }
+    let _ = zip.close().await;
 }
 
-async fn stream_file(
+async fn stream_sftp_file_to_zip_entry(
     sftp: &SftpSession,
     path: &Path,
-    file_tx: &tokio_mpsc::Sender<FileEvent>,
+    relative: &str,
+    zip: &mut ZipFileWriter<DuplexStream>,
     total_bytes: &mut usize,
 ) -> Result<()> {
     let path_str = path.to_str().context("invalid file path")?;
-    let mut file = sftp
-        .open(path_str)
-        .await
-        .context("failed to open remote file")?;
+    let mut file = sftp.open(path_str).await.context("failed to open remote file")?;
+    let entry = ZipEntryBuilder::new(relative.into(), Compression::Deflate);
+    let mut entry_writer = zip.write_entry_stream(entry).await.context("failed to start zip entry")?;
     let mut buf = vec![0u8; FILE_CHUNK_SIZE];
     loop {
-        let n = file
-            .read(&mut buf)
-            .await
-            .context("failed to read remote file")?;
+        let n = file.read(&mut buf).await.context("failed to read remote file")?;
         if n == 0 {
             break;
         }
@@ -137,48 +104,8 @@ async fn stream_file(
         if *total_bytes > MAX_DOWNLOAD_BYTES {
             bail!("download size limit exceeded");
         }
-        match timeout(
-            Duration::from_secs(FILE_EVENT_SEND_TIMEOUT_SECS),
-            file_tx.send(FileEvent::Chunk(Bytes::copy_from_slice(&buf[..n]))),
-        )
-        .await
-        {
-            Ok(Ok(())) => {}
-            Ok(Err(_)) => bail!("zip writer dropped"),
-            Err(_) => bail!("zip writer send timed out"),
-        }
+        entry_writer.write_all(&buf[..n]).await.context("failed to write to zip entry")?;
     }
+    entry_writer.close().await.context("failed to close zip entry")?;
     Ok(())
-}
-
-fn write_zip_to_channel(
-    mut file_rx: tokio_mpsc::Receiver<FileEvent>,
-    zip_tx: mpsc::Sender<Result<Bytes, IoError>>,
-) {
-    let options = SimpleFileOptions::default().compression_method(zip::CompressionMethod::Deflated);
-    let mut writer = SeekableChannelWriter::new(zip_tx);
-    let zip_ok = {
-        let mut zip = zip::ZipWriter::new(&mut writer);
-        let mut ok = true;
-        while let Some(event) = file_rx.blocking_recv() {
-            match event {
-                FileEvent::Start(name) => {
-                    if zip.start_file(&name, options).is_err() {
-                        ok = false;
-                        break;
-                    }
-                }
-                FileEvent::Chunk(data) => {
-                    if Write::write_all(&mut zip, &data).is_err() {
-                        ok = false;
-                        break;
-                    }
-                }
-            }
-        }
-        ok && zip.finish().is_ok()
-    };
-    if zip_ok {
-        let _ = writer.flush_remaining();
-    }
 }

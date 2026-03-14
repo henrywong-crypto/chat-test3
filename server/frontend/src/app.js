@@ -324,33 +324,53 @@ document.getElementById('fm-file-input').addEventListener('change', function() {
 
 // ── Chat panel ────────────────────────────────────────────────────────────────
 
-let chatSessionId = null;
-let chatEs = null;
-let chatEsPending = null;
-let chatStreaming = false;
-let streamHadText = false;
-let pendingSessionTitle = null;
+// All mutable chat state in one place.  Never add new globals for chat — put
+// them here so view switches can clear everything atomically.
+const chatState = {
+  viewSessionId:        null,  // session the user sees; null = new-chat view
+  runningSessionId:     null,  // key of the in-flight query; null = idle
+  es:                   null,  // live EventSource
+  esPending:            null,  // content to POST once ES connects
+  streaming:            false,
+  streamHadText:        false,
+  pendingTitle:         null,
+  sessionHasNewContent: new Set(),
+  render:               newRenderContext(), // cleared atomically on every view switch
+};
 
-// Session running in the background (has an in-flight query).
-let runningSessionId = null;
-// Sessions that completed while the user was viewing a different session.
-const sessionHasNewContent = new Set();
+// Per-view rendering context.  Replaced wholesale by switchView() so stale DOM
+// references never escape into a different session's view.
+function newRenderContext() {
+  return {
+    turnEl:          null,  // current assistant-turn wrapper <div>
+    turnRawText:     '',
+    msgEl:           null,  // current text container
+    textEl:          null,
+    rawText:         '',
+    thinkingEl:      null,
+    thinkingTextEl:  null,
+    thinkingRawText: '',
+    pendingToolUses: new Map(), // tool_use_id → DOM refs
+    thinkingTimer:   null,
+    thinkingStart:   null,
+  };
+}
 
-// Current assistant message container (text node inside it)
-let currentAssistantTurnEl = null;
-let currentAssistantTurnRawText = '';
-let currentAssistantMsgEl = null;
-let currentAssistantTextEl = null;
-let currentAssistantRawText = '';
+// Logical key for what the user is viewing ('__new__' = unsaved new session).
+function viewKey() { return chatState.viewSessionId ?? '__new__'; }
 
-// Thinking block state
-let currentThinkingEl = null;
-let currentThinkingTextEl = null;
-let currentThinkingRawText = '';
-let streamInThinkingBlock = false;
+// True when the running query belongs to the currently-visible session.
+function runningMatchesView() {
+  return chatState.runningSessionId !== null &&
+         chatState.runningSessionId === viewKey();
+}
 
-// Map tool_use_id → { resultEl, inner, resultHeader, resultIcon, resultLabel, resultBody, toolName }
-const pendingToolUses = new Map();
+// Switch the visible session and wipe all per-view render state atomically.
+function switchView(sessionId) {
+  chatState.viewSessionId = sessionId;
+  removeThinkingIndicator();
+  chatState.render = newRenderContext();
+}
 
 // ── Document attachments ──────────────────────────────────────────────────────
 
@@ -432,14 +452,14 @@ document.getElementById('chat-history-refresh-btn')?.addEventListener('click', l
 document.getElementById('chat-send-btn').addEventListener('click', () => {
   const input = document.getElementById('chat-input');
   const content = input.value.trim();
-  if (!content || runningSessionId === (chatSessionId ?? '__new__')) return;
+  if (!content || runningMatchesView()) return;
   input.value = '';
   autoResizeChatInput();
   sendQuery(content);
 });
 document.getElementById('chat-stop-btn').addEventListener('click', stopQuery);
 document.addEventListener('keydown', e => {
-  if (e.key === 'Escape' && chatStreaming && !document.querySelector('[id^="question-panel-"]')) stopQuery();
+  if (e.key === 'Escape' && chatState.streaming && !document.querySelector('[id^="question-panel-"]')) stopQuery();
 });
 document.getElementById('chat-input').addEventListener('keydown', e => {
   if (e.key === 'Enter' && !e.shiftKey) {
@@ -475,8 +495,8 @@ function switchToChat() {
   const sessionPanel = document.querySelector('.session-panel');
   sessionPanel.style.display = 'flex';
   // Restore chat title
-  if (chatSessionId) {
-    const activeItem = document.querySelector(`.session-item[data-id="${chatSessionId}"]`);
+  if (chatState.viewSessionId) {
+    const activeItem = document.querySelector(`.session-item[data-id="${chatState.viewSessionId}"]`);
     if (activeItem) {
       const title = activeItem.querySelector('.session-item-title')?.textContent || 'Chat';
       updateChatTitle(title);
@@ -487,7 +507,7 @@ function switchToChat() {
     updateChatTitle('New Chat');
   }
   loadChatHistory();
-  if (!chatEs) connectChatSse();
+  if (!chatState.es) connectChatSse();
 }
 
 function switchToShell() {
@@ -520,84 +540,84 @@ function switchToShell() {
 
 function connectChatSse() {
   console.log('[chat] connecting SSE', vmId);
-  chatEs = new EventSource('/sessions/' + vmId + '/chat-stream');
-  chatEs.onopen = () => {
+  chatState.es = new EventSource('/sessions/' + vmId + '/chat-stream');
+  chatState.es.onopen = () => {
     console.log('[chat] SSE open');
-    if (chatEsPending) {
-      const content = chatEsPending;
-      chatEsPending = null;
+    if (chatState.esPending) {
+      const content = chatState.esPending;
+      chatState.esPending = null;
       postQuery(content);
     }
   };
-  chatEs.onerror = (e) => {
-    console.log('[chat] SSE error  readyState=' + chatEs.readyState, e);
-    if (chatEs.readyState === EventSource.CLOSED) {
+  chatState.es.onerror = (e) => {
+    console.log('[chat] SSE error  readyState=' + chatState.es.readyState, e);
+    if (chatState.es.readyState === EventSource.CLOSED) {
       console.log('[chat] SSE closed');
-      chatEs = null;
-      runningSessionId = null;
-      chatStreaming = false;
-      streamHadText = false;
+      chatState.es = null;
+      chatState.runningSessionId = null;
+      chatState.streaming = false;
+      chatState.streamHadText = false;
       sealAssistantMessage();
       applyChatInputState();
     }
   };
-  chatEs.addEventListener('init', () => {
+  chatState.es.addEventListener('init', () => {
     console.log('[chat] event: init');
-    if (runningSessionId !== null && runningSessionId !== (chatSessionId ?? '__new__')) return;
+    if (!runningMatchesView()) return;
     showThinkingIndicator();
   });
-  chatEs.addEventListener('text_delta', e => {
+  chatState.es.addEventListener('text_delta', e => {
     const payload = JSON.parse(e.data);
     console.log('[chat] event: text_delta  len=' + payload.text.length);
-    if (runningSessionId !== null && runningSessionId !== (chatSessionId ?? '__new__')) return;
+    if (!runningMatchesView()) return;
     removeThinkingIndicator();
-    streamHadText = true;
+    chatState.streamHadText = true;
     appendToAssistantMessage(payload.text);
   });
-  chatEs.addEventListener('thinking_delta', e => {
+  chatState.es.addEventListener('thinking_delta', e => {
     const payload = JSON.parse(e.data);
     console.log('[chat] event: thinking_delta  len=' + payload.thinking.length);
-    if (runningSessionId !== null && runningSessionId !== (chatSessionId ?? '__new__')) return;
+    if (!runningMatchesView()) return;
     appendToThinkingBlock(payload.thinking);
   });
-  chatEs.addEventListener('tool_start', e => {
+  chatState.es.addEventListener('tool_start', e => {
     const payload = JSON.parse(e.data);
     console.log('[chat] event: tool_start  name=' + payload.name);
-    if (runningSessionId !== null && runningSessionId !== (chatSessionId ?? '__new__')) return;
+    if (!runningMatchesView()) return;
     // AskUserQuestion is handled interactively via the ask_user_question event.
     if (payload.name === 'AskUserQuestion') return;
     sealAssistantMessage();
     appendToolUseBlock(payload.id, payload.name, payload.input ?? {});
   });
-  chatEs.addEventListener('ask_user_question', e => {
+  chatState.es.addEventListener('ask_user_question', e => {
     const payload = JSON.parse(e.data);
     console.log('[chat] event: ask_user_question  request_id=' + payload.request_id);
-    if (runningSessionId !== null && runningSessionId !== (chatSessionId ?? '__new__')) return;
+    if (!runningMatchesView()) return;
     removeThinkingIndicator();
     sealAssistantMessage();
     renderQuestionPanel(payload.request_id, payload.questions || []);
   });
-  chatEs.addEventListener('tool_result', e => {
+  chatState.es.addEventListener('tool_result', e => {
     const payload = JSON.parse(e.data);
     console.log('[chat] event: tool_result  tool_use_id=' + payload.tool_use_id + '  is_error=' + payload.is_error);
-    if (runningSessionId !== null && runningSessionId !== (chatSessionId ?? '__new__')) return;
+    if (!runningMatchesView()) return;
     fillToolResult(payload.tool_use_id, payload.content, payload.is_error);
   });
-  chatEs.addEventListener('done', e => {
+  chatState.es.addEventListener('done', e => {
     const payload = JSON.parse(e.data);
     console.log('[chat] event: done  session_id=' + payload.session_id);
-    const completedSessionId = runningSessionId;
-    runningSessionId = null;
-    streamHadText = false;
-    chatStreaming = false;
-    const currentViewId = chatSessionId ?? '__new__';
-    if (completedSessionId !== null && completedSessionId !== currentViewId) {
+    const completedSessionId = chatState.runningSessionId;
+    chatState.runningSessionId = null;
+    chatState.streamHadText = false;
+    chatState.streaming = false;
+    const currentViewKey = viewKey();
+    if (completedSessionId !== null && completedSessionId !== currentViewKey) {
       // Completed in background — mark it and refresh the list.
-      sessionHasNewContent.add(completedSessionId);
+      chatState.sessionHasNewContent.add(completedSessionId);
       loadChatHistory();
     } else {
       // Completed while viewing this session — normal finish.
-      if (payload.session_id) chatSessionId = payload.session_id;
+      if (payload.session_id) chatState.viewSessionId = payload.session_id;
       sealAssistantTurn();
       removeThinkingIndicator();
       scrollChatToBottom();
@@ -605,15 +625,15 @@ function connectChatSse() {
     }
     applyChatInputState();
   });
-  chatEs.addEventListener('error_event', e => {
+  chatState.es.addEventListener('error_event', e => {
     const payload = JSON.parse(e.data);
     console.log('[chat] event: error_event  message=' + (payload.message ?? String(payload)));
-    const completedSessionId = runningSessionId;
-    runningSessionId = null;
-    streamHadText = false;
-    chatStreaming = false;
-    const currentViewId = chatSessionId ?? '__new__';
-    if (completedSessionId !== null && completedSessionId !== currentViewId) {
+    const completedSessionId = chatState.runningSessionId;
+    chatState.runningSessionId = null;
+    chatState.streamHadText = false;
+    chatState.streaming = false;
+    const currentViewKey = viewKey();
+    if (completedSessionId !== null && completedSessionId !== currentViewKey) {
       loadChatHistory();
     } else {
       removeThinkingIndicator();
@@ -626,17 +646,17 @@ function connectChatSse() {
 }
 
 function prepareForQuery(content) {
-  runningSessionId = chatSessionId ?? '__new__';
+  chatState.runningSessionId = viewKey();
   appendUserMessage(content);
   sealAssistantTurn();
-  streamHadText = false;
-  chatStreaming = true;
+  chatState.streamHadText = false;
+  chatState.streaming = true;
   lockChatInput();
   showThinkingIndicator();
 }
 
 function stopQuery() {
-  if (!chatStreaming) return;
+  if (!chatState.streaming) return;
   fetch('/sessions/' + vmId + '/chat-stop', {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
@@ -650,33 +670,33 @@ function sendQuery(content) {
     chatAttachments = [];
     renderAttachmentChips();
   }
-  if (chatSessionId === null) {
-    pendingSessionTitle = content.slice(0, 60);
+  if (chatState.viewSessionId === null) {
+    chatState.pendingTitle = content.slice(0, 60);
   }
   prepareForQuery(content);
-  if (!chatEs || chatEs.readyState === EventSource.CONNECTING) {
-    console.log('[chat] SSE not ready (readyState=' + (chatEs?.readyState ?? 'null') + '), queuing query');
-    chatEsPending = fullContent;
-    if (!chatEs) connectChatSse();
+  if (!chatState.es || chatState.es.readyState === EventSource.CONNECTING) {
+    console.log('[chat] SSE not ready (readyState=' + (chatState.es?.readyState ?? 'null') + '), queuing query');
+    chatState.esPending = fullContent;
+    if (!chatState.es) connectChatSse();
     return;
   }
   postQuery(fullContent);
 }
 
 function postQuery(content) {
-  console.log('[chat] posting query  content_len=' + content.length + '  session_id=' + chatSessionId);
+  console.log('[chat] posting query  content_len=' + content.length + '  session_id=' + chatState.viewSessionId);
   fetch('/sessions/' + vmId + '/chat', {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ content, session_id: chatSessionId, csrf_token: fmCsrfToken }),
+    body: JSON.stringify({ content, session_id: chatState.viewSessionId, csrf_token: fmCsrfToken }),
   }).then(res => {
     console.log('[chat] query response  status=' + res.status);
     if (!res.ok) {
       res.text().then(msg => {
         sealAssistantMessage();
         appendErrorMessage(msg || `Server error ${res.status}`);
-        runningSessionId = null;
-        chatStreaming = false;
+        chatState.runningSessionId = null;
+        chatState.streaming = false;
         applyChatInputState();
       });
     }
@@ -684,8 +704,8 @@ function postQuery(content) {
     console.log('[chat] query fetch error:', err);
     sealAssistantMessage();
     appendErrorMessage('Failed to send message: ' + err.message);
-    runningSessionId = null;
-    chatStreaming = false;
+    chatState.runningSessionId = null;
+    chatState.streaming = false;
     applyChatInputState();
   });
 }
@@ -705,7 +725,7 @@ function appendUserMessage(content) {
 }
 
 function ensureAssistantTurn() {
-  if (currentAssistantTurnEl) return;
+  if (chatState.render.turnEl) return;
   const messages = document.getElementById('chat-messages');
   const turn = document.createElement('div');
   turn.className = 'assistant-turn';
@@ -723,56 +743,56 @@ function ensureAssistantTurn() {
   turn.appendChild(header);
 
   messages.appendChild(turn);
-  currentAssistantTurnEl = turn;
-  currentAssistantTurnRawText = '';
+  chatState.render.turnEl = turn;
+  chatState.render.turnRawText = '';
 }
 
 function ensureAssistantMessage() {
-  if (currentAssistantMsgEl) return;
+  if (chatState.render.msgEl) return;
   ensureAssistantTurn();
   const textEl = document.createElement('div');
   textEl.className = 'text-sm pl-8 whitespace-pre-wrap break-words';
-  currentAssistantTurnEl.appendChild(textEl);
-  currentAssistantMsgEl = textEl;
-  currentAssistantTextEl = textEl;
+  chatState.render.turnEl.appendChild(textEl);
+  chatState.render.msgEl = textEl;
+  chatState.render.textEl = textEl;
 }
 
 function appendToAssistantMessage(text) {
   if (!text) return;
   ensureAssistantMessage();
-  currentAssistantRawText += text;
-  currentAssistantTurnRawText += text;
-  currentAssistantTextEl.className = 'markdown-body text-sm pl-8';
-  currentAssistantTextEl.innerHTML = marked.parse(currentAssistantRawText);
-  injectCodeCopyButtons(currentAssistantTextEl);
+  chatState.render.rawText += text;
+  chatState.render.turnRawText += text;
+  chatState.render.textEl.className = 'markdown-body text-sm pl-8';
+  chatState.render.textEl.innerHTML = marked.parse(chatState.render.rawText);
+  injectCodeCopyButtons(chatState.render.textEl);
   scrollChatToBottom();
 }
 
 function sealAssistantMessage() {
-  currentAssistantMsgEl = null;
-  currentAssistantTextEl = null;
-  currentAssistantRawText = '';
+  chatState.render.msgEl = null;
+  chatState.render.textEl = null;
+  chatState.render.rawText = '';
   sealThinkingBlock();
 }
 
 function sealAssistantTurn() {
-  const rawText = currentAssistantTurnRawText;
+  const rawText = chatState.render.turnRawText;
   sealAssistantMessage();
-  if (currentAssistantTurnEl && rawText) {
-    attachMessageCopyButton(currentAssistantTurnEl, rawText);
+  if (chatState.render.turnEl && rawText) {
+    attachMessageCopyButton(chatState.render.turnEl, rawText);
   }
-  currentAssistantTurnEl = null;
-  currentAssistantTurnRawText = '';
+  chatState.render.turnEl = null;
+  chatState.render.turnRawText = '';
 }
 
 function sealThinkingBlock() {
-  currentThinkingEl = null;
-  currentThinkingTextEl = null;
-  currentThinkingRawText = '';
+  chatState.render.thinkingEl = null;
+  chatState.render.thinkingTextEl = null;
+  chatState.render.thinkingRawText = '';
 }
 
 function ensureThinkingBlock() {
-  if (currentThinkingEl) return;
+  if (chatState.render.thinkingEl) return;
   ensureAssistantTurn();
   const details = document.createElement('details');
   details.className = 'thinking-block';
@@ -789,18 +809,18 @@ function ensureThinkingBlock() {
   const textEl = document.createElement('div');
   textEl.className = 'thinking-text';
   details.appendChild(textEl);
-  currentAssistantTurnEl.appendChild(details);
+  chatState.render.turnEl.appendChild(details);
 
-  currentThinkingEl = details;
-  currentThinkingTextEl = textEl;
-  currentThinkingRawText = '';
+  chatState.render.thinkingEl = details;
+  chatState.render.thinkingTextEl = textEl;
+  chatState.render.thinkingRawText = '';
 }
 
 function appendToThinkingBlock(text) {
   if (!text) return;
   ensureThinkingBlock();
-  currentThinkingRawText += text;
-  currentThinkingTextEl.textContent = currentThinkingRawText;
+  chatState.render.thinkingRawText += text;
+  chatState.render.thinkingTextEl.textContent = chatState.render.thinkingRawText;
 }
 
 function attachMessageCopyButton(turnEl, rawText) {
@@ -1027,9 +1047,9 @@ function appendToolUseBlock(toolId, toolName, input) {
 
   wrapper.appendChild(inner);
   wrapper.appendChild(resultEl);
-  currentAssistantTurnEl.appendChild(wrapper);
+  chatState.render.turnEl.appendChild(wrapper);
 
-  pendingToolUses.set(toolId, { resultEl, inner, resultHeader, resultIcon, resultLabel, resultBody, toolName });
+  chatState.render.pendingToolUses.set(toolId, { resultEl, inner, resultHeader, resultIcon, resultLabel, resultBody, toolName });
   scrollChatToBottom();
 }
 
@@ -1265,9 +1285,9 @@ function buildInlineCopyBtn(text) {
 // ── Tool result rendering ─────────────────────────────────────────────────────
 
 function fillToolResult(toolId, content, isError) {
-  const entry = pendingToolUses.get(toolId);
+  const entry = chatState.render.pendingToolUses.get(toolId);
   if (!entry) return;
-  pendingToolUses.delete(toolId);
+  chatState.render.pendingToolUses.delete(toolId);
   const { resultEl, inner, resultHeader, resultIcon, resultLabel, resultBody, toolName } = entry;
 
   const category = getToolCategory(toolName);
@@ -1367,9 +1387,6 @@ function appendErrorMessage(msg) {
 
 // ── Thinking indicator ────────────────────────────────────────────────────────
 
-let thinkingTimerInterval = null;
-let thinkingStartTime = null;
-
 function showThinkingIndicator() {
   if (document.getElementById('chat-thinking')) return;
   const messages = document.getElementById('chat-messages');
@@ -1395,18 +1412,18 @@ function showThinkingIndicator() {
   row.appendChild(dots);
   row.appendChild(timerEl);
   messages.appendChild(row);
-  thinkingStartTime = Date.now();
-  thinkingTimerInterval = setInterval(() => {
+  chatState.render.thinkingStart = Date.now();
+  chatState.render.thinkingTimer = setInterval(() => {
     const el = document.getElementById('chat-thinking-timer');
-    if (el) el.textContent = Math.floor((Date.now() - thinkingStartTime) / 1000) + 's';
+    if (el) el.textContent = Math.floor((Date.now() - chatState.render.thinkingStart) / 1000) + 's';
   }, 1000);
   scrollChatToBottom();
 }
 
 function removeThinkingIndicator() {
-  clearInterval(thinkingTimerInterval);
-  thinkingTimerInterval = null;
-  thinkingStartTime = null;
+  clearInterval(chatState.render.thinkingTimer);
+  chatState.render.thinkingTimer = null;
+  chatState.render.thinkingStart = null;
   document.getElementById('chat-thinking')?.remove();
 }
 
@@ -1427,7 +1444,7 @@ function applyChatInputState() {
   const stopBtn = document.getElementById('chat-stop-btn');
   const sendBtn = document.getElementById('chat-send-btn');
   const input = document.getElementById('chat-input');
-  if (runningSessionId !== null && runningSessionId === (chatSessionId ?? '__new__')) {
+  if (runningMatchesView()) {
     // Viewing the running session — show the stop button.
     stopBtn.classList.remove('hidden');
     sendBtn.classList.add('hidden');
@@ -1477,9 +1494,9 @@ function renderChatHistory(chatSessions) {
 }
 
 function buildChatSessionItem(chatSession) {
-  const isActive = chatSession.session_id === chatSessionId;
-  const isRunning = chatSession.session_id === runningSessionId;
-  const hasNew = sessionHasNewContent.has(chatSession.session_id);
+  const isActive = chatSession.session_id === chatState.viewSessionId;
+  const isRunning = chatSession.session_id === chatState.runningSessionId;
+  const hasNew = chatState.sessionHasNewContent.has(chatSession.session_id);
   const item = document.createElement('div');
   item.className = 'session-item' + (isActive ? ' active' : '');
   item.dataset.id = chatSession.session_id;
@@ -1537,7 +1554,7 @@ async function deleteChatSession(sessionId, projectDir, itemEl) {
     });
     if (!res.ok) throw new Error('Delete failed');
     itemEl.remove();
-    if (sessionId === chatSessionId) startNewSession();
+    if (sessionId === chatState.viewSessionId) startNewSession();
   } catch {
     // leave the item in place if deletion failed
   }
@@ -1552,10 +1569,7 @@ function formatRelativeTime(isoString) {
 }
 
 function startNewSession() {
-  chatSessionId = null;
-  pendingToolUses.clear();
-  streamInThinkingBlock = false;
-  sealThinkingBlock();
+  switchView(null);
   chatAttachments = [];
   renderAttachmentChips();
   document.getElementById('chat-messages').innerHTML = '';
@@ -1570,11 +1584,8 @@ function updateChatTitle(title) {
 }
 
 function resumeSession(sessionId, projectDir, title) {
-  sessionHasNewContent.delete(sessionId);
-  chatSessionId = sessionId;
-  pendingToolUses.clear();
-  streamInThinkingBlock = false;
-  sealThinkingBlock();
+  chatState.sessionHasNewContent.delete(sessionId);
+  switchView(sessionId);
   chatAttachments = [];
   renderAttachmentChips();
   document.getElementById('chat-messages').innerHTML = '';

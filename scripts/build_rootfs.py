@@ -33,13 +33,13 @@ from pathlib import Path
 
 # ── constants ────────────────────────────────────────────────────────────────
 
-S3_BUCKET   = "https://s3.amazonaws.com/spec.ccfc.min"
+S3_BUCKET = "https://s3.amazonaws.com/spec.ccfc.min"
 S3_ARTIFACTS = f"{S3_BUCKET}/firecracker-ci"
 INSTALL_DIR = Path("/var/lib/fc")
-AGENT_DIR    = Path(__file__).parent.parent / "rootfs" / "agent"
-AGENT_PY     = AGENT_DIR / "agent.py"
-CONNECTOR_PY = AGENT_DIR / "connector.py"
-SETTINGS_PY  = AGENT_DIR / "settings.py"
+ROOTFS_DIR = Path(__file__).parent.parent / "rootfs"
+AGENT_PY = ROOTFS_DIR / "agent.py"
+CONNECTOR_PY = ROOTFS_DIR / "connector.py"
+SETTINGS_PY = ROOTFS_DIR / "settings.py"
 
 CLAUDE_SETTINGS = """\
 {
@@ -57,8 +57,8 @@ CLAUDE_SETTINGS = """\
 CHROOT_ROOT_SCRIPT = """\
 set -e
 export DEBIAN_FRONTEND=noninteractive
-apt-get update -qq
-apt-get install -y -qq curl logrotate
+apt-get update
+apt-get install -y curl logrotate
 curl -LsSf https://astral.sh/uv/install.sh | env UV_INSTALL_DIR=/usr/local/bin sh
 """
 
@@ -72,20 +72,6 @@ LOGROTATE_CONF = """\
 }
 """
 
-IMDS_ROUTE_UNIT = """\
-[Unit]
-Description=Add IMDS route for Firecracker MMDS
-DefaultDependencies=no
-After=network-pre.target
-
-[Service]
-Type=oneshot
-ExecStart=/usr/sbin/ip route add 169.254.169.254 dev eth0
-RemainAfterExit=yes
-
-[Install]
-WantedBy=network.target
-"""
 
 # Runs as the ubuntu user inside the chroot.
 CHROOT_USER_SCRIPT = """\
@@ -95,6 +81,7 @@ echo 'export PATH="$HOME/.local/bin:$PATH"' >> ~/.bashrc
 """
 
 # ── shell helpers ─────────────────────────────────────────────────────────────
+
 
 def run(cmd: list, **kwargs) -> None:
     print(f"+ {' '.join(str(c) for c in cmd)}")
@@ -113,6 +100,7 @@ def chroot_as_ubuntu(rootfs: Path, script: str) -> None:
 
 
 # ── version discovery ─────────────────────────────────────────────────────────
+
 
 def fetch_arch() -> str:
     return subprocess.check_output(["uname", "-m"], text=True).strip()
@@ -137,8 +125,8 @@ def list_s3_keys(fc_version: str, arch: str, prefix: str) -> list[str]:
 
 def is_versioned_kernel(s3_key: str) -> bool:
     """Return True for plain version kernels like vmlinux-6.1.155 (not vmlinux-acpi-*)."""
-    name = Path(s3_key).name          # e.g. "vmlinux-6.1.155"
-    version = name.split("-", 1)[1]   # e.g. "6.1.155"
+    name = Path(s3_key).name  # e.g. "vmlinux-6.1.155"
+    version = name.split("-", 1)[1]  # e.g. "6.1.155"
     return name.count("-") == 1 and all(part.isdigit() for part in version.split("."))
 
 
@@ -160,19 +148,22 @@ def fetch_latest_ubuntu_key(fc_version: str, arch: str) -> str:
     squashfs_keys = [k for k in all_keys if k.endswith(".squashfs")]
     if not squashfs_keys:
         sys.exit(f"error: no Ubuntu squashfs found for Firecracker {fc_version}/{arch}")
-    return sorted(squashfs_keys)[-1]  # e.g. "firecracker-ci/v1.14/x86_64/ubuntu-24.04.squashfs"
+    return sorted(squashfs_keys)[
+        -1
+    ]  # e.g. "firecracker-ci/v1.14/x86_64/ubuntu-24.04.squashfs"
 
 
 # ── build steps ───────────────────────────────────────────────────────────────
 
+
 def download_artifacts(
     workdir: Path, fc_version: str, arch: str, kernel_key: str, ubuntu_key: str
 ) -> tuple[Path, Path]:
-    base_url   = f"{S3_ARTIFACTS}/{fc_version}/{arch}"
-    kernel_name = Path(kernel_key).name   # e.g. "vmlinux-6.1.155"
-    ubuntu_name = Path(ubuntu_key).stem   # e.g. "ubuntu-24.04"
+    base_url = f"{S3_ARTIFACTS}/{fc_version}/{arch}"
+    kernel_name = Path(kernel_key).name  # e.g. "vmlinux-6.1.155"
+    ubuntu_name = Path(ubuntu_key).stem  # e.g. "ubuntu-24.04"
 
-    kernel   = workdir / kernel_name
+    kernel = workdir / kernel_name
     squashfs = workdir / f"{ubuntu_name}.squashfs.upstream"
 
     if not kernel.exists():
@@ -188,8 +179,8 @@ def unpack_squashfs(workdir: Path, squashfs: Path) -> Path:
     if rootfs.exists():
         run(["rm", "-rf", str(rootfs)])
     run(["unsquashfs", "-d", str(rootfs), str(squashfs)])
-    run(["chown", "-R", "root:root",     str(rootfs)])
-    run(["chown", "-R", "1000:1000",     str(rootfs / "home/ubuntu")])
+    run(["chown", "-R", "root:root", str(rootfs)])
+    run(["chown", "-R", "1000:1000", str(rootfs / "home/ubuntu")])
     return rootfs
 
 
@@ -199,10 +190,10 @@ def setup_client_ssh_key(workdir: Path, rootfs: Path) -> Path:
     Private key → returned (installed to /var/lib/fc/ later).
     Public key  → baked into the rootfs as ubuntu's authorized_keys.
     """
-    private_key    = workdir / "id_ed25519"
-    public_key     = workdir / "id_ed25519.pub"
+    private_key = workdir / "id_ed25519"
+    public_key = workdir / "id_ed25519.pub"
     authorized_keys = rootfs / "home/ubuntu/.ssh/authorized_keys"
-    ssh_dir        = rootfs / "home/ubuntu/.ssh"
+    ssh_dir = rootfs / "home/ubuntu/.ssh"
 
     private_key.unlink(missing_ok=True)
     public_key.unlink(missing_ok=True)
@@ -225,8 +216,8 @@ def setup_host_ssh_key(workdir: Path, rootfs: Path) -> Path:
                   can verify the VM and prevent MITM on the TAP network).
     """
     private_key = workdir / "ssh_host_ed25519_key"
-    public_key  = workdir / "ssh_host_ed25519_key.pub"
-    etc_ssh     = rootfs  / "etc/ssh"
+    public_key = workdir / "ssh_host_ed25519_key.pub"
+    etc_ssh = rootfs / "etc/ssh"
 
     private_key.unlink(missing_ok=True)
     public_key.unlink(missing_ok=True)
@@ -234,7 +225,7 @@ def setup_host_ssh_key(workdir: Path, rootfs: Path) -> Path:
 
     etc_ssh.mkdir(parents=True, exist_ok=True)
     shutil.copy(private_key, etc_ssh / "ssh_host_ed25519_key")
-    shutil.copy(public_key,  etc_ssh / "ssh_host_ed25519_key.pub")
+    shutil.copy(public_key, etc_ssh / "ssh_host_ed25519_key.pub")
     run(["chmod", "600", str(etc_ssh / "ssh_host_ed25519_key")])
 
     return public_key
@@ -245,11 +236,6 @@ def prepare_rootfs(rootfs: Path) -> None:
     (rootfs / "var/cache/apt/archives/partial").mkdir(parents=True, exist_ok=True)
     (rootfs / "var/log/apt").mkdir(parents=True, exist_ok=True)
     (rootfs / "etc/logrotate.d/agent").write_text(LOGROTATE_CONF)
-    systemd_dir = rootfs / "etc/systemd/system"
-    (systemd_dir / "imds-route.service").write_text(IMDS_ROUTE_UNIT)
-    wants_dir = systemd_dir / "network.target.wants"
-    wants_dir.mkdir(exist_ok=True)
-    (wants_dir / "imds-route.service").symlink_to("/etc/systemd/system/imds-route.service")
 
 
 def mount_binds(rootfs: Path) -> list[Path]:
@@ -274,7 +260,9 @@ def unmount_binds(mounts: list[Path]) -> None:
     # and mask systemd-resolved so it cannot recreate the symlink at boot.
     resolv_conf = mounts[-1]
     resolv_conf.write_text("nameserver 1.1.1.1\nnameserver 1.0.0.1\n")
-    resolved_mask = resolv_conf.parent.parent / "etc/systemd/system/systemd-resolved.service"
+    resolved_mask = (
+        resolv_conf.parent.parent / "etc/systemd/system/systemd-resolved.service"
+    )
     if not resolved_mask.exists():
         resolved_mask.symlink_to("/dev/null")
 
@@ -290,9 +278,9 @@ def install_claude_code(rootfs: Path) -> None:
 def install_agent(rootfs: Path) -> None:
     opt = rootfs / "opt"
     opt.mkdir(exist_ok=True)
-    shutil.copy(str(AGENT_PY),     str(opt / "agent.py"))
+    shutil.copy(str(AGENT_PY), str(opt / "agent.py"))
     shutil.copy(str(CONNECTOR_PY), str(opt / "connector.py"))
-    shutil.copy(str(SETTINGS_PY),  str(opt / "settings.py"))
+    shutil.copy(str(SETTINGS_PY), str(opt / "settings.py"))
     run(["chown", "-R", "1000:1000", str(opt)])
 
     # Pre-warm the uv package cache as the ubuntu user so the first VM startup
@@ -301,9 +289,16 @@ def install_agent(rootfs: Path) -> None:
     # install from the cache (no network needed).
     # Non-fatal: the agent works without the cache; deps install on first run.
     result = subprocess.run(
-        ["chroot", str(rootfs), "su", "-", "ubuntu", "-c",
-         "bash -lc '/usr/local/bin/uv run --with claude-agent-sdk"
-         " python3 -c \"import claude_agent_sdk\"'"],
+        [
+            "chroot",
+            str(rootfs),
+            "su",
+            "-",
+            "ubuntu",
+            "-c",
+            "bash -lc '/usr/local/bin/uv run --with claude-agent-sdk"
+            ' python3 -c "import claude_agent_sdk"\'',
+        ],
     )
     if result.returncode != 0:
         print("warning: uv prewarm failed (agent will install deps on first run)")
@@ -334,14 +329,14 @@ def install_artifacts(
 ) -> tuple[Path, Path, Path, Path]:
     INSTALL_DIR.mkdir(parents=True, exist_ok=True)
 
-    kernel_dest       = INSTALL_DIR / kernel.name
-    ext4_dest         = INSTALL_DIR / ext4.name
-    client_key_dest   = INSTALL_DIR / f"{ubuntu_name}.id_ed25519"
+    kernel_dest = INSTALL_DIR / kernel.name
+    ext4_dest = INSTALL_DIR / ext4.name
+    client_key_dest = INSTALL_DIR / f"{ubuntu_name}.id_ed25519"
     host_key_pub_dest = INSTALL_DIR / "vm_host_key.pub"
 
-    shutil.move(str(kernel),          str(kernel_dest))
-    shutil.move(str(ext4),            str(ext4_dest))
-    shutil.move(str(client_ssh_key),  str(client_key_dest))
+    shutil.move(str(kernel), str(kernel_dest))
+    shutil.move(str(ext4), str(ext4_dest))
+    shutil.move(str(client_ssh_key), str(client_key_dest))
     shutil.copy(str(host_ssh_key_pub), str(host_key_pub_dest))
 
     run(["chown", "-R", "ubuntu:ubuntu", str(INSTALL_DIR)])
@@ -352,6 +347,7 @@ def install_artifacts(
 
 # ── smoke test ────────────────────────────────────────────────────────────────
 
+
 def smoke_test(kernel: Path, ext4: Path, client_key: Path, host_key_pub: Path) -> None:
     """Boot a temporary Firecracker VM and verify SSH authentication works."""
     if not shutil.which("firecracker"):
@@ -359,8 +355,8 @@ def smoke_test(kernel: Path, ext4: Path, client_key: Path, host_key_pub: Path) -
         return
 
     print("\nRunning smoke test...")
-    tap      = "tap-fctest"
-    host_ip  = "10.123.0.1"
+    tap = "tap-fctest"
+    host_ip = "10.123.0.1"
     guest_ip = "10.123.0.2"
 
     with tempfile.TemporaryDirectory(prefix="fc-test-") as tmp:
@@ -385,8 +381,8 @@ def smoke_test(kernel: Path, ext4: Path, client_key: Path, host_key_pub: Path) -
 def setup_test_tap(tap: str, host_ip: str) -> None:
     subprocess.run(["ip", "tuntap", "del", tap, "mode", "tap"], check=False)
     run(["ip", "tuntap", "add", tap, "mode", "tap"])
-    run(["ip", "addr",   "add", f"{host_ip}/30", "dev", tap])
-    run(["ip", "link",   "set", tap, "up"])
+    run(["ip", "addr", "add", f"{host_ip}/30", "dev", tap])
+    run(["ip", "link", "set", tap, "up"])
 
 
 def teardown_test_tap(tap: str) -> None:
@@ -412,21 +408,36 @@ def boot_vm(
         "console=ttyS0 reboot=k panic=1 pci=off "
         f"ip={guest_ip}::{host_ip}:255.255.255.252::eth0:none"
     )
-    fc_api(socket_path, "PUT", "/boot-source", {
-        "kernel_image_path": str(kernel),
-        "boot_args": boot_args,
-    })
-    fc_api(socket_path, "PUT", "/drives/rootfs", {
-        "drive_id":       "rootfs",
-        "path_on_host":   str(rootfs),
-        "is_root_device": True,
-        "is_read_only":   False,
-    })
-    fc_api(socket_path, "PUT", "/network-interfaces/eth0", {
-        "iface_id":    "eth0",
-        "guest_mac":   "AA:FC:00:00:00:01",
-        "host_dev_name": tap,
-    })
+    fc_api(
+        socket_path,
+        "PUT",
+        "/boot-source",
+        {
+            "kernel_image_path": str(kernel),
+            "boot_args": boot_args,
+        },
+    )
+    fc_api(
+        socket_path,
+        "PUT",
+        "/drives/rootfs",
+        {
+            "drive_id": "rootfs",
+            "path_on_host": str(rootfs),
+            "is_root_device": True,
+            "is_read_only": False,
+        },
+    )
+    fc_api(
+        socket_path,
+        "PUT",
+        "/network-interfaces/eth0",
+        {
+            "iface_id": "eth0",
+            "guest_mac": "AA:FC:00:00:00:01",
+            "host_dev_name": tap,
+        },
+    )
     fc_api(socket_path, "PUT", "/actions", {"action_type": "InstanceStart"})
     return fc_proc
 
@@ -448,8 +459,12 @@ def verify_ssh(guest_ip: str, client_key: Path, host_key_pub: Path) -> None:
     known_hosts_line = f"{guest_ip} {host_key_pub.read_text().strip()}\n"
 
     print(f"  VM started, waiting for SSH at {guest_ip}...")
-    print(f"  To test manually: ssh -i {client_key} -o UserKnownHostsFile={host_key_pub} -o StrictHostKeyChecking=yes ubuntu@{guest_ip}")
-    with tempfile.NamedTemporaryFile(mode="w", suffix=".known_hosts", delete=False) as kh:
+    print(
+        f"  To test manually: ssh -i {client_key} -o UserKnownHostsFile={host_key_pub} -o StrictHostKeyChecking=yes ubuntu@{guest_ip}"
+    )
+    with tempfile.NamedTemporaryFile(
+        mode="w", suffix=".known_hosts", delete=False
+    ) as kh:
         kh.write(known_hosts_line)
         known_hosts_path = kh.name
 
@@ -457,13 +472,21 @@ def verify_ssh(guest_ip: str, client_key: Path, host_key_pub: Path) -> None:
         for _ in range(60):
             time.sleep(1)
             result = subprocess.run(
-                ["ssh",
-                 "-i", str(client_key),
-                 "-o", f"UserKnownHostsFile={known_hosts_path}",
-                 "-o", "StrictHostKeyChecking=yes",
-                 "-o", "ConnectTimeout=2",
-                 "-o", "BatchMode=yes",
-                 f"ubuntu@{guest_ip}", "echo ok"],
+                [
+                    "ssh",
+                    "-i",
+                    str(client_key),
+                    "-o",
+                    f"UserKnownHostsFile={known_hosts_path}",
+                    "-o",
+                    "StrictHostKeyChecking=yes",
+                    "-o",
+                    "ConnectTimeout=2",
+                    "-o",
+                    "BatchMode=yes",
+                    f"ubuntu@{guest_ip}",
+                    "echo ok",
+                ],
                 capture_output=True,
                 text=True,
             )
@@ -493,6 +516,7 @@ def fc_api(socket_path: Path, method: str, path: str, body: dict) -> None:
 
 # ── main ──────────────────────────────────────────────────────────────────────
 
+
 def main() -> None:
     if sys.platform != "linux":
         sys.exit("error: rootfs build requires Linux (for chroot and bind mounts)")
@@ -519,16 +543,20 @@ def main() -> None:
     print(f"Architecture: {arch}")
 
     print("Fetching latest versions...")
-    fc_version  = fetch_latest_fc_version()
-    kernel_key  = fetch_latest_kernel_key(fc_version, arch)
-    ubuntu_key  = fetch_latest_ubuntu_key(fc_version, arch)
-    ubuntu_name = Path(ubuntu_key).stem   # e.g. "ubuntu-24.04"
-    print(f"Firecracker {fc_version}, kernel {Path(kernel_key).name}, rootfs {ubuntu_name}")
+    fc_version = fetch_latest_fc_version()
+    kernel_key = fetch_latest_kernel_key(fc_version, arch)
+    ubuntu_key = fetch_latest_ubuntu_key(fc_version, arch)
+    ubuntu_name = Path(ubuntu_key).stem  # e.g. "ubuntu-24.04"
+    print(
+        f"Firecracker {fc_version}, kernel {Path(kernel_key).name}, rootfs {ubuntu_name}"
+    )
 
-    kernel, squashfs = download_artifacts(workdir, fc_version, arch, kernel_key, ubuntu_key)
+    kernel, squashfs = download_artifacts(
+        workdir, fc_version, arch, kernel_key, ubuntu_key
+    )
 
-    rootfs           = unpack_squashfs(workdir, squashfs)
-    client_ssh_key   = setup_client_ssh_key(workdir, rootfs)
+    rootfs = unpack_squashfs(workdir, squashfs)
+    client_ssh_key = setup_client_ssh_key(workdir, rootfs)
     host_ssh_key_pub = setup_host_ssh_key(workdir, rootfs)
     prepare_rootfs(rootfs)
 

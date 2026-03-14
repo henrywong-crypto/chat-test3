@@ -28,7 +28,9 @@ async def connect_to_agent() -> tuple[asyncio.StreamReader, asyncio.StreamWriter
     raise RuntimeError("agent daemon failed to start after 30s")
 
 
-async def pipe_stdin_to_socket(stdin_reader: asyncio.StreamReader, writer: asyncio.StreamWriter) -> None:
+async def pipe_stdin_to_socket(
+    stdin_reader: asyncio.StreamReader, writer: asyncio.StreamWriter
+) -> None:
     while True:
         data = await stdin_reader.read(4096)
         if not data:
