@@ -145,8 +145,8 @@ async def run_query(content: str, session_id):
         tool_input = get_field(input_data, 'tool_input') or {}
         questions = tool_input.get('questions', []) if isinstance(tool_input, dict) else []
         _pending_question = asyncio.get_running_loop().create_future()
-        _pending_question_data = {'request_id': tool_use_id, 'questions': questions}
-        emit_sse('ask_user_question', {'request_id': tool_use_id, 'questions': questions})
+        _pending_question_data = {'request_id': tool_use_id, 'session_id': captured_session_id, 'questions': questions}
+        emit_sse('ask_user_question', {'request_id': tool_use_id, 'session_id': captured_session_id, 'questions': questions})
         log(f"PreToolUse AskUserQuestion: waiting for answer")
         answers = await _pending_question
         _pending_question = None

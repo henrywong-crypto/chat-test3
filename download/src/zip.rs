@@ -24,8 +24,6 @@ use common::validate_within_dir;
 const MAX_DOWNLOAD_BYTES: usize = 100 * 1024 * 1024; // 100 MB
 const MAX_ZIP_DEPTH: usize = 10;
 const FILE_CHUNK_SIZE: usize = 64 * 1024; // 64 KB
-// Timeout on sends from the SFTP reader to the zip writer. The zip writer runs in
-// spawn_blocking and should consume file events almost immediately; 30 s is ample.
 const FILE_EVENT_SEND_TIMEOUT_SECS: u64 = 30;
 
 enum FileEvent {
@@ -66,19 +64,18 @@ async fn collect_zip_files(
     let mut total_bytes: usize = 0;
     let mut dirs_to_visit: Vec<(PathBuf, usize)> = vec![(dir_path.clone(), 0)];
     while let Some((dir, depth)) = dirs_to_visit.pop() {
-        let read_dir = match dir.to_str() {
-            Some(s) => match sftp.read_dir(s).await {
-                Ok(entries) => entries,
-                Err(_) => return,
-            },
-            None => return,
+        let Some(dir_str) = dir.to_str() else { return };
+        let read_dir = match sftp.read_dir(dir_str).await {
+            Ok(entries) => entries,
+            Err(_) => return,
         };
         for entry in read_dir {
-            let name = entry.file_name();
-            if name == "." || name == ".." {
+            let file_name = entry.file_name();
+            let name = Path::new(&file_name);
+            if name == Path::new(".") || name == Path::new("..") {
                 continue;
             }
-            let child_path = dir.join(&name);
+            let child_path = dir.join(name);
             if entry.file_type().is_symlink() {
                 continue;
             }
