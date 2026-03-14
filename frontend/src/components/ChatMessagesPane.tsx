@@ -67,7 +67,7 @@ export default function ChatMessagesPane({ messages, isLoading }: ChatMessagesPa
         ref={scrollRef}
         onWheel={handleWheel}
         onScroll={handleScroll}
-        className="h-full space-y-3 overflow-y-auto px-0 py-3 sm:space-y-4 sm:p-4"
+        className="h-full space-y-3 overflow-y-auto py-4 sm:space-y-4"
       >
         {messages.map((message, index) => {
           const prevMessage = index > 0 ? messages[index - 1] : null;

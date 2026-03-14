@@ -57,16 +57,10 @@
 
 * {
   border-color: hsl(var(--border));
-  transition: none;
   box-sizing: border-box;
 }
 button, a, input, textarea, select, [role="button"], .transition-all {
   transition: all 150ms cubic-bezier(0.4, 0, 0.2, 1);
-}
-body, div, section, header, footer, nav, main, p, span, h1, h2, h3, h4, h5, h6 {
-  transition: background-color 200ms ease-in-out,
-              border-color 200ms ease-in-out,
-              color 200ms ease-in-out;
 }
 
 body {
@@ -128,6 +122,11 @@ body {
   border: 1px solid hsl(var(--border));
   border-radius: 0.5rem;
   overflow-x: auto;
+}
+.prose table {
+  display: block;
+  overflow-x: auto;
+  white-space: nowrap;
 }
 .prose code {
   font-size: 0.875em;

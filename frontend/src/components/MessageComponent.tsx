@@ -116,7 +116,7 @@ const MessageComponent = memo(({ message, prevMessage }: MessageComponentProps) 
           </div>
         </div>
       )}
-      <div className={twMerge("text-sm text-foreground", isGrouped ? "" : "pl-8")}>
+      <div className={twMerge("min-w-0 overflow-x-auto text-sm text-foreground", isGrouped ? "" : "pl-8")}>
         <MarkdownContent content={message.content} />
       </div>
       {isGrouped && hovered && (
