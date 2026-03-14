@@ -1,6 +1,6 @@
 use anyhow::{anyhow, Context, Result};
 use axum::{
-    extract::{Multipart, Path, State},
+    extract::{Multipart, Path as AxumPath, State},
     http::StatusCode,
     response::{IntoResponse, Response},
 };
@@ -30,7 +30,7 @@ struct UploadMetadata {
 pub(crate) async fn upload_file_handler(
     user: User,
     session: Session,
-    Path(vm_id): Path<String>,
+    AxumPath(vm_id): AxumPath<String>,
     State(state): State<AppState>,
     mut multipart: Multipart,
 ) -> Result<Response, AppError> {
