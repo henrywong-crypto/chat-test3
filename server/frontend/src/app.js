@@ -432,7 +432,7 @@ document.getElementById('chat-history-refresh-btn')?.addEventListener('click', l
 document.getElementById('chat-send-btn').addEventListener('click', () => {
   const input = document.getElementById('chat-input');
   const content = input.value.trim();
-  if (!content || runningSessionId !== null) return;
+  if (!content || runningSessionId === (chatSessionId ?? '__new__')) return;
   input.value = '';
   autoResizeChatInput();
   sendQuery(content);
@@ -1432,14 +1432,8 @@ function applyChatInputState() {
     stopBtn.classList.remove('hidden');
     sendBtn.classList.add('hidden');
     input.disabled = true;
-  } else if (runningSessionId !== null) {
-    // Viewing a different session while one runs — disable send.
-    stopBtn.classList.add('hidden');
-    sendBtn.classList.remove('hidden');
-    sendBtn.disabled = true;
-    input.disabled = true;
   } else {
-    // Nothing running — fully enabled.
+    // Nothing running in the current view — fully enabled.
     stopBtn.classList.add('hidden');
     sendBtn.classList.remove('hidden');
     sendBtn.disabled = false;

@@ -38,7 +38,10 @@ impl SeekableChannelWriter {
     }
 
     fn flush_to_high_water(&mut self) -> io::Result<()> {
-        let flush_len: usize = (self.high_water - self.base)
+        let flush_len: usize = self
+            .high_water
+            .checked_sub(self.base)
+            .ok_or_else(|| io::Error::new(io::ErrorKind::InvalidInput, "high_water is behind base"))?
             .try_into()
             .map_err(|_| io::Error::new(io::ErrorKind::InvalidInput, "flush offset overflows usize"))?;
         if flush_len == 0 {
@@ -103,7 +106,10 @@ impl SeekableChannelWriter {
 
 impl io::Write for SeekableChannelWriter {
     fn write(&mut self, data: &[u8]) -> io::Result<usize> {
-        let start: usize = (self.pos - self.base)
+        let start: usize = self
+            .pos
+            .checked_sub(self.base)
+            .ok_or_else(|| io::Error::new(io::ErrorKind::InvalidInput, "pos is behind base"))?
             .try_into()
             .map_err(|_| io::Error::new(io::ErrorKind::InvalidInput, "write offset overflows usize"))?;
         let end = start
