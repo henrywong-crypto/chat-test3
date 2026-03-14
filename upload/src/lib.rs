@@ -6,7 +6,7 @@ use tokio::io::{copy, AsyncRead, AsyncWriteExt};
 use common::validate_within_dir;
 
 pub async fn write_file_via_sftp(
-    sftp: SftpSession,
+    sftp: &SftpSession,
     remote_path: &Path,
     upload_dir: &Path,
     source: &mut (impl AsyncRead + Unpin),

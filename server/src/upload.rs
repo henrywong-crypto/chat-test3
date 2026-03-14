@@ -53,7 +53,7 @@ pub(crate) async fn upload_file_handler(
     )
     .await?;
     let sftp = open_sftp_session(&mut ssh_handle).await?;
-    stream_upload_file(&mut multipart, sftp, Path::new(&upload_metadata.remote_path), Path::new(&state.upload_dir)).await?;
+    stream_upload_file(&mut multipart, &sftp, Path::new(&upload_metadata.remote_path), Path::new(&state.upload_dir)).await?;
     Ok((StatusCode::OK, "").into_response())
 }
 
@@ -96,7 +96,7 @@ async fn extract_upload_metadata(multipart: &mut Multipart) -> Result<UploadMeta
 
 async fn stream_upload_file(
     multipart: &mut Multipart,
-    sftp: SftpSession,
+    sftp: &SftpSession,
     remote_path: &Path,
     upload_dir: &Path,
 ) -> Result<()> {
