@@ -72,12 +72,21 @@ async fn run_agent_relay(
         // so the browser receives the HTTP 200 headers and fires onopen without delay.
         loop {
             interval.tick().await;
-            if heartbeat_tx
-                .send(Bytes::from_static(b": keep-alive\n\n"))
-                .await
-                .is_err()
+            match timeout(
+                Duration::from_secs(SEND_TIMEOUT_SECS),
+                heartbeat_tx.send(Bytes::from_static(b": keep-alive\n\n")),
+            )
+            .await
             {
-                break;
+                Ok(Ok(())) => {}
+                Ok(Err(_)) => {
+                    info!("sse receiver dropped during startup heartbeat, ending");
+                    break;
+                }
+                Err(_) => {
+                    error!("startup heartbeat send timed out, sse consumer likely stuck");
+                    break;
+                }
             }
         }
     });

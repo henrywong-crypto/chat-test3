@@ -158,8 +158,11 @@ async fn build_chat_session_with_title(
         .metadata()
         .mtime
         .context("missing mtime on session file")?;
-    let last_active_at = DateTime::from_timestamp(mtime as i64, 0)
-        .context("mtime is out of range for a timestamp")?;
+    let last_active_at = DateTime::from_timestamp(
+        i64::try_from(mtime).context("mtime out of i64 range")?,
+        0,
+    )
+    .context("mtime is out of range for a timestamp")?;
     let path = project_dir.join(Path::new(session_id).with_extension("jsonl"));
     let Some(title) = fetch_session_title(sftp, &path).await? else {
         return Ok(None);

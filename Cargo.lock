@@ -1032,6 +1032,7 @@ name = "common"
 version = "0.1.0"
 dependencies = [
  "anyhow",
+ "tokio",
 ]
 
 [[package]]
@@ -1727,6 +1728,7 @@ version = "0.1.0"
 dependencies = [
  "anyhow",
  "chrono",
+ "common",
  "firecracker-client",
  "ipnetwork",
  "macaddr",
@@ -4638,7 +4640,6 @@ dependencies = [
  "upload",
  "uuid",
  "vm-lifecycle",
- "vm-settings",
  "zip",
 ]
 
@@ -5100,6 +5101,7 @@ name = "ssh-client"
 version = "0.1.0"
 dependencies = [
  "anyhow",
+ "chrono",
  "russh",
  "tokio",
 ]
@@ -5964,13 +5966,13 @@ dependencies = [
  "anyhow",
  "aws-config",
  "aws-credential-types",
+ "chrono",
+ "common",
  "firecracker-manager",
  "serde_json",
- "time",
  "tokio",
  "tracing",
  "uuid",
- "vm-settings",
 ]
 
 [[package]]

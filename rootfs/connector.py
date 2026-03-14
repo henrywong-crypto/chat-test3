@@ -8,7 +8,7 @@ import subprocess
 import sys
 
 SOCKET_PATH = "/tmp/agent.sock"
-AGENT_CMD = ["/usr/local/bin/uv", "run", "/opt/agent.py"]
+AGENT_CMD = ["/usr/local/bin/uv", "run", "--directory", "/opt", "python3", "agent.py"]
 
 
 async def connect_to_agent() -> tuple[asyncio.StreamReader, asyncio.StreamWriter]:

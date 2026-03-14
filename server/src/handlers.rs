@@ -351,7 +351,7 @@ pub(crate) async fn handle_chat_upload(
     )
     .await?;
     let sftp = open_sftp_session(&mut ssh_handle).await?;
-    let remote_path = stream_chat_attachment(&mut multipart, sftp).await?;
+    let remote_path = stream_chat_attachment(&mut multipart, &sftp).await?;
     Ok(Json(serde_json::json!({"path": remote_path})).into_response())
 }
 
@@ -373,7 +373,7 @@ async fn extract_chat_upload_metadata(multipart: &mut Multipart) -> Result<ChatU
     Err(anyhow!("missing 'csrf_token' field"))
 }
 
-async fn stream_chat_attachment(multipart: &mut Multipart, sftp: SftpSession) -> Result<String> {
+async fn stream_chat_attachment(multipart: &mut Multipart, sftp: &SftpSession) -> Result<String> {
     while let Some(field) = multipart
         .next_field()
         .await
@@ -413,7 +413,7 @@ fn build_chat_upload_path(filename: &str) -> String {
 }
 
 async fn write_chat_file_via_sftp(
-    sftp: SftpSession,
+    sftp: &SftpSession,
     path: &str,
     reader: &mut (impl AsyncRead + Unpin),
 ) -> Result<()> {

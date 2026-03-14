@@ -24,20 +24,20 @@ use crate::process::{
     spawn_firecracker_jailed, wait_for_socket,
 };
 
-static VM_NET_INDICES: Mutex<BTreeSet<u32>> = Mutex::new(BTreeSet::new());
+static VM_NET_INDICES: Mutex<BTreeSet<u8>> = Mutex::new(BTreeSet::new());
 
-fn acquire_net_idx() -> Result<Option<u32>> {
+fn acquire_net_idx() -> Result<Option<u8>> {
     let mut used = VM_NET_INDICES
         .lock()
         .map_err(|e| anyhow::anyhow!("VM network index lock poisoned: {e}"))?;
-    let idx = (0..254u32).find(|i| !used.contains(i));
+    let idx = (0..254u8).find(|i| !used.contains(i));
     if let Some(i) = idx {
         used.insert(i);
     }
     Ok(idx)
 }
 
-fn release_net_idx(idx: u32) {
+fn release_net_idx(idx: u8) {
     match VM_NET_INDICES.lock() {
         Ok(mut used) => {
             used.remove(&idx);
@@ -70,7 +70,7 @@ pub struct VmConfig {
 pub struct Vm {
     pub id: String,
     pub pid: u32,
-    net_idx: u32,
+    net_idx: u8,
     net_helper_path: PathBuf,
     chroot_dir: PathBuf,
 }
@@ -102,7 +102,9 @@ impl Vm {
 
 impl Drop for Vm {
     fn drop(&mut self) {
-        let _ = kill(Pid::from_raw(self.pid as i32), Signal::SIGTERM);
+        if let Ok(raw_pid) = i32::try_from(self.pid) {
+            let _ = kill(Pid::from_raw(raw_pid), Signal::SIGTERM);
+        }
         let tap_name = format_tap_name(self.net_idx);
         let _ = std::process::Command::new(&self.net_helper_path)
             .args(["tap-delete", &tap_name])
@@ -120,8 +122,10 @@ async fn stop_vm(socket_path: &Path, pid: u32) {
         .await
         .is_err()
     {
-        if let Err(e) = kill(Pid::from_raw(pid as i32), Signal::SIGKILL) {
-            warn!("failed to SIGKILL process {pid}: {e}");
+        if let Ok(raw_pid) = i32::try_from(pid) {
+            if let Err(e) = kill(Pid::from_raw(raw_pid), Signal::SIGKILL) {
+                warn!("failed to SIGKILL process {pid}: {e}");
+            }
         }
     }
 }
@@ -151,7 +155,7 @@ pub async fn create_vm(vm_config: &VmConfig) -> Result<Vm> {
 
 async fn launch_vm(
     vm_config: &VmConfig,
-    net_idx: u32,
+    net_idx: u8,
     tap_name: &str,
     chroot_dir: &Path,
 ) -> Result<Vm> {

@@ -146,12 +146,18 @@ async fn handle_resize_message(ssh_channel: &mut Channel<Msg>, text: &str) -> Re
         return Ok(());
     };
     if json["type"] == "resize" {
-        let cols = json["cols"]
-            .as_u64()
-            .context("missing cols in resize message")? as u32;
-        let rows = json["rows"]
-            .as_u64()
-            .context("missing rows in resize message")? as u32;
+        let cols = u32::try_from(
+            json["cols"]
+                .as_u64()
+                .context("missing cols in resize message")?,
+        )
+        .context("cols out of u32 range")?;
+        let rows = u32::try_from(
+            json["rows"]
+                .as_u64()
+                .context("missing rows in resize message")?,
+        )
+        .context("rows out of u32 range")?;
         ssh_channel.window_change(cols, rows, 0, 0).await?;
     }
     Ok(())

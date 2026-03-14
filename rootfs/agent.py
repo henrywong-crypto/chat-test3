@@ -1,9 +1,3 @@
-#!/usr/bin/env -S uv run --script
-# /// script
-# requires-python = ">=3.11"
-# dependencies = ["claude-agent-sdk"]
-# ///
-
 import asyncio
 import dataclasses
 import json
@@ -11,6 +5,7 @@ import os
 import sys
 
 SOCKET_PATH = "/tmp/agent.sock"
+QUESTION_TIMEOUT_SECS = 3600
 
 
 def log(msg: str) -> None:
@@ -42,12 +37,15 @@ _pending_question_data: dict | None = None
 _stdin_queue: asyncio.Queue = asyncio.Queue()
 # The currently running query task, so it can be cancelled on interrupt.
 _current_query_task: asyncio.Task | None = None
+# The writer that submitted the currently running query — only that connection may interrupt it.
+_current_query_writer: asyncio.StreamWriter | None = None
 # The active writer for the current client connection.
 _current_writer: asyncio.StreamWriter | None = None
 
 
-async def route_connection(reader: asyncio.StreamReader) -> None:
+async def route_connection(reader: asyncio.StreamReader, writer: asyncio.StreamWriter) -> None:
     """Read lines from a connected client and route them; return on EOF without exiting."""
+    global _current_writer, _current_query_writer
     while True:
         raw = await reader.readline()
         if not raw:
@@ -61,25 +59,40 @@ async def route_connection(reader: asyncio.StreamReader) -> None:
             log(f"failed to parse line: {line[:120]}")
             continue
         if msg.get('type') == 'answer_question':
-            if _pending_question and not _pending_question.done():
+            request_id = msg.get('request_id')
+            if (
+                _pending_question and not _pending_question.done()
+                and _pending_question_data
+                and _pending_question_data.get('request_id') == request_id
+            ):
+                # Route the response back to whichever connection sent this answer.
+                _current_writer = writer
                 _pending_question.set_result(msg.get('answers', {}))
         elif msg.get('type') == 'interrupt':
-            if _current_query_task and not _current_query_task.done():
+            if (
+                _current_query_task and not _current_query_task.done()
+                and writer is _current_query_writer
+            ):
                 log("interrupt received, cancelling query task")
                 _current_query_task.cancel()
         else:
-            await _stdin_queue.put(msg)
+            # Route responses back to whichever connection sent this message.
+            _current_writer = writer
+            await _stdin_queue.put((msg, writer))
 
 
 async def handle_connection(reader: asyncio.StreamReader, writer: asyncio.StreamWriter) -> None:
     """Handle a single client connection."""
     global _current_writer
     log("client connected")
-    _current_writer = writer
-    if _pending_question_data:
-        log("re-emitting pending question to reconnected client")
-        emit_sse('ask_user_question', _pending_question_data)
-    await route_connection(reader)
+    previous_writer = _current_writer
+    previous_dropped = previous_writer is None or previous_writer.is_closing()
+    if previous_dropped:
+        _current_writer = writer
+        if _pending_question_data:
+            log("re-emitting pending question to reconnected client")
+            emit_sse('ask_user_question', _pending_question_data)
+    await route_connection(reader, writer)
     if _current_writer is writer:
         _current_writer = None
     writer.close()
@@ -89,10 +102,11 @@ async def handle_connection(reader: asyncio.StreamReader, writer: asyncio.Stream
 
 async def process_query_queue() -> None:
     """Consume _stdin_queue and run queries sequentially."""
-    global _current_query_task
+    global _current_query_task, _current_query_writer
     while True:
-        msg = await _stdin_queue.get()
+        msg, query_writer = await _stdin_queue.get()
         if msg.get('type') == 'query':
+            _current_query_writer = query_writer
             _current_query_task = asyncio.create_task(
                 run_query(msg.get('content', ''), msg.get('session_id'))
             )
@@ -100,6 +114,8 @@ async def process_query_queue() -> None:
                 await _current_query_task
             except asyncio.CancelledError:
                 pass
+            finally:
+                _current_query_writer = None
 
 
 async def main():
@@ -147,7 +163,7 @@ async def run_query(content: str, session_id):
         cwd=os.environ.get('HOME', '/root'),
         can_use_tool=handle_tool_permission,
         hooks={
-            'PreToolUse': [HookMatcher(matcher='AskUserQuestion', hooks=[ask_user_question_hook], timeout=86400)],
+            'PreToolUse': [HookMatcher(matcher='AskUserQuestion', hooks=[ask_user_question_hook], timeout=QUESTION_TIMEOUT_SECS)],
         },
         **({"resume": session_id} if session_id else {}),
     )

@@ -7,15 +7,15 @@
 
 Must be run as root. Because sudo resets PATH, pass uv's full path:
 
-    sudo $(which uv) run vm/build_rootfs.py
+    sudo $(which uv) run scripts/build_rootfs.py
 
 Use --workdir to keep artifacts between runs (avoids re-downloading):
 
-    sudo $(which uv) run vm/build_rootfs.py --workdir /tmp/fc-build
+    sudo $(which uv) run scripts/build_rootfs.py --workdir /tmp/fc-build
 
 Use --no-test to skip the Firecracker smoke test after building:
 
-    sudo $(which uv) run vm/build_rootfs.py --no-test
+    sudo $(which uv) run scripts/build_rootfs.py --no-test
 """
 
 import argparse
@@ -36,9 +36,11 @@ from pathlib import Path
 S3_BUCKET   = "https://s3.amazonaws.com/spec.ccfc.min"
 S3_ARTIFACTS = f"{S3_BUCKET}/firecracker-ci"
 INSTALL_DIR = Path("/var/lib/fc")
-AGENT_PY      = Path(__file__).parent / "agent.py"
-CONNECTOR_PY  = Path(__file__).parent / "connector.py"
-SETTINGS_PY   = Path(__file__).parent / "settings.py"
+ROOTFS_DIR    = Path(__file__).parent.parent / "rootfs"
+AGENT_PY      = ROOTFS_DIR / "agent.py"
+AGENT_PYPROJECT = ROOTFS_DIR / "pyproject.toml"
+CONNECTOR_PY  = ROOTFS_DIR / "connector.py"
+SETTINGS_PY   = ROOTFS_DIR / "settings.py"
 
 CLAUDE_SETTINGS = """\
 {
@@ -289,20 +291,22 @@ def install_claude_code(rootfs: Path) -> None:
 def install_agent(rootfs: Path) -> None:
     (rootfs / "opt").mkdir(exist_ok=True)
     shutil.copy(str(AGENT_PY), str(rootfs / "opt/agent.py"))
+    shutil.copy(str(AGENT_PYPROJECT), str(rootfs / "opt/pyproject.toml"))
     shutil.copy(str(CONNECTOR_PY), str(rootfs / "opt/connector.py"))
     shutil.copy(str(SETTINGS_PY), str(rootfs / "opt/settings.py"))
+    run(["chown", "-R", "1000:1000", str(rootfs / "opt")])
 
     # Pre-warm the uv dependency cache as the ubuntu user so the first VM
-    # startup is instant.  Import the package directly — agent.py is now a
-    # daemon that never exits, so we cannot run it to prime the cache.
-    # bash -l sources ~/.profile → ~/.bashrc so the claude binary is on PATH.
-    # Non-fatal: the agent works without the cache; it just downloads on first run.
+    # startup is instant.  uv sync installs deps into /opt/.venv without
+    # running the daemon.
+    # bash -l sources ~/.profile → ~/.bashrc so uv is on PATH.
+    # Non-fatal: the agent works without the cache; it just installs on first run.
     result = subprocess.run(
         ["chroot", str(rootfs), "su", "-", "ubuntu", "-c",
-         "bash -lc '/usr/local/bin/uv run --with claude-agent-sdk python3 -c \"import claude_agent_sdk\"'"],
+         "bash -lc '/usr/local/bin/uv sync --directory /opt'"],
     )
     if result.returncode != 0:
-        print("warning: uv prewarm failed (agent will cache deps on first run)")
+        print("warning: uv prewarm failed (agent will install deps on first run)")
 
 
 def write_claude_settings(rootfs: Path) -> None:

@@ -47,7 +47,7 @@ pub(crate) async fn wait_for_socket(socket_path: &Path) -> Result<()> {
     .context("timed out waiting for firecracker socket")
 }
 
-pub(crate) fn build_vm_boot_args(base_boot_args: &str, guest_ip: &Ipv4Addr, net_idx: u32) -> String {
+pub(crate) fn build_vm_boot_args(base_boot_args: &str, guest_ip: &Ipv4Addr, net_idx: u8) -> String {
     format!(
         "{base_boot_args} ip={guest_ip}::172.16.{net_idx}.1:255.255.255.252::eth0:none:1.1.1.1:1.0.0.1"
     )

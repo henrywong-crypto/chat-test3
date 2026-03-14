@@ -53,7 +53,7 @@ async fn test_vm_boots() -> Result<()> {
     let vm_config = build_test_vm_config(&test_config);
     let vm_guard = create_vm(&vm_config).await?;
     assert!(
-        kill(Pid::from_raw(vm_guard.pid as i32), None).is_ok(),
+        kill(Pid::from_raw(i32::try_from(vm_guard.pid).context("pid out of i32 range")?), None).is_ok(),
         "VM process is not running"
     );
     assert!(
@@ -105,7 +105,7 @@ async fn test_vm_boots_with_jailer() -> Result<()> {
     let vm_guard = create_vm(&vm_config).await?;
 
     assert!(
-        kill(Pid::from_raw(vm_guard.pid as i32), None).is_ok(),
+        kill(Pid::from_raw(i32::try_from(vm_guard.pid).context("pid out of i32 range")?), None).is_ok(),
         "VM process is not running"
     );
     assert!(

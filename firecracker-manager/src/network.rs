@@ -23,20 +23,20 @@ pub(crate) async fn delete_tap(net_helper_path: &Path, tap_name: &str) {
         .await;
 }
 
-pub(crate) fn format_tap_name(idx: u32) -> String {
+pub(crate) fn format_tap_name(idx: u8) -> String {
     format!("tap{idx}")
 }
 
-pub(crate) fn format_tap_ip(idx: u32) -> Ipv4Network {
-    Ipv4Network::new(Ipv4Addr::new(172, 16, idx as u8, 1), 30).expect("prefix 30 is valid")
+pub(crate) fn format_tap_ip(idx: u8) -> Ipv4Network {
+    Ipv4Network::new(Ipv4Addr::new(172, 16, idx, 1), 30).expect("prefix 30 is valid")
 }
 
-pub(crate) fn format_guest_ip(idx: u32) -> Ipv4Addr {
-    Ipv4Addr::new(172, 16, idx as u8, 2)
+pub(crate) fn format_guest_ip(idx: u8) -> Ipv4Addr {
+    Ipv4Addr::new(172, 16, idx, 2)
 }
 
-pub(crate) fn format_guest_mac(idx: u32) -> MacAddr6 {
-    MacAddr6::new(0x06, 0x00, 0xAC, 0x10, idx as u8, 0x02)
+pub(crate) fn format_guest_mac(idx: u8) -> MacAddr6 {
+    MacAddr6::new(0x06, 0x00, 0xAC, 0x10, idx, 0x02)
 }
 
 pub async fn setup_host_networking(net_helper_path: &Path) {
@@ -116,7 +116,7 @@ mod tests {
     #[test]
     fn test_tap_and_guest_ip_share_same_subnet_for_same_idx() {
         // For each idx, tap (.1) and guest (.2) are in the same /30 block.
-        for idx in [0u32, 1, 128, 253] {
+        for idx in [0u8, 1, 128, 253] {
             let tap_ip = format_tap_ip(idx);
             let guest_ip = format_guest_ip(idx);
             assert!(tap_ip.contains(guest_ip), "idx={idx}: guest_ip not in tap subnet");

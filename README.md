@@ -114,10 +114,10 @@ Use the latest Firecracker minor version (e.g. `v1.14`) and pick the highest ker
 
 ### Automated (recommended)
 
-`vm/build_rootfs.py` automates the full build. It requires root, `uv`, `unsquashfs`, and `mkfs.ext4`:
+`scripts/build_rootfs.py` automates the full build. It requires root, `uv`, `unsquashfs`, and `mkfs.ext4`:
 
 ```bash
-sudo $(which uv) run vm/build_rootfs.py
+sudo $(which uv) run scripts/build_rootfs.py
 ```
 
 Pass `--workdir /path/to/dir` to use a specific working directory (defaults to a temporary directory). The script installs the finished artifacts directly into `/var/lib/fc/`.
@@ -159,7 +159,7 @@ sudo chroot squashfs-root bash -c "
 sudo chroot squashfs-root su - ubuntu -c "bash -c 'curl -fsSL https://claude.ai/install.sh | bash && echo '\''export PATH=\"\$HOME/.local/bin:\$PATH\"'\'' >> ~/.bashrc'"
 
 # Place the agent and pre-warm the uv dependency cache as the ubuntu user
-sudo cp vm/agent.py squashfs-root/opt/agent.py
+sudo cp rootfs/agent.py squashfs-root/opt/agent.py
 sudo chroot squashfs-root su - ubuntu -c "echo | bash -lc 'uv run /opt/agent.py'" || true
 
 sudo umount squashfs-root/dev
