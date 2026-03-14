@@ -13,6 +13,7 @@ use russh::{Channel, ChannelMsg, client::Msg};
 use ssh_client::{connect_ssh, open_terminal_channel};
 use std::time::Duration;
 use store::upsert_user;
+use tokio::time::timeout;
 use tracing::{error, info, warn};
 use uuid::Uuid;
 use vm_lifecycle::{VmEntry, build_user_rootfs_path};
@@ -21,6 +22,8 @@ use crate::{
     auth::User,
     state::{AppError, AppState, find_vm_guest_ip_for_user, mark_vm_ws_connected},
 };
+
+const LOCK_TIMEOUT_SECS: u64 = 30;
 
 pub(crate) async fn handle_ws_upgrade(
     user: User,
@@ -74,7 +77,9 @@ async fn save_vm_rootfs_on_disconnect(
         .await
         .context("failed to create user rootfs dir on disconnect")?;
     let user_rootfs = build_user_rootfs_path(&state.user_rootfs_dir, user_id);
-    let _guard = state.rootfs_lock.lock().await;
+    let _guard = timeout(Duration::from_secs(LOCK_TIMEOUT_SECS), state.rootfs_lock.lock())
+        .await
+        .context("timed out waiting for rootfs lock")?;
     info!("saving rootfs on disconnect");
     vm_entry
         .vm

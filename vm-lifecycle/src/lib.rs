@@ -72,6 +72,7 @@ pub async fn refresh_all_vm_mmds(vms: &VmRegistry, use_iam_creds: bool, iam_role
     };
     let vm_socket_paths: HashMap<String, PathBuf> = {
         let Ok(registry) = vms.lock() else {
+            warn!("vm registry mutex poisoned");
             return;
         };
         registry
@@ -101,8 +102,9 @@ async fn refresh_vm_mmds(
 }
 
 pub async fn sweep_idle_vms(vms: &VmRegistry) {
-    let _stale_vms: Vec<VmEntry> = {
+    let _stale_vms = {
         let Ok(mut registry) = vms.lock() else {
+            warn!("vm registry mutex poisoned");
             return;
         };
         let stale_ids: Vec<String> = registry
@@ -113,6 +115,6 @@ pub async fn sweep_idle_vms(vms: &VmRegistry) {
         stale_ids
             .into_iter()
             .filter_map(|id| registry.remove(&id))
-            .collect()
+            .collect::<Vec<_>>()
     };
 }

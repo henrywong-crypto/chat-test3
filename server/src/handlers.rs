@@ -15,10 +15,10 @@ use ssh_client::connect_ssh;
 use std::{
     io::{Error as IoError, ErrorKind},
     path::Path,
-    time::{Instant, SystemTime, UNIX_EPOCH},
+    time::{Duration, Instant, SystemTime, UNIX_EPOCH},
 };
 use store::{User as DbUser, upsert_user};
-use tokio::io::{AsyncRead, AsyncWriteExt};
+use tokio::{io::{AsyncRead, AsyncWriteExt}, time::timeout};
 use tokio_util::io::StreamReader;
 use tower_sessions::Session;
 use tracing::{error, info};
@@ -34,6 +34,8 @@ use crate::{
     static_files::{app_js_version, styles_css_version},
     templates::render_terminal_page,
 };
+
+const LOCK_TIMEOUT_SECS: u64 = 30;
 
 #[derive(Deserialize)]
 pub(crate) struct CsrfForm {
@@ -178,7 +180,9 @@ pub(crate) async fn delete_user_rootfs_handler(
     let db_user = upsert_user(&state.db, &user.email).await?;
     let rootfs_path = build_user_rootfs_path(&state.user_rootfs_dir, db_user.id);
     info!("deleting saved rootfs");
-    let _guard = state.rootfs_lock.lock().await;
+    let _guard = timeout(Duration::from_secs(LOCK_TIMEOUT_SECS), state.rootfs_lock.lock())
+        .await
+        .context("timed out waiting for rootfs lock")?;
     let _ = tokio::fs::remove_file(&rootfs_path).await;
     drop(_guard);
     remove_user_vm(&state.vms, db_user.id)?;

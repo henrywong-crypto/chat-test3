@@ -2,12 +2,15 @@ use anyhow::{Context, Result};
 use std::{
     collections::HashMap,
     path::{Path, PathBuf},
+    time::Duration,
 };
-use tokio::sync::Mutex as AsyncMutex;
-use tracing::{error, info};
+use tokio::{fs, sync::Mutex as AsyncMutex, time::timeout};
+use tracing::{error, info, warn};
 use uuid::Uuid;
 
 use crate::{VmEntry, VmRegistry};
+
+const LOCK_TIMEOUT_SECS: u64 = 30;
 
 pub fn build_user_rootfs_path(user_rootfs_dir: &Path, user_id: Uuid) -> PathBuf {
     user_rootfs_dir.join(format!("{user_id}.ext4"))
@@ -25,7 +28,9 @@ pub async fn ensure_user_rootfs(
     rootfs_lock: &AsyncMutex<()>,
 ) -> Result<PathBuf> {
     let rootfs_path = build_user_rootfs_path(user_rootfs_dir, user_id);
-    let _guard = rootfs_lock.lock().await;
+    let _guard = timeout(Duration::from_secs(LOCK_TIMEOUT_SECS), rootfs_lock.lock())
+        .await
+        .context("timed out waiting for rootfs lock")?;
     if rootfs_path.exists() {
         return Ok(rootfs_path);
     }
@@ -41,6 +46,7 @@ pub async fn save_all_vm_rootfs(
 ) {
     let vm_entries: HashMap<String, VmEntry> = {
         let Ok(mut registry) = vms.lock() else {
+            warn!("vm registry mutex poisoned");
             return;
         };
         registry.drain().collect()
@@ -65,7 +71,9 @@ async fn save_vm_rootfs_to_dir(
     tokio::fs::create_dir_all(user_rootfs_dir)
         .await
         .context("failed to create user rootfs dir on shutdown")?;
-    let _guard = rootfs_lock.lock().await;
+    let _guard = timeout(Duration::from_secs(LOCK_TIMEOUT_SECS), rootfs_lock.lock())
+        .await
+        .context("timed out waiting for rootfs lock")?;
     for (_vm_id, vm_entry) in vm_entries {
         let rootfs_path = build_user_rootfs_path(user_rootfs_dir, vm_entry.user_id);
         info!(dest = %rootfs_path.display(), "saving rootfs on shutdown");
