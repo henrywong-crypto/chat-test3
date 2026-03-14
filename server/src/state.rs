@@ -16,8 +16,7 @@ use store::PgPool;
 use tokio::sync::{Mutex as AsyncMutex, mpsc};
 use tracing::error;
 use uuid::Uuid;
-use vm_lifecycle::VmRegistry;
-use vm_settings::VmBuildConfig;
+use vm_lifecycle::{VmBuildConfig, VmRegistry};
 
 #[derive(Clone, Deserialize)]
 pub(crate) struct AppConfig {
