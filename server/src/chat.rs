@@ -158,7 +158,7 @@ pub(crate) async fn handle_chat_question_answer(
 }
 
 #[derive(Deserialize)]
-struct StopBody {
+pub(crate) struct StopBody {
     csrf_token: String,
 }
 
