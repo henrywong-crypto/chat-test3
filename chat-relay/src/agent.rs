@@ -91,7 +91,7 @@ async fn run_agent_relay(
         }
     });
     let relay_result = connect_agent_relay(
-        &guest_ip,
+        guest_ip,
         &ssh_key_path,
         &ssh_user,
         &vm_host_key_path,
