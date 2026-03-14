@@ -56,7 +56,7 @@ pub(crate) async fn list_files_handler(
         },
     };
     let mut ssh_handle = connect_ssh(
-        &guest_ip.to_string(),
+        guest_ip,
         &state.ssh_key_path,
         &state.ssh_user,
         &state.vm_host_key_path,

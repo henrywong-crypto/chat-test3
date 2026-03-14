@@ -46,7 +46,7 @@ pub(crate) async fn upload_file_handler(
         return Ok((StatusCode::NOT_FOUND, "Session not found or expired").into_response());
     };
     let mut ssh_handle = connect_ssh(
-        &guest_ip.to_string(),
+        guest_ip,
         &state.ssh_key_path,
         &state.ssh_user,
         &state.vm_host_key_path,

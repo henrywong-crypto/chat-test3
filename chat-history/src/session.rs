@@ -5,7 +5,7 @@ use russh_sftp::client::{SftpSession, fs::DirEntry};
 use serde::Serialize;
 use sftp_client::open_sftp_session;
 use ssh_client::connect_ssh;
-use std::path::Path;
+use std::{net::Ipv4Addr, path::Path};
 use tokio::io::AsyncReadExt;
 
 use crate::{
@@ -24,7 +24,7 @@ pub struct ChatSession {
 }
 
 pub async fn list_chat_sessions(
-    guest_ip: &str,
+    guest_ip: Ipv4Addr,
     ssh_key_path: &Path,
     ssh_user: &str,
     vm_host_key_path: &Path,
@@ -56,7 +56,7 @@ pub async fn list_chat_sessions(
 }
 
 pub async fn delete_chat_session(
-    guest_ip: &str,
+    guest_ip: Ipv4Addr,
     ssh_key_path: &Path,
     ssh_user: &str,
     vm_host_key_path: &Path,

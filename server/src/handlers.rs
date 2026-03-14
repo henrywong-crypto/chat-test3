@@ -235,7 +235,7 @@ pub(crate) async fn list_chat_sessions_handler(
         return Ok((StatusCode::NOT_FOUND, "Session not found or expired").into_response());
     };
     Ok(list_chat_sessions(
-        &guest_ip.to_string(),
+        guest_ip,
         &state.ssh_key_path,
         &state.ssh_user,
         &state.vm_host_key_path,
@@ -269,7 +269,7 @@ pub(crate) async fn get_chat_transcript_handler(
         return Ok((StatusCode::NOT_FOUND, "Session not found or expired").into_response());
     };
     Ok(fetch_chat_history(
-        &guest_ip.to_string(),
+        guest_ip,
         &state.ssh_key_path,
         &state.ssh_user,
         &state.vm_host_key_path,
@@ -309,7 +309,7 @@ pub(crate) async fn delete_chat_session_handler(
         return Ok((StatusCode::NOT_FOUND, "Session not found or expired").into_response());
     };
     delete_chat_session(
-        &guest_ip.to_string(),
+        guest_ip,
         &state.ssh_key_path,
         &state.ssh_user,
         &state.vm_host_key_path,
@@ -344,7 +344,7 @@ pub(crate) async fn handle_chat_upload(
     };
     info!("uploading chat attachment via sftp");
     let mut ssh_handle = connect_ssh(
-        &guest_ip.to_string(),
+        guest_ip,
         &state.ssh_key_path,
         &state.ssh_user,
         &state.vm_host_key_path,

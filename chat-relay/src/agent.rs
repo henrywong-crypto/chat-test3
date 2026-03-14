@@ -118,7 +118,7 @@ async fn connect_agent_relay(
     inbound: mpsc::Receiver<AgentMessage>,
     tx: mpsc::Sender<Bytes>,
 ) -> Result<()> {
-    let mut ssh_handle = connect_ssh(&guest_ip.to_string(), &ssh_key_path, &ssh_user, &vm_host_key_path).await?;
+    let mut ssh_handle = connect_ssh(guest_ip, &ssh_key_path, &ssh_user, &vm_host_key_path).await?;
     info!("agent ssh channel opened");
     let ssh_channel = open_exec_channel(&mut ssh_handle, AGENT_CMD).await?;
     run_relay(ssh_handle, ssh_channel, inbound, tx).await

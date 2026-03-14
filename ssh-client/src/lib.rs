@@ -7,7 +7,7 @@ use russh::{
 };
 use std::{
     future::Future,
-    net::{IpAddr, SocketAddr},
+    net::{Ipv4Addr, SocketAddr},
     path::Path,
     sync::Arc,
     time::Duration,
@@ -35,7 +35,7 @@ impl Handler for SshClient {
 }
 
 pub async fn connect_ssh(
-    guest_ip: &str,
+    guest_ip: Ipv4Addr,
     ssh_key_path: &Path,
     ssh_user: &str,
     vm_host_key_path: &Path,
@@ -43,7 +43,7 @@ pub async fn connect_ssh(
     let vm_host_key = load_vm_host_key(vm_host_key_path)?;
     let ssh_keypair = Arc::new(load_ssh_keypair(ssh_key_path)?);
     let ssh_config = Arc::new(Config::default());
-    let guest_addr = SocketAddr::new(guest_ip.parse::<IpAddr>().context("invalid guest IP")?, 22);
+    let guest_addr = SocketAddr::from((guest_ip, 22));
     let connect_deadline = Utc::now()
         .checked_add_signed(TimeDelta::seconds(60))
         .context("connect deadline overflow")?;

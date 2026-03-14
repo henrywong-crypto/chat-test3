@@ -2,7 +2,7 @@ use anyhow::{Context, Result};
 use bytes::Bytes;
 use russh::{ChannelMsg, client};
 use ssh_client::{SshClient, connect_ssh, open_exec_channel};
-use std::{path::Path, str::from_utf8};
+use std::{net::Ipv4Addr, path::Path, str::from_utf8};
 
 const SETTINGS_CMD: &str = "bash -lc '/usr/local/bin/uv run /opt/settings.py'";
 
@@ -36,7 +36,7 @@ pub fn build_api_key_settings_json(
 }
 
 pub async fn get_vm_settings(
-    guest_ip: &str,
+    guest_ip: Ipv4Addr,
     ssh_key_path: &Path,
     ssh_user: &str,
     vm_host_key_path: &Path,
@@ -68,7 +68,7 @@ pub async fn get_vm_settings(
 }
 
 pub async fn set_vm_settings(
-    guest_ip: &str,
+    guest_ip: Ipv4Addr,
     ssh_key_path: &Path,
     ssh_user: &str,
     vm_host_key_path: &Path,

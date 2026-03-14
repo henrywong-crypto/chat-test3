@@ -11,7 +11,7 @@ use bytes::Bytes;
 use futures::{SinkExt, StreamExt};
 use russh::{Channel, ChannelMsg, client::Msg};
 use ssh_client::{connect_ssh, open_terminal_channel};
-use std::time::Duration;
+use std::{net::Ipv4Addr, time::Duration};
 use store::upsert_user;
 use tokio::time::timeout;
 use tracing::{error, info, warn};
@@ -51,7 +51,7 @@ async fn run_terminal_session(ws: WebSocket, state: AppState, vm_id: &str, user_
     };
     mark_vm_ws_connected(&state.vms, &vm_id)
         .unwrap_or_else(|e| error!("failed to mark VM ws connected: {e}"));
-    run_ssh_relay(&guest_ip.to_string(), &state, ws)
+    run_ssh_relay(guest_ip, &state, ws)
         .await
         .unwrap_or_else(|e| error!("terminal session error: {e}"));
     save_and_drop_vm(&state, &vm_id, user_id).await;
@@ -91,7 +91,7 @@ async fn save_vm_rootfs_on_disconnect(
         .context("failed to save rootfs")
 }
 
-async fn run_ssh_relay(guest_ip: &str, state: &AppState, ws: WebSocket) -> Result<()> {
+async fn run_ssh_relay(guest_ip: Ipv4Addr, state: &AppState, ws: WebSocket) -> Result<()> {
     let mut ssh_handle = connect_ssh(
         guest_ip,
         &state.ssh_key_path,
