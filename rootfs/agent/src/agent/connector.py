@@ -1,14 +1,10 @@
-#!/usr/bin/env python3
-# /// script
-# requires-python = ">=3.11"
-# ///
 import asyncio
 import os
 import subprocess
 import sys
 
 SOCKET_PATH = "/tmp/agent.sock"
-AGENT_CMD = ["/usr/local/bin/uv", "run", "--directory", "/opt", "python3", "agent.py"]
+AGENT_CMD = ["/opt/agent/.venv/bin/agent"]
 
 
 async def connect_to_agent() -> tuple[asyncio.StreamReader, asyncio.StreamWriter]:
@@ -48,7 +44,7 @@ async def pipe_socket_to_stdout(reader: asyncio.StreamReader) -> None:
         sys.stdout.buffer.flush()
 
 
-async def main() -> None:
+async def _main() -> None:
     reader, writer = await connect_to_agent()
     loop = asyncio.get_running_loop()
 
@@ -63,4 +59,5 @@ async def main() -> None:
     )
 
 
-asyncio.run(main())
+def main():
+    asyncio.run(_main())

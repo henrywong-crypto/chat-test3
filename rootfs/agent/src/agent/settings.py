@@ -1,9 +1,3 @@
-#!/usr/bin/env -S uv run --script
-# /// script
-# requires-python = ">=3.11"
-# dependencies = []
-# ///
-
 import json
 import sys
 from pathlib import Path
@@ -65,6 +59,3 @@ def main() -> None:
         print(json.dumps(clear_bedrock()))
     else:
         print(json.dumps({"error": f"unknown type: {cmd_type}"}))
-
-
-main()

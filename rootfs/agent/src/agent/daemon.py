@@ -127,7 +127,7 @@ async def process_query_queue() -> None:
                 _current_query_writer = None
 
 
-async def main():
+async def _main():
     try:
         os.unlink(SOCKET_PATH)
     except FileNotFoundError:
@@ -137,6 +137,10 @@ async def main():
     asyncio.create_task(process_query_queue())
     async with server:
         await server.serve_forever()
+
+
+def main():
+    asyncio.run(_main())
 
 
 async def run_query(content: str, session_id):
@@ -408,6 +412,3 @@ class _Encoder(json.JSONEncoder):
             if type_val is not None:
                 data['type'] = type_val if isinstance(type_val, str) else str(type_val)
         return data
-
-
-asyncio.run(main())

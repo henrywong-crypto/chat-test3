@@ -41,8 +41,14 @@ impl SeekableChannelWriter {
         let flush_len: usize = (self.high_water - self.base)
             .try_into()
             .map_err(|_| io::Error::new(io::ErrorKind::InvalidInput, "flush offset overflows usize"))?;
-        if flush_len == 0 || flush_len > self.buf.len() {
+        if flush_len == 0 {
             return Ok(());
+        }
+        if flush_len > self.buf.len() {
+            return Err(io::Error::new(
+                io::ErrorKind::InvalidInput,
+                "flush_len exceeds buffer",
+            ));
         }
         let chunk = Bytes::copy_from_slice(&self.buf[..flush_len]);
         match Handle::current().block_on(timeout(

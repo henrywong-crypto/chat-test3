@@ -70,11 +70,10 @@ async fn collect_zip_files(
         };
         for entry in read_dir {
             let file_name = entry.file_name();
-            let name = Path::new(&file_name);
-            if name == Path::new(".") || name == Path::new("..") {
+            if file_name == "." || file_name == ".." {
                 continue;
             }
-            let child_path = dir.join(name);
+            let child_path = dir.join(&file_name);
             if entry.file_type().is_symlink() {
                 continue;
             }

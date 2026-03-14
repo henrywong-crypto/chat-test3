@@ -36,11 +36,7 @@ from pathlib import Path
 S3_BUCKET   = "https://s3.amazonaws.com/spec.ccfc.min"
 S3_ARTIFACTS = f"{S3_BUCKET}/firecracker-ci"
 INSTALL_DIR = Path("/var/lib/fc")
-ROOTFS_DIR    = Path(__file__).parent.parent / "rootfs"
-AGENT_PY      = ROOTFS_DIR / "agent.py"
-AGENT_PYPROJECT = ROOTFS_DIR / "pyproject.toml"
-CONNECTOR_PY  = ROOTFS_DIR / "connector.py"
-SETTINGS_PY   = ROOTFS_DIR / "settings.py"
+AGENT_DIR = Path(__file__).parent.parent / "rootfs" / "agent"
 
 CLAUDE_SETTINGS = """\
 {
@@ -289,21 +285,20 @@ def install_claude_code(rootfs: Path) -> None:
 
 
 def install_agent(rootfs: Path) -> None:
-    (rootfs / "opt").mkdir(exist_ok=True)
-    shutil.copy(str(AGENT_PY), str(rootfs / "opt/agent.py"))
-    shutil.copy(str(AGENT_PYPROJECT), str(rootfs / "opt/pyproject.toml"))
-    shutil.copy(str(CONNECTOR_PY), str(rootfs / "opt/connector.py"))
-    shutil.copy(str(SETTINGS_PY), str(rootfs / "opt/settings.py"))
+    agent_dest = rootfs / "opt/agent"
+    if agent_dest.exists():
+        shutil.rmtree(str(agent_dest))
+    shutil.copytree(str(AGENT_DIR), str(agent_dest))
     run(["chown", "-R", "1000:1000", str(rootfs / "opt")])
 
     # Pre-warm the uv dependency cache as the ubuntu user so the first VM
-    # startup is instant.  uv sync installs deps into /opt/.venv without
+    # startup is instant.  uv sync installs deps into /opt/agent/.venv without
     # running the daemon.
     # bash -l sources ~/.profile → ~/.bashrc so uv is on PATH.
     # Non-fatal: the agent works without the cache; it just installs on first run.
     result = subprocess.run(
         ["chroot", str(rootfs), "su", "-", "ubuntu", "-c",
-         "bash -lc '/usr/local/bin/uv sync --directory /opt'"],
+         "bash -lc '/usr/local/bin/uv sync --directory /opt/agent'"],
     )
     if result.returncode != 0:
         print("warning: uv prewarm failed (agent will install deps on first run)")
