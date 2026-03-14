@@ -1,5 +1,6 @@
 use anyhow::{Context, Result, bail};
-use std::path::Path;
+use macaddr::MacAddr6;
+use std::{net::Ipv4Addr, path::Path};
 use tokio::process::Command;
 use tracing::warn;
 
@@ -29,12 +30,12 @@ pub(crate) fn format_tap_ip(idx: u32) -> String {
     format!("172.16.{idx}.1/30")
 }
 
-pub(crate) fn format_guest_ip(idx: u32) -> String {
-    format!("172.16.{idx}.2")
+pub(crate) fn format_guest_ip(idx: u32) -> Ipv4Addr {
+    Ipv4Addr::new(172, 16, idx as u8, 2)
 }
 
-pub(crate) fn format_guest_mac(idx: u32) -> String {
-    format!("06:00:AC:10:{:02X}:02", idx)
+pub(crate) fn format_guest_mac(idx: u32) -> MacAddr6 {
+    MacAddr6::new(0x06, 0x00, 0xAC, 0x10, idx as u8, 0x02)
 }
 
 pub async fn setup_host_networking(net_helper_path: &Path) {
@@ -106,9 +107,9 @@ mod tests {
 
     #[test]
     fn test_format_guest_ip_structure() {
-        assert_eq!(format_guest_ip(0), "172.16.0.2");
-        assert_eq!(format_guest_ip(1), "172.16.1.2");
-        assert_eq!(format_guest_ip(255), "172.16.255.2");
+        assert_eq!(format_guest_ip(0), Ipv4Addr::new(172, 16, 0, 2));
+        assert_eq!(format_guest_ip(1), Ipv4Addr::new(172, 16, 1, 2));
+        assert_eq!(format_guest_ip(255), Ipv4Addr::new(172, 16, 255, 2));
     }
 
     #[test]
@@ -116,9 +117,9 @@ mod tests {
         // For each idx, tap (.1) and guest (.2) are in the same /30 block.
         for idx in [0u32, 1, 128, 253] {
             let tap_ip = format_tap_ip(idx);
-            let guest_ip = format_guest_ip(idx);
+            let guest_str = format_guest_ip(idx).to_string();
             let tap_prefix = tap_ip.trim_end_matches(".1/30");
-            let guest_prefix = guest_ip.trim_end_matches(".2");
+            let guest_prefix = guest_str.trim_end_matches(".2");
             assert_eq!(tap_prefix, guest_prefix, "idx={idx}: subnet mismatch");
         }
     }
@@ -127,20 +128,20 @@ mod tests {
 
     #[test]
     fn test_format_guest_mac_zero_padded_for_low_idx() {
-        assert_eq!(format_guest_mac(0), "06:00:AC:10:00:02");
-        assert_eq!(format_guest_mac(1), "06:00:AC:10:01:02");
-        assert_eq!(format_guest_mac(15), "06:00:AC:10:0F:02");
+        assert_eq!(format_guest_mac(0), MacAddr6::new(0x06, 0x00, 0xAC, 0x10, 0x00, 0x02));
+        assert_eq!(format_guest_mac(1), MacAddr6::new(0x06, 0x00, 0xAC, 0x10, 0x01, 0x02));
+        assert_eq!(format_guest_mac(15), MacAddr6::new(0x06, 0x00, 0xAC, 0x10, 0x0F, 0x02));
     }
 
     #[test]
     fn test_format_guest_mac_two_hex_digits_for_high_idx() {
-        assert_eq!(format_guest_mac(16), "06:00:AC:10:10:02");
-        assert_eq!(format_guest_mac(255), "06:00:AC:10:FF:02");
+        assert_eq!(format_guest_mac(16), MacAddr6::new(0x06, 0x00, 0xAC, 0x10, 0x10, 0x02));
+        assert_eq!(format_guest_mac(255), MacAddr6::new(0x06, 0x00, 0xAC, 0x10, 0xFF, 0x02));
     }
 
     #[test]
     fn test_format_guest_mac_uses_uppercase_hex() {
         let mac = format_guest_mac(0xAB);
-        assert!(mac.contains("AB"), "expected uppercase hex in {mac}");
+        assert!(mac.to_string().contains("AB"), "expected uppercase hex in {mac}");
     }
 }

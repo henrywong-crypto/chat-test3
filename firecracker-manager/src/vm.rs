@@ -6,6 +6,7 @@ use nix::{
 };
 use std::{
     collections::BTreeSet,
+    net::Ipv4Addr,
     path::{Path, PathBuf},
     sync::Mutex,
     time::Duration,
@@ -73,7 +74,7 @@ pub struct Vm {
 }
 
 impl Vm {
-    pub fn guest_ip(&self) -> String {
+    pub fn guest_ip(&self) -> Ipv4Addr {
         format_guest_ip(self.net_idx)
     }
 
@@ -159,7 +160,7 @@ async fn launch_vm(
     )
     .await?;
     let mac = format_guest_mac(net_idx);
-    let boot_args = build_vm_boot_args(&vm_config.boot_args, &format_guest_ip(net_idx), net_idx);
+    let boot_args = build_vm_boot_args(&vm_config.boot_args, format_guest_ip(net_idx), net_idx);
     let kernel_path_in_jail = PathBuf::from("/vmlinux");
     let rootfs_path_in_jail = PathBuf::from("/rootfs.ext4");
     let rootfs_copy = chroot_dir.join("rootfs.ext4");
@@ -179,7 +180,7 @@ async fn launch_vm(
         &kernel_path_in_jail,
         vm_config,
         tap_name,
-        &mac,
+        &mac.to_string(),
         &boot_args,
     )
     .await?;

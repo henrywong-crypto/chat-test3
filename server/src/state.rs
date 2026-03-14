@@ -8,6 +8,7 @@ use config::{Config, Environment, File};
 use serde::Deserialize;
 use std::{
     collections::HashMap,
+    net::Ipv4Addr,
     path::PathBuf,
     sync::{Arc, Mutex},
 };
@@ -246,7 +247,7 @@ pub(crate) fn find_vm_guest_ip_for_user(
     vms: &VmRegistry,
     vm_id: &str,
     user_id: Uuid,
-) -> Result<Option<String>> {
+) -> Result<Option<Ipv4Addr>> {
     let registry = vms
         .lock()
         .map_err(|_| anyhow!("vm registry lock poisoned"))?;
@@ -256,7 +257,7 @@ pub(crate) fn find_vm_guest_ip_for_user(
         .map(|e| e.vm.guest_ip()))
 }
 
-pub(crate) fn find_user_vm_guest_ip(vms: &VmRegistry, user_id: Uuid) -> Result<Option<String>> {
+pub(crate) fn find_user_vm_guest_ip(vms: &VmRegistry, user_id: Uuid) -> Result<Option<Ipv4Addr>> {
     let registry = vms
         .lock()
         .map_err(|_| anyhow!("vm registry lock poisoned"))?;

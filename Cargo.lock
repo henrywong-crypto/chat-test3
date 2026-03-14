@@ -1728,6 +1728,7 @@ dependencies = [
  "anyhow",
  "chrono",
  "firecracker-client",
+ "macaddr",
  "nix 0.31.2",
  "serde",
  "serde_json",
@@ -2966,6 +2967,12 @@ dependencies = [
  "libc",
  "pkg-config",
 ]
+
+[[package]]
+name = "macaddr"
+version = "1.0.1"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "baee0bbc17ce759db233beb01648088061bf678383130602a298e6998eedb2d8"
 
 [[package]]
 name = "manyhow"

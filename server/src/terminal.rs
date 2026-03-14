@@ -45,7 +45,7 @@ async fn run_terminal_session(ws: WebSocket, state: AppState, vm_id: String, use
     };
     mark_vm_ws_connected(&state.vms, &vm_id)
         .unwrap_or_else(|e| error!("failed to mark VM ws connected: {e}"));
-    run_ssh_relay(&guest_ip, &state, ws)
+    run_ssh_relay(&guest_ip.to_string(), &state, ws)
         .await
         .unwrap_or_else(|e| error!("terminal session error: {e}"));
     save_and_drop_vm(&state, &vm_id, user_id).await;

@@ -42,7 +42,7 @@ pub(crate) async fn handle_chat_stream(
         .map_err(|e| anyhow!("chat senders lock poisoned: {e}"))?
         .insert(vm_id.clone(), agent_tx);
     let event_stream = start_agent_relay(
-        guest_ip,
+        guest_ip.to_string(),
         &state.ssh_key_path,
         state.ssh_user.clone(),
         &state.vm_host_key_path,
