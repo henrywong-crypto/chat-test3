@@ -60,13 +60,13 @@ pub async fn save_all_vm_rootfs(
         "saving rootfs for {} running vm(s) before shutdown",
         vm_entries.len()
     );
-    save_vm_rootfs_to_dir(vm_entries, user_rootfs_dir, rootfs_lock)
+    save_vm_rootfs_to_dir(&vm_entries, user_rootfs_dir, rootfs_lock)
         .await
         .unwrap_or_else(|e| error!("failed to save rootfs on shutdown: {e}"));
 }
 
 async fn save_vm_rootfs_to_dir(
-    vm_entries: HashMap<String, VmEntry>,
+    vm_entries: &HashMap<String, VmEntry>,
     user_rootfs_dir: &Path,
     rootfs_lock: &AsyncMutex<()>,
 ) -> Result<()> {

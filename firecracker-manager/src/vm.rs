@@ -11,6 +11,7 @@ use std::{
     sync::Mutex,
     time::Duration,
 };
+use tokio::fs::rename;
 use tracing::{info, warn};
 
 use crate::configure::configure_vm;
@@ -89,7 +90,7 @@ impl Vm {
     pub async fn save_rootfs(&self, dest: &Path) -> Result<()> {
         stop_vm(&self.socket_path(), self.pid).await;
         let rootfs_copy = self.rootfs_copy();
-        if tokio::fs::rename(&rootfs_copy, dest).await.is_err() {
+        if rename(&rootfs_copy, dest).await.is_err() {
             copy_rootfs(&rootfs_copy, dest)
                 .await
                 .with_context(|| format!("failed to copy rootfs to {}", dest.display()))?;
