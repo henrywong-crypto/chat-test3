@@ -382,9 +382,10 @@ async function uploadAttachment(file) {
     if (!res.ok) throw new Error('upload failed: ' + res.status);
     const data = await res.json();
     placeholder.path = data.path;
-  } catch (_err) {
+  } catch (err) {
     const idx = chatAttachments.indexOf(placeholder);
     if (idx !== -1) chatAttachments.splice(idx, 1);
+    appendErrorMessage(`Failed to upload ${file.name}: ${err.message}`);
   }
   renderAttachmentChips();
 }
