@@ -34,8 +34,6 @@ def get_field(obj, field, default=None):
 _pending_questions: dict[str, asyncio.Future] = {}
 # Queue for incoming stdin messages (queries, etc.) from the Rust relay.
 _stdin_queue: asyncio.Queue = asyncio.Queue()
-# Tracks the in-flight AskUserQuestion panel so can_use_tool can await it.
-_pending_ask_user_question: tuple[str, asyncio.Future] | None = None
 # The currently running query task, so it can be cancelled on interrupt.
 _current_query_task: asyncio.Task | None = None
 
@@ -96,9 +94,6 @@ async def run_query(content: str, session_id):
     from claude_agent_sdk import ClaudeAgentOptions, PermissionResultAllow, query
     from claude_agent_sdk.types import HookMatcher, StreamEvent
 
-    global _pending_ask_user_question
-    _pending_ask_user_question = None
-
     log(f"query start  session_id={session_id!r}  content_len={len(content)}")
 
     async def handle_tool_permission(tool_name, input_, context):
@@ -106,24 +101,17 @@ async def run_query(content: str, session_id):
         return PermissionResultAllow()
 
     async def ask_user_question_hook(input_data, tool_use_id, context):
-        global _pending_ask_user_question
         if not tool_use_id:
             log("PreToolUse AskUserQuestion: no tool_use_id, cannot block")
             return {'continue_': True}
         tool_input = get_field(input_data, 'tool_input') or {}
-        # If the streaming path already registered a future, reuse it; otherwise create one now.
-        # (The SDK may call this hook before or after yielding the content_block_stop event.)
-        if tool_use_id not in _pending_questions:
-            questions = tool_input.get('questions', []) if isinstance(tool_input, dict) else []
-            _emit_ask_user_question(tool_use_id, questions)
-        fut = _pending_questions.get(tool_use_id)
-        if not fut:
-            log(f"PreToolUse AskUserQuestion: failed to create future  tool_use_id={tool_use_id!r}")
-            return {'continue_': True}
+        questions = tool_input.get('questions', []) if isinstance(tool_input, dict) else []
+        fut = asyncio.get_running_loop().create_future()
+        _pending_questions[tool_use_id] = fut
+        emit_sse('ask_user_question', {'request_id': tool_use_id, 'questions': questions})
         log(f"PreToolUse AskUserQuestion: waiting for answer  request_id={tool_use_id!r}")
         answers = await fut
         _pending_questions.pop(tool_use_id, None)
-        _pending_ask_user_question = None
         log(f"PreToolUse AskUserQuestion: answered  request_id={tool_use_id!r}")
         return {
             'hookSpecificOutput': {
@@ -174,11 +162,7 @@ async def run_query(content: str, session_id):
         log(f"query error: {exc}")
         emit_sse('error_event', {'message': str(exc)})
     finally:
-        # Clean up any unresolved AskUserQuestion state from this query.
-        if _pending_ask_user_question:
-            stale_request_id, _ = _pending_ask_user_question
-            _pending_questions.pop(stale_request_id, None)
-            _pending_ask_user_question = None
+        _pending_questions.clear()
     log(f"query done  session_id={captured_session_id!r}")
     emit_sse('done', {'session_id': captured_session_id})
 
@@ -239,7 +223,6 @@ def process_block_delta(ev, block_types: dict, tool_info: dict, tool_input: dict
 
 
 def process_block_stop(ev, block_types: dict, tool_info: dict, tool_input: dict) -> None:
-    global _pending_ask_user_question
     idx = get_field(ev, 'index', 0)
     if block_types.get(idx) == 'tool_use' and idx in tool_info:
         raw_input = tool_input.pop(idx, '{}') or '{}'
@@ -248,23 +231,9 @@ def process_block_stop(ev, block_types: dict, tool_info: dict, tool_input: dict)
         except json.JSONDecodeError:
             input_data = {}
         info = tool_info.pop(idx)
-        if info['name'] == 'AskUserQuestion':
-            _emit_ask_user_question(info['id'], input_data.get('questions', []))
-        else:
+        if info['name'] != 'AskUserQuestion':
             emit_sse('tool_start', {'id': info['id'], 'name': info['name'], 'input': input_data})
     block_types.pop(idx, None)
-
-
-def _emit_ask_user_question(tool_use_id: str, questions: list) -> None:
-    """Emit ask_user_question SSE and register the pending future. No-op if already shown."""
-    global _pending_ask_user_question
-    if _pending_ask_user_question:
-        return
-    fut = asyncio.get_running_loop().create_future()
-    _pending_questions[tool_use_id] = fut
-    _pending_ask_user_question = (tool_use_id, fut)
-    emit_sse('ask_user_question', {'request_id': tool_use_id, 'questions': questions})
-    log(f"AskUserQuestion panel shown  request_id={tool_use_id!r}")
 
 
 # ── Non-StreamEvent (structured agent events) ─────────────────────────────────
@@ -341,11 +310,7 @@ def process_assistant_event(event, emitted_streaming_text: bool) -> None:
                 emit_sse('thinking_delta', {'thinking': thinking})
         elif block_type == 'tool_use':
             block_name = getattr(block, 'name', None) or ''
-            if block_name == 'AskUserQuestion':
-                block_input = getattr(block, 'input', {}) or {}
-                questions = block_input.get('questions', []) if isinstance(block_input, dict) else []
-                _emit_ask_user_question(getattr(block, 'id', None) or '', questions)
-            else:
+            if block_name != 'AskUserQuestion':
                 emit_sse('tool_start', {
                     'id': getattr(block, 'id', None),
                     'name': block_name,
