@@ -23,6 +23,7 @@ export function useSseHandlers(
     addMessage,
     updateLastMessage,
     updateMessageById,
+    getMessages,
     setMessages,
     setViewSessionId,
     generateId,
@@ -154,6 +155,8 @@ export function useSseHandlers(
         toolIdToMsgId.current.clear();
 
         if (session_id && completedSession === viewRef.current) {
+          const msgs = getMessages(completedSession);
+          setMessages(session_id, msgs);
           setViewSessionId(session_id);
         }
 
