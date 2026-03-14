@@ -142,11 +142,11 @@ export function SseProvider({ children }: { children: React.ReactNode }) {
   }, [vmId]);
 
   const deleteSession = useCallback(async (sessionId: string, projectDir: string) => {
-    const formData = new FormData();
-    formData.append("csrf_token", csrfToken);
-    formData.append("session_id", sessionId);
-    formData.append("project_dir", projectDir);
-    const res = await fetch(`/sessions/${vmId}/chat-transcript`, { method: "DELETE", body: formData });
+    const res = await fetch(`/sessions/${vmId}/chat-transcript`, {
+      method: "DELETE",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ csrf_token: csrfToken, session_id: sessionId, project_dir: projectDir }),
+    });
     if (!res.ok) throw new Error(`HTTP ${res.status}`);
   }, [vmId, csrfToken]);
 

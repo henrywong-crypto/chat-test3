@@ -296,7 +296,7 @@ pub(crate) async fn delete_chat_session_handler(
     RoutePath(vm_id): RoutePath<String>,
     session: Session,
     State(state): State<AppState>,
-    Form(form): Form<DeleteChatSessionForm>,
+    Json(form): Json<DeleteChatSessionForm>,
 ) -> Result<Response, AppError> {
     if !validate_vm_id(&vm_id) {
         return Ok((StatusCode::NOT_FOUND, "Not found").into_response());

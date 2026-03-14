@@ -15,6 +15,7 @@ function AppContent() {
   const [selectedSession, setSelectedSession] = useState<ChatSession | null>(null);
   const [showSettings, setShowSettings] = useState(false);
   const [runningSessionId, setRunningSessionId] = useState<string | null>(null);
+  const [newChatKey, setNewChatKey] = useState(0);
   const [darkMode, setDarkMode] = useState<boolean>(() => {
     const saved = localStorage.getItem("ui-theme");
     return saved ? saved === "dark" : true;
@@ -70,7 +71,10 @@ function AppContent() {
           viewSessionId={selectedSession?.session_id ?? null}
           runningSessionId={runningSessionId}
           onSelectSession={setSelectedSession}
-          onNewChat={() => setSelectedSession(null)}
+          onNewChat={() => {
+            setSelectedSession(null);
+            setNewChatKey((k) => k + 1);
+          }}
           onRefresh={handleRefresh}
           onDeleteSession={handleDeleteSession}
         />
@@ -82,6 +86,7 @@ function AppContent() {
             sessions={sessions}
             setSessions={setSessions}
             selectedSession={selectedSession}
+            newChatKey={newChatKey}
             onRunningSessionChange={setRunningSessionId}
           />
         )}

@@ -66,10 +66,11 @@ interface ChatInterfaceProps {
   sessions: ChatSession[];
   setSessions: (s: ChatSession[]) => void;
   selectedSession: ChatSession | null;
+  newChatKey: number;
   onRunningSessionChange?: (sessionId: string | null) => void;
 }
 
-export default function ChatInterface({ sessions, setSessions, selectedSession, onRunningSessionChange }: ChatInterfaceProps) {
+export default function ChatInterface({ sessions, setSessions, selectedSession, newChatKey, onRunningSessionChange }: ChatInterfaceProps) {
   const sseCtx = useSse();
   const chatState = useChatState();
 
@@ -121,6 +122,12 @@ export default function ChatInterface({ sessions, setSessions, selectedSession, 
     setViewSessionId(selectedSession.session_id);
     loadTranscriptForSession(selectedSession);
   }, [selectedSession]); // eslint-disable-line react-hooks/exhaustive-deps
+
+  // Reset to a blank new chat when the user explicitly clicks "New Chat"
+  useEffect(() => {
+    if (newChatKey === 0) return;
+    setViewSessionId(null);
+  }, [newChatKey]); // eslint-disable-line react-hooks/exhaustive-deps
 
   // Notify parent when the running session changes so Sidebar can show the active indicator
   const onRunningSessionChangeRef = useRef(onRunningSessionChange);
