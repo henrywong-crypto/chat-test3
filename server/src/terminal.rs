@@ -24,6 +24,7 @@ use crate::{
 };
 
 const LOCK_TIMEOUT_SECS: u64 = 30;
+const SEND_TIMEOUT_SECS: u64 = 30;
 
 pub(crate) async fn handle_ws_upgrade(
     user: User,
@@ -105,8 +106,16 @@ async fn run_ssh_relay(guest_ip: &str, state: &AppState, ws: WebSocket) -> Resul
             msg = ssh_channel.wait() => {
                 match msg {
                     Some(ChannelMsg::Data { ref data }) => {
-                        if ws_sender.send(Message::Binary(Bytes::copy_from_slice(data))).await.is_err() {
-                            break;
+                        match timeout(Duration::from_secs(SEND_TIMEOUT_SECS), ws_sender.send(Message::Binary(Bytes::copy_from_slice(data)))).await {
+                            Ok(Ok(())) => {}
+                            Ok(Err(_)) => {
+                                info!("ws receiver dropped, ending relay");
+                                break;
+                            }
+                            Err(_) => {
+                                error!("ws send timed out, consumer likely stuck");
+                                break;
+                            }
                         }
                     }
                     Some(ChannelMsg::ExitStatus { .. }) | None => break,
@@ -125,15 +134,23 @@ async fn run_ssh_relay(guest_ip: &str, state: &AppState, ws: WebSocket) -> Resul
                             .unwrap_or_else(|e| warn!("handle_resize_message failed: {e}"));
                     }
                     Some(Ok(Message::Ping(data))) => {
-                        let _ = ws_sender.send(Message::Pong(data)).await;
+                        let _ = timeout(Duration::from_secs(SEND_TIMEOUT_SECS), ws_sender.send(Message::Pong(data))).await;
                     }
                     Some(Ok(Message::Pong(_))) => {}
                     _ => break,
                 }
             }
             _ = keepalive.tick() => {
-                if ws_sender.send(Message::Ping(Bytes::new())).await.is_err() {
-                    break;
+                match timeout(Duration::from_secs(SEND_TIMEOUT_SECS), ws_sender.send(Message::Ping(Bytes::new()))).await {
+                    Ok(Ok(())) => {}
+                    Ok(Err(_)) => {
+                        info!("ws receiver dropped during keepalive, ending relay");
+                        break;
+                    }
+                    Err(_) => {
+                        error!("ws keepalive send timed out, consumer likely stuck");
+                        break;
+                    }
                 }
             }
         }

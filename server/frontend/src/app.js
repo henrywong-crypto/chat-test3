@@ -452,7 +452,7 @@ document.getElementById('chat-history-refresh-btn')?.addEventListener('click', l
 document.getElementById('chat-send-btn').addEventListener('click', () => {
   const input = document.getElementById('chat-input');
   const content = input.value.trim();
-  if (!content || runningMatchesView()) return;
+  if (!content || chatState.streaming) return;
   input.value = '';
   autoResizeChatInput();
   sendQuery(content);
@@ -544,9 +544,9 @@ function connectChatSse() {
   chatState.es.onopen = () => {
     console.log('[chat] SSE open');
     if (chatState.esPending) {
-      const content = chatState.esPending;
+      const { content, sessionId } = chatState.esPending;
       chatState.esPending = null;
-      postQuery(content);
+      postQuery(content, sessionId);
     }
   };
   chatState.es.onerror = (e) => {
@@ -673,22 +673,23 @@ function sendQuery(content) {
   if (chatState.viewSessionId === null) {
     chatState.pendingTitle = content.slice(0, 60);
   }
+  const sessionId = chatState.viewSessionId;  // capture at send time
   prepareForQuery(content);
   if (!chatState.es || chatState.es.readyState === EventSource.CONNECTING) {
     console.log('[chat] SSE not ready (readyState=' + (chatState.es?.readyState ?? 'null') + '), queuing query');
-    chatState.esPending = fullContent;
+    chatState.esPending = { content: fullContent, sessionId };
     if (!chatState.es) connectChatSse();
     return;
   }
-  postQuery(fullContent);
+  postQuery(fullContent, sessionId);
 }
 
-function postQuery(content) {
-  console.log('[chat] posting query  content_len=' + content.length + '  session_id=' + chatState.viewSessionId);
+function postQuery(content, sessionId) {
+  console.log('[chat] posting query  content_len=' + content.length + '  session_id=' + sessionId);
   fetch('/sessions/' + vmId + '/chat', {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ content, session_id: chatState.viewSessionId, csrf_token: fmCsrfToken }),
+    body: JSON.stringify({ content, session_id: sessionId, csrf_token: fmCsrfToken }),
   }).then(res => {
     console.log('[chat] query response  status=' + res.status);
     if (!res.ok) {
@@ -1449,8 +1450,14 @@ function applyChatInputState() {
     stopBtn.classList.remove('hidden');
     sendBtn.classList.add('hidden');
     input.disabled = true;
+  } else if (chatState.streaming) {
+    // Running in another session — block new queries to prevent cross-session corruption.
+    stopBtn.classList.add('hidden');
+    sendBtn.classList.remove('hidden');
+    sendBtn.disabled = true;
+    input.disabled = true;
   } else {
-    // Nothing running in the current view — fully enabled.
+    // Nothing running — fully enabled.
     stopBtn.classList.add('hidden');
     sendBtn.classList.remove('hidden');
     sendBtn.disabled = false;
@@ -1602,7 +1609,9 @@ async function loadAndRenderTranscript(sessionId, projectDir) {
     const url = '/sessions/' + vmId + '/chat-transcript?session_id=' + encodeURIComponent(sessionId) + '&project_dir=' + encodeURIComponent(projectDir);
     const res = await fetch(url);
     if (!res.ok) return;
+    if (chatState.viewSessionId !== sessionId) return;  // view switched while loading
     const transcript = await res.json();
+    if (chatState.viewSessionId !== sessionId) return;  // view switched while parsing
     renderTranscriptMessages(transcript.messages);
   } catch {}
 }
