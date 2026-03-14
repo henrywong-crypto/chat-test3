@@ -1,4 +1,5 @@
 import asyncio
+import contextvars
 import dataclasses
 import json
 import os
@@ -15,11 +16,12 @@ def log(msg: str) -> None:
 
 
 def emit_sse(event_name: str, data: dict) -> None:
-    """Write a properly formatted SSE event to the current writer."""
-    if _current_writer is None or _current_writer.is_closing():
+    """Write a properly formatted SSE event to the query-scoped writer."""
+    writer = _emit_writer.get()
+    if writer is None or writer.is_closing():
         return
     payload = f"event: {event_name}\ndata: {json.dumps(data, cls=_Encoder)}\n\n"
-    _current_writer.write(payload.encode())
+    writer.write(payload.encode())
 
 
 def get_field(obj, field, default=None):
@@ -39,13 +41,19 @@ _stdin_queue: asyncio.Queue = asyncio.Queue()
 _current_query_task: asyncio.Task | None = None
 # The writer that submitted the currently running query — only that connection may interrupt it.
 _current_query_writer: asyncio.StreamWriter | None = None
-# The active writer for the current client connection.
+# Tracks the most recently active writer for reconnect detection.
 _current_writer: asyncio.StreamWriter | None = None
+# Per-task writer context: set before spawning each query task so emit_sse always
+# routes to the connection that submitted the query, even if _current_writer changes
+# while the query is running.
+_emit_writer: contextvars.ContextVar[asyncio.StreamWriter | None] = contextvars.ContextVar(
+    'emit_writer', default=None
+)
 
 
 async def route_connection(reader: asyncio.StreamReader, writer: asyncio.StreamWriter) -> None:
     """Read lines from a connected client and route them; return on EOF without exiting."""
-    global _current_writer, _current_query_writer
+    global _current_writer
     while True:
         raw = await reader.readline()
         if not raw:
@@ -65,8 +73,6 @@ async def route_connection(reader: asyncio.StreamReader, writer: asyncio.StreamW
                 and _pending_question_data
                 and _pending_question_data.get('request_id') == request_id
             ):
-                # Route the response back to whichever connection sent this answer.
-                _current_writer = writer
                 _pending_question.set_result(msg.get('answers', {}))
         elif msg.get('type') == 'interrupt':
             if (
@@ -76,7 +82,6 @@ async def route_connection(reader: asyncio.StreamReader, writer: asyncio.StreamW
                 log("interrupt received, cancelling query task")
                 _current_query_task.cancel()
         else:
-            # Route responses back to whichever connection sent this message.
             _current_writer = writer
             await _stdin_queue.put((msg, writer))
 
@@ -91,7 +96,9 @@ async def handle_connection(reader: asyncio.StreamReader, writer: asyncio.Stream
         _current_writer = writer
         if _pending_question_data:
             log("re-emitting pending question to reconnected client")
+            token = _emit_writer.set(writer)
             emit_sse('ask_user_question', _pending_question_data)
+            _emit_writer.reset(token)
     await route_connection(reader, writer)
     if _current_writer is writer:
         _current_writer = None
@@ -107,9 +114,11 @@ async def process_query_queue() -> None:
         msg, query_writer = await _stdin_queue.get()
         if msg.get('type') == 'query':
             _current_query_writer = query_writer
+            token = _emit_writer.set(query_writer)
             _current_query_task = asyncio.create_task(
                 run_query(msg.get('content', ''), msg.get('session_id'))
             )
+            _emit_writer.reset(token)
             try:
                 await _current_query_task
             except asyncio.CancelledError:

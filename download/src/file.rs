@@ -15,6 +15,8 @@ use std::{
 use tokio_util::io::ReaderStream;
 
 pub async fn build_streaming_file_response(
+    // owned so it can be moved into SftpFileStream, keeping the SSH channel alive until the
+    // response stream is fully consumed.
     sftp: SftpSession,
     path: &Path,
 ) -> Result<Response<Body>> {

@@ -31,6 +31,8 @@ enum FileEvent {
 }
 
 pub fn build_streaming_zip_response(
+    // owned because it is moved into the tokio::spawn future, which requires 'static — a
+    // reference would not satisfy that bound, and SftpSession does not implement Clone.
     sftp: SftpSession,
     dir_path: &Path,
     upload_dir: &Path,
