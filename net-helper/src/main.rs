@@ -1,4 +1,4 @@
-use anyhow::{bail, Context, Result};
+use anyhow::{anyhow, bail, Context, Result};
 use caps::{CapSet, Capability};
 use clap::{Parser, Subcommand};
 use ipnet::Ipv4Net;
@@ -12,9 +12,19 @@ struct Args {
 
 #[derive(Subcommand)]
 enum Cmd {
-    TapCreate { tap_name: String, cidr: String },
-    TapDelete { tap_name: String },
-    SetupNat { host_iface: String },
+    TapCreate {
+        #[arg(value_parser = parse_tap_name)]
+        tap_name: String,
+        cidr: Ipv4Net,
+    },
+    TapDelete {
+        #[arg(value_parser = parse_tap_name)]
+        tap_name: String,
+    },
+    SetupNat {
+        #[arg(value_parser = parse_iface_name)]
+        host_iface: String,
+    },
 }
 
 fn main() {
@@ -28,28 +38,17 @@ fn main() {
 fn run(args: Args) -> Result<()> {
     raise_ambient_net_admin()
         .context("failed to raise ambient cap_net_admin — deploy with 'sudo setcap cap_net_admin=eip /usr/local/bin/net-helper'")?;
-
     match args.command {
-        Cmd::TapCreate { tap_name, cidr } => {
-            validate_tap_name(&tap_name)?;
-            validate_cidr(&cidr)?;
-            cmd_tap_create(&tap_name, &cidr)
-        }
-        Cmd::TapDelete { tap_name } => {
-            validate_tap_name(&tap_name)?;
-            cmd_tap_delete(&tap_name)
-        }
-        Cmd::SetupNat { host_iface } => {
-            validate_iface_name(&host_iface)?;
-            cmd_setup_nat(&host_iface)
-        }
+        Cmd::TapCreate { tap_name, cidr } => cmd_tap_create(&tap_name, &cidr),
+        Cmd::TapDelete { tap_name } => cmd_tap_delete(&tap_name),
+        Cmd::SetupNat { host_iface } => cmd_setup_nat(&host_iface),
     }
 }
 
-fn validate_tap_name(name: &str) -> Result<()> {
+fn parse_tap_name(name: &str) -> Result<String> {
     let digits = name
         .strip_prefix("tap")
-        .ok_or_else(|| anyhow::anyhow!("must start with 'tap'"))?;
+        .ok_or_else(|| anyhow!("must start with 'tap'"))?;
     if digits.is_empty() || digits.len() > 3 {
         bail!("digits part must be 1-3 characters");
     }
@@ -63,15 +62,10 @@ fn validate_tap_name(name: &str) -> Result<()> {
     if n > 253 {
         bail!("tap index must be 0-253");
     }
-    Ok(())
+    Ok(name.to_owned())
 }
 
-fn validate_cidr(cidr: &str) -> Result<()> {
-    cidr.parse::<Ipv4Net>().context("invalid CIDR")?;
-    Ok(())
-}
-
-fn validate_iface_name(name: &str) -> Result<()> {
+fn parse_iface_name(name: &str) -> Result<String> {
     if name.is_empty() || name.len() > 15 {
         bail!("interface name must be 1-15 characters");
     }
@@ -84,7 +78,7 @@ fn validate_iface_name(name: &str) -> Result<()> {
     {
         bail!("interface name contains invalid characters");
     }
-    Ok(())
+    Ok(name.to_owned())
 }
 
 fn run_cmd(prog: &str, args: &[&str]) -> Result<()> {
@@ -98,11 +92,11 @@ fn run_cmd(prog: &str, args: &[&str]) -> Result<()> {
     Ok(())
 }
 
-fn cmd_tap_create(tap_name: &str, cidr: &str) -> Result<()> {
+fn cmd_tap_create(tap_name: &str, cidr: &Ipv4Net) -> Result<()> {
     // Delete if stale (best-effort)
     let _ = Command::new("ip").args(["link", "del", tap_name]).status();
     run_cmd("ip", &["tuntap", "add", "dev", tap_name, "mode", "tap"])?;
-    run_cmd("ip", &["addr", "add", cidr, "dev", tap_name])?;
+    run_cmd("ip", &["addr", "add", &cidr.to_string(), "dev", tap_name])?;
     run_cmd("ip", &["link", "set", "dev", tap_name, "up"])
 }
 
@@ -115,31 +109,10 @@ fn cmd_setup_nat(iface: &str) -> Result<()> {
     run_cmd("iptables", &["-P", "FORWARD", "ACCEPT"])?;
     // Best-effort delete to avoid duplicates on restart
     let _ = Command::new("iptables")
-        .args([
-            "-t",
-            "nat",
-            "-D",
-            "POSTROUTING",
-            "-o",
-            iface,
-            "-j",
-            "MASQUERADE",
-        ])
+        .args(["-t", "nat", "-D", "POSTROUTING", "-o", iface, "-j", "MASQUERADE"])
         .stderr(std::process::Stdio::null())
         .status();
-    run_cmd(
-        "iptables",
-        &[
-            "-t",
-            "nat",
-            "-A",
-            "POSTROUTING",
-            "-o",
-            iface,
-            "-j",
-            "MASQUERADE",
-        ],
-    )
+    run_cmd("iptables", &["-t", "nat", "-A", "POSTROUTING", "-o", iface, "-j", "MASQUERADE"])
 }
 
 fn raise_ambient_net_admin() -> Result<()> {
@@ -156,48 +129,48 @@ mod tests {
 
     #[test]
     fn tap_name_valid() {
-        assert!(validate_tap_name("tap0").is_ok());
-        assert!(validate_tap_name("tap1").is_ok());
-        assert!(validate_tap_name("tap9").is_ok());
-        assert!(validate_tap_name("tap10").is_ok());
-        assert!(validate_tap_name("tap99").is_ok());
-        assert!(validate_tap_name("tap100").is_ok());
-        assert!(validate_tap_name("tap253").is_ok());
+        assert!(parse_tap_name("tap0").is_ok());
+        assert!(parse_tap_name("tap1").is_ok());
+        assert!(parse_tap_name("tap9").is_ok());
+        assert!(parse_tap_name("tap10").is_ok());
+        assert!(parse_tap_name("tap99").is_ok());
+        assert!(parse_tap_name("tap100").is_ok());
+        assert!(parse_tap_name("tap253").is_ok());
     }
 
     #[test]
     fn tap_name_invalid() {
-        assert!(validate_tap_name("").is_err());
-        assert!(validate_tap_name("tap").is_err());
-        assert!(validate_tap_name("eth0").is_err());
-        assert!(validate_tap_name("tap00").is_err());
-        assert!(validate_tap_name("tap01").is_err());
-        assert!(validate_tap_name("tap254").is_err());
-        assert!(validate_tap_name("tap999").is_err());
-        assert!(validate_tap_name("tap1234").is_err());
-        assert!(validate_tap_name("tapx").is_err());
-        assert!(validate_tap_name("tap-1").is_err());
+        assert!(parse_tap_name("").is_err());
+        assert!(parse_tap_name("tap").is_err());
+        assert!(parse_tap_name("eth0").is_err());
+        assert!(parse_tap_name("tap00").is_err());
+        assert!(parse_tap_name("tap01").is_err());
+        assert!(parse_tap_name("tap254").is_err());
+        assert!(parse_tap_name("tap999").is_err());
+        assert!(parse_tap_name("tap1234").is_err());
+        assert!(parse_tap_name("tapx").is_err());
+        assert!(parse_tap_name("tap-1").is_err());
     }
 
     #[test]
     fn iface_name_valid() {
-        assert!(validate_iface_name("eth0").is_ok());
-        assert!(validate_iface_name("ens3").is_ok());
-        assert!(validate_iface_name("wlan0").is_ok());
-        assert!(validate_iface_name("lo").is_ok());
-        assert!(validate_iface_name("docker0").is_ok());
-        assert!(validate_iface_name("veth@if5").is_ok());
-        assert!(validate_iface_name("a").is_ok());
-        assert!(validate_iface_name("123456789012345").is_ok());
+        assert!(parse_iface_name("eth0").is_ok());
+        assert!(parse_iface_name("ens3").is_ok());
+        assert!(parse_iface_name("wlan0").is_ok());
+        assert!(parse_iface_name("lo").is_ok());
+        assert!(parse_iface_name("docker0").is_ok());
+        assert!(parse_iface_name("veth@if5").is_ok());
+        assert!(parse_iface_name("a").is_ok());
+        assert!(parse_iface_name("123456789012345").is_ok());
     }
 
     #[test]
     fn iface_name_invalid() {
-        assert!(validate_iface_name("").is_err());
-        assert!(validate_iface_name(".").is_err());
-        assert!(validate_iface_name("..").is_err());
-        assert!(validate_iface_name("1234567890123456").is_err());
-        assert!(validate_iface_name("eth 0").is_err());
-        assert!(validate_iface_name("eth/0").is_err());
+        assert!(parse_iface_name("").is_err());
+        assert!(parse_iface_name(".").is_err());
+        assert!(parse_iface_name("..").is_err());
+        assert!(parse_iface_name("1234567890123456").is_err());
+        assert!(parse_iface_name("eth 0").is_err());
+        assert!(parse_iface_name("eth/0").is_err());
     }
 }
