@@ -6,7 +6,7 @@ use serde::Serialize;
 use ssh_client::{SshClient, connect_ssh, open_exec_channel};
 use std::{
     net::Ipv4Addr,
-    path::Path,
+    path::PathBuf,
     str::from_utf8,
 };
 use tokio::{
@@ -49,27 +49,23 @@ pub fn start_agent_relay(
     let ssh_user = ssh_user.to_owned();
     let vm_host_key_path = vm_host_key_path.to_owned();
     tokio::spawn(async move {
-        run_agent_relay(guest_ip, &ssh_key_path, &ssh_user, &vm_host_key_path, inbound, tx).await
+        run_agent_relay(guest_ip, ssh_key_path, ssh_user, vm_host_key_path, inbound, tx).await
     });
     ReceiverStream::new(rx)
 }
 
 async fn run_agent_relay(
     guest_ip: Ipv4Addr,
-    ssh_key_path: &Path,
-    ssh_user: &str,
-    vm_host_key_path: &Path,
+    ssh_key_path: PathBuf,
+    ssh_user: String,
+    vm_host_key_path: PathBuf,
     inbound: mpsc::Receiver<AgentMessage>,
     tx: mpsc::Sender<Bytes>,
 ) {
-    // Keep the SSE connection alive while SSH is being established (can take up to 60s
-    // while waiting for the VM to become reachable). Without this, browsers close idle
-    // connections before the relay is ready.
     let heartbeat_tx = tx.clone();
     let heartbeat_task = tokio::spawn(async move {
         let mut interval = interval(Duration::from_secs(HEARTBEAT_SECS));
-        // Do NOT skip the first tick: fire immediately to flush nginx proxy buffers
-        // so the browser receives the HTTP 200 headers and fires onopen without delay.
+        interval.tick().await;
         loop {
             interval.tick().await;
             match timeout(
@@ -92,9 +88,9 @@ async fn run_agent_relay(
     });
     let relay_result = connect_agent_relay(
         guest_ip,
-        &ssh_key_path,
-        &ssh_user,
-        &vm_host_key_path,
+        ssh_key_path,
+        ssh_user,
+        vm_host_key_path,
         inbound,
         tx.clone(),
     )
@@ -116,13 +112,13 @@ async fn run_agent_relay(
 
 async fn connect_agent_relay(
     guest_ip: Ipv4Addr,
-    ssh_key_path: &Path,
-    ssh_user: &str,
-    vm_host_key_path: &Path,
+    ssh_key_path: PathBuf,
+    ssh_user: String,
+    vm_host_key_path: PathBuf,
     inbound: mpsc::Receiver<AgentMessage>,
     tx: mpsc::Sender<Bytes>,
 ) -> Result<()> {
-    let mut ssh_handle = connect_ssh(&guest_ip.to_string(), ssh_key_path, ssh_user, vm_host_key_path).await?;
+    let mut ssh_handle = connect_ssh(&guest_ip.to_string(), &ssh_key_path, &ssh_user, &vm_host_key_path).await?;
     info!("agent ssh channel opened");
     let ssh_channel = open_exec_channel(&mut ssh_handle, AGENT_CMD).await?;
     run_relay(ssh_handle, ssh_channel, inbound, tx).await
@@ -135,7 +131,7 @@ async fn run_relay(
     tx: mpsc::Sender<Bytes>,
 ) -> Result<()> {
     let mut heartbeat = interval(Duration::from_secs(HEARTBEAT_SECS));
-    heartbeat.tick().await; // consume the immediate first tick
+    heartbeat.tick().await;
     loop {
         tokio::select! {
             biased;
