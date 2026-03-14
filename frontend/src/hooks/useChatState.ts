@@ -20,6 +20,7 @@ export interface ChatStateResult {
   getMessages: (sessionId: string | null) => ChatMessage[];
   setMessages: (sessionId: string | null, msgs: ChatMessage[]) => void;
   addMessage: (sessionId: string | null, msg: ChatMessage) => void;
+  removeMessage: (sessionId: string | null, id: string) => void;
   updateLastMessage: (sessionId: string | null, updater: (msg: ChatMessage) => ChatMessage) => void;
   updateMessageById: (sessionId: string | null, id: string, updater: (msg: ChatMessage) => ChatMessage) => void;
   generateId: () => string;
@@ -69,6 +70,12 @@ export function useChatState(): ChatStateResult {
     setRenderTick((t) => t + 1);
   }, []);
 
+  const removeMessage = useCallback((sessionId: string | null, id: string) => {
+    const prev = messagesBySession.current.get(sessionId) ?? [];
+    messagesBySession.current.set(sessionId, prev.filter((m) => m.id !== id));
+    setRenderTick((t) => t + 1);
+  }, []);
+
   const updateLastMessage = useCallback((
     sessionId: string | null,
     updater: (msg: ChatMessage) => ChatMessage,
@@ -107,6 +114,7 @@ export function useChatState(): ChatStateResult {
     getMessages,
     setMessages,
     addMessage,
+    removeMessage,
     updateLastMessage,
     updateMessageById,
     generateId,

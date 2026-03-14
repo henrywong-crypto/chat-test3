@@ -6,13 +6,14 @@ interface SseHandlerDeps {
   latestEvent: SseEvent | null;
   loadHistory: () => Promise<import("../types").ChatSession[]>;
   newChatKeyRef: { current: number };
+  sessionStartKeyRef: { current: number };
 }
 
 export function useSseHandlers(
   sseState: SseHandlerDeps,
   chatState: ChatStateResult & { setSessions: (s: import("../types").ChatSession[]) => void },
 ) {
-  const { latestEvent, loadHistory, newChatKeyRef } = sseState;
+  const { latestEvent, loadHistory, newChatKeyRef, sessionStartKeyRef } = sseState;
   const {
     viewSessionId,
     runningSessionId,
@@ -21,6 +22,7 @@ export function useSseHandlers(
     setSessionPendingQuestion,
     setSessions,
     addMessage,
+    removeMessage,
     updateLastMessage,
     updateMessageById,
     getMessages,
@@ -42,9 +44,6 @@ export function useSseHandlers(
   // Track current thinking message id
   const thinkingMsgId = useRef<string | null>(null);
 
-  // Track the newChatKey when the current null-session started
-  const sessionStartChatKey = useRef(0);
-
   // Track current assistant message id (accumulating text)
   const assistantMsgId = useRef<string | null>(null);
 
@@ -53,15 +52,26 @@ export function useSseHandlers(
     const event = latestEvent as SseEvent;
     const session = runningRef.current;
 
+    // Seal the active thinking message. If it accumulated no content (no
+    // thinking_delta arrived), remove it entirely so the animated dots don't
+    // linger after the response starts arriving.
+    const sealThinking = () => {
+      if (!thinkingMsgId.current) return;
+      const msgId = thinkingMsgId.current;
+      thinkingMsgId.current = null;
+      const msgs = getMessages(session);
+      const thinkMsg = msgs.find((m) => m.id === msgId);
+      if (thinkMsg && !thinkMsg.content) {
+        removeMessage(session, msgId);
+      }
+    };
+
     switch (event.type) {
       case "init": {
         // Push a thinking indicator as an assistant message
         const id = generateId();
         thinkingMsgId.current = id;
         assistantMsgId.current = null;
-        if (session === null) {
-          sessionStartChatKey.current = newChatKeyRef.current;
-        }
         addMessage(session, {
           id,
           type: "assistant",
@@ -85,11 +95,7 @@ export function useSseHandlers(
 
       case "text_delta": {
         const { text } = event.payload;
-        // Remove the thinking indicator if this is the first text
-        if (thinkingMsgId.current) {
-          // Seal the thinking message (keep it, just mark not active)
-          thinkingMsgId.current = null;
-        }
+        sealThinking();
         if (!assistantMsgId.current) {
           const id = generateId();
           assistantMsgId.current = id;
@@ -110,7 +116,7 @@ export function useSseHandlers(
 
       case "tool_start": {
         const { id: toolId, name, input } = event.payload;
-        thinkingMsgId.current = null;
+        sealThinking();
         assistantMsgId.current = null;
         if (name === "AskUserQuestion") break;
         const msgId = generateId();
@@ -142,7 +148,7 @@ export function useSseHandlers(
 
       case "ask_user_question": {
         const { request_id, questions } = event.payload;
-        thinkingMsgId.current = null;
+        sealThinking();
         assistantMsgId.current = null;
         setSessionPendingQuestion(session, { requestId: request_id, questions });
         break;
@@ -154,12 +160,12 @@ export function useSseHandlers(
         setRunningSessionId(null);
         setIsStreaming(false);
         setSessionPendingQuestion(completedSession, null);
-        thinkingMsgId.current = null;
+        sealThinking();
         assistantMsgId.current = null;
         toolIdToMsgId.current.clear();
 
         if (session_id && completedSession === viewRef.current) {
-          const newChatKeyUnchanged = completedSession !== null || sessionStartChatKey.current === newChatKeyRef.current;
+          const newChatKeyUnchanged = completedSession !== null || sessionStartKeyRef.current === newChatKeyRef.current;
           if (newChatKeyUnchanged) {
             const msgs = getMessages(completedSession);
             setMessages(session_id, msgs);

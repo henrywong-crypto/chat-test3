@@ -1,4 +1,5 @@
 import React, { createContext, useCallback, useContext, useEffect, useRef, useState } from "react";
+import { flushSync } from "react-dom";
 import type { ChatSession, FileEntry, SseEvent, TranscriptMessage } from "../types";
 
 interface SseContextValue {
@@ -63,35 +64,35 @@ export function SseProvider({ children }: { children: React.ReactNode }) {
     };
 
     addListener("init", () => {
-      setLatestEvent({ type: "init" });
+      flushSync(() => setLatestEvent({ type: "init" }));
     });
 
     addListener("text_delta", (e) => {
-      setLatestEvent({ type: "text_delta", payload: JSON.parse(e.data) });
+      flushSync(() => setLatestEvent({ type: "text_delta", payload: JSON.parse(e.data) }));
     });
 
     addListener("thinking_delta", (e) => {
-      setLatestEvent({ type: "thinking_delta", payload: JSON.parse(e.data) });
+      flushSync(() => setLatestEvent({ type: "thinking_delta", payload: JSON.parse(e.data) }));
     });
 
     addListener("tool_start", (e) => {
-      setLatestEvent({ type: "tool_start", payload: JSON.parse(e.data) });
+      flushSync(() => setLatestEvent({ type: "tool_start", payload: JSON.parse(e.data) }));
     });
 
     addListener("ask_user_question", (e) => {
-      setLatestEvent({ type: "ask_user_question", payload: JSON.parse(e.data) });
+      flushSync(() => setLatestEvent({ type: "ask_user_question", payload: JSON.parse(e.data) }));
     });
 
     addListener("tool_result", (e) => {
-      setLatestEvent({ type: "tool_result", payload: JSON.parse(e.data) });
+      flushSync(() => setLatestEvent({ type: "tool_result", payload: JSON.parse(e.data) }));
     });
 
     addListener("done", (e) => {
-      setLatestEvent({ type: "done", payload: JSON.parse(e.data) });
+      flushSync(() => setLatestEvent({ type: "done", payload: JSON.parse(e.data) }));
     });
 
     addListener("error_event", (e) => {
-      setLatestEvent({ type: "error_event", payload: JSON.parse(e.data) });
+      flushSync(() => setLatestEvent({ type: "error_event", payload: JSON.parse(e.data) }));
     });
 
     return () => {

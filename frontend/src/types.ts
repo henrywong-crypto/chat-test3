@@ -18,6 +18,9 @@ export interface ContentBlock {
   name?: string;
   input?: Record<string, unknown>;
   thinking?: string;
+  tool_use_id?: string;
+  content?: string | ContentBlock[];
+  is_error?: boolean;
 }
 
 export interface Question {
