@@ -4,6 +4,7 @@ export default defineConfig({
   testDir: "./tests",
   timeout: 15_000,
   expect: { timeout: 10_000 },
+  workers: 3,
   reporter: "list",
   use: {
     headless: true,

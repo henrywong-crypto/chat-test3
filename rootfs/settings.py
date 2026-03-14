@@ -26,20 +26,6 @@ def set_settings(content: str) -> dict:
     return {"ok": True}
 
 
-def clear_bedrock() -> dict:
-    if not SETTINGS_PATH.exists():
-        return {"ok": True}
-    try:
-        data = json.loads(SETTINGS_PATH.read_text())
-    except (json.JSONDecodeError, OSError):
-        return {"ok": True}
-    env = data.get("env", {})
-    env.pop("CLAUDE_CODE_USE_BEDROCK", None)
-    data["env"] = env
-    SETTINGS_PATH.write_text(json.dumps(data, indent=2))
-    return {"ok": True}
-
-
 def main() -> None:
     raw = sys.stdin.readline()
     if not raw:
@@ -55,8 +41,6 @@ def main() -> None:
     elif cmd_type == "set":
         content = msg.get("content", "")
         print(json.dumps(set_settings(content)))
-    elif cmd_type == "clear_bedrock":
-        print(json.dumps(clear_bedrock()))
     else:
         print(json.dumps({"error": f"unknown type: {cmd_type}"}))
 
