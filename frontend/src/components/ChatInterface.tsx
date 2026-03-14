@@ -1,12 +1,12 @@
-import React, { useCallback, useEffect } from "react";
-import type { ChatSession, TranscriptMessage } from "../types";
+import React, { useCallback, useEffect, useRef } from "react";
+import type { ChatMessage, ChatSession, TranscriptMessage } from "../types";
 import { useSse } from "../contexts/SseContext";
 import { useChatState } from "../hooks/useChatState";
 import { useSseHandlers } from "../hooks/useSseHandlers";
-import ChatMessagesPane from "./ChatMessagesPane";
-import ChatComposer from "./ChatComposer";
 import AskUserQuestionPanel from "./AskUserQuestionPanel";
-import type { ChatMessage } from "../types";
+import ChatComposer from "./ChatComposer";
+import ChatMessagesPane from "./ChatMessagesPane";
+import ClaudeStatus from "./ClaudeStatus";
 
 function buildMessagesFromTranscript(transcript: TranscriptMessage[]): ChatMessage[] {
   const messages: ChatMessage[] = [];
@@ -66,9 +66,10 @@ interface ChatInterfaceProps {
   sessions: ChatSession[];
   setSessions: (s: ChatSession[]) => void;
   selectedSession: ChatSession | null;
+  onRunningSessionChange?: (sessionId: string | null) => void;
 }
 
-export default function ChatInterface({ sessions, setSessions, selectedSession }: ChatInterfaceProps) {
+export default function ChatInterface({ sessions, setSessions, selectedSession, onRunningSessionChange }: ChatInterfaceProps) {
   const sseCtx = useSse();
   const chatState = useChatState();
 
@@ -118,11 +119,22 @@ export default function ChatInterface({ sessions, setSessions, selectedSession }
   useEffect(() => {
     if (!selectedSession) {
       setViewSessionId(null);
+      setAwaitingQuestion(false);
+      setPendingQuestion(null);
       return;
     }
     setViewSessionId(selectedSession.session_id);
+    setAwaitingQuestion(false);
+    setPendingQuestion(null);
     loadTranscriptForSession(selectedSession);
   }, [selectedSession]); // eslint-disable-line react-hooks/exhaustive-deps
+
+  // Notify parent when the running session changes so Sidebar can show the active indicator
+  const onRunningSessionChangeRef = useRef(onRunningSessionChange);
+  onRunningSessionChangeRef.current = onRunningSessionChange;
+  useEffect(() => {
+    onRunningSessionChangeRef.current?.(runningSessionId);
+  }, [runningSessionId]);
 
   const handleSend = useCallback(async (text: string) => {
     const sessionId = viewSessionId;
@@ -178,6 +190,7 @@ export default function ChatInterface({ sessions, setSessions, selectedSession }
   return (
     <div className="flex min-h-0 flex-1 flex-col" key={renderTick}>
       <ChatMessagesPane messages={messages} isLoading={isLoading} />
+      <ClaudeStatus isLoading={isLoading} onAbort={handleStop} />
       {awaitingQuestion && pendingQuestion ? (
         <div className="flex-shrink-0 border-t border-border p-4">
           <div className="mx-auto max-w-3xl">

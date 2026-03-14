@@ -1,5 +1,5 @@
 import React from "react";
-import { MessageSquare, Terminal, FolderOpen, LogOut, RotateCcw } from "lucide-react";
+import { FolderOpen, LogOut, MessageSquare, RotateCcw, Settings, Terminal } from "lucide-react";
 import type { ViewTab } from "../types";
 
 interface IconRailProps {
@@ -7,9 +7,10 @@ interface IconRailProps {
   onTabChange: (tab: ViewTab) => void;
   hasUserRootfs: boolean;
   csrfToken: string;
+  onSettingsOpen: () => void;
 }
 
-export default function IconRail({ activeTab, onTabChange, hasUserRootfs, csrfToken }: IconRailProps) {
+export default function IconRail({ activeTab, onTabChange, hasUserRootfs, csrfToken, onSettingsOpen }: IconRailProps) {
   return (
     <div className="flex w-12 flex-col items-center gap-1 border-r border-border bg-card py-2">
       <IconButton
@@ -36,6 +37,9 @@ export default function IconRail({ activeTab, onTabChange, hasUserRootfs, csrfTo
 
       <div className="mt-auto flex flex-col items-center gap-1">
         {hasUserRootfs && <ResetButton csrfToken={csrfToken} />}
+        <IconButton title="Settings" onClick={onSettingsOpen}>
+          <Settings className="h-5 w-5" />
+        </IconButton>
         <IconButton title="Logout" onClick={() => { window.location.href = "/logout"; }}>
           <LogOut className="h-5 w-5" />
         </IconButton>

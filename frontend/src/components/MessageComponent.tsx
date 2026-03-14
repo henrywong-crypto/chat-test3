@@ -1,8 +1,9 @@
-import React, { memo } from "react";
+import React, { memo, useState } from "react";
 import ReactMarkdown from "react-markdown";
 import remarkGfm from "remark-gfm";
 import { twMerge } from "tailwind-merge";
 import type { ChatMessage } from "../types";
+import MessageCopyControl from "./MessageCopyControl";
 import ToolRenderer from "./ToolRenderer";
 
 interface MessageComponentProps {
@@ -18,14 +19,24 @@ const MessageComponent = memo(({ message, prevMessage }: MessageComponentProps) 
     !prevMessage.isToolUse;
 
   const formattedTime = new Date(message.timestamp).toLocaleTimeString();
+  const [hovered, setHovered] = useState(false);
 
   if (message.type === "user") {
     return (
-      <div className="flex justify-end px-3 py-0.5">
+      <div
+        className="flex justify-end px-3 py-0.5"
+        onMouseEnter={() => setHovered(true)}
+        onMouseLeave={() => setHovered(false)}
+      >
         <div className="max-w-xs sm:max-w-md lg:max-w-lg xl:max-w-xl">
           <div className="rounded-2xl rounded-br-md bg-blue-600 px-3 py-2 text-sm text-white shadow-sm">
             <div className="whitespace-pre-wrap break-words">{message.content}</div>
-            <div className="mt-1 text-right text-[10px] text-blue-100">{formattedTime}</div>
+            <div className="mt-1 flex items-center justify-end gap-2">
+              {hovered && (
+                <MessageCopyControl content={message.content} messageType="user" />
+              )}
+              <span className="text-[10px] text-blue-100">{formattedTime}</span>
+            </div>
           </div>
         </div>
       </div>
@@ -86,7 +97,11 @@ const MessageComponent = memo(({ message, prevMessage }: MessageComponentProps) 
 
   // Regular assistant message
   return (
-    <div className={twMerge("px-3", isGrouped ? "py-0.5" : "py-1")}>
+    <div
+      className={twMerge("px-3", isGrouped ? "py-0.5" : "py-1")}
+      onMouseEnter={() => setHovered(true)}
+      onMouseLeave={() => setHovered(false)}
+    >
       {!isGrouped && (
         <div className="mb-1.5 flex items-center gap-2">
           <div className="flex h-6 w-6 flex-shrink-0 items-center justify-center rounded-full bg-primary text-[10px] font-bold text-primary-foreground">
@@ -94,11 +109,21 @@ const MessageComponent = memo(({ message, prevMessage }: MessageComponentProps) 
           </div>
           <span className="text-xs font-medium text-foreground">Claude</span>
           <span className="text-[10px] text-muted-foreground">{formattedTime}</span>
+          <div className="ml-auto">
+            {hovered && (
+              <MessageCopyControl content={message.content} messageType="assistant" />
+            )}
+          </div>
         </div>
       )}
       <div className={twMerge("text-sm text-foreground", isGrouped ? "" : "pl-8")}>
         <MarkdownContent content={message.content} />
       </div>
+      {isGrouped && hovered && (
+        <div className="flex justify-end pt-0.5">
+          <MessageCopyControl content={message.content} messageType="assistant" />
+        </div>
+      )}
     </div>
   );
 });

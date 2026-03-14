@@ -5,6 +5,7 @@ import Sidebar from "./components/Sidebar";
 import ChatInterface from "./components/ChatInterface";
 import Terminal from "./components/Terminal";
 import FileManager from "./components/FileManager";
+import SettingsPanel from "./components/SettingsPanel";
 import type { ChatSession, ViewTab } from "./types";
 
 function AppContent() {
@@ -12,6 +13,8 @@ function AppContent() {
   const [activeTab, setActiveTab] = useState<ViewTab>("chat");
   const [sessions, setSessions] = useState<ChatSession[]>([]);
   const [selectedSession, setSelectedSession] = useState<ChatSession | null>(null);
+  const [showSettings, setShowSettings] = useState(false);
+  const [runningSessionId, setRunningSessionId] = useState<string | null>(null);
 
   useEffect(() => {
     loadHistory().then(setSessions).catch(console.error);
@@ -41,13 +44,14 @@ function AppContent() {
         onTabChange={setActiveTab}
         hasUserRootfs={hasUserRootfs}
         csrfToken={csrfToken}
+        onSettingsOpen={() => setShowSettings(true)}
       />
 
       {activeTab === "chat" && (
         <Sidebar
           sessions={sessions}
           viewSessionId={selectedSession?.session_id ?? null}
-          runningSessionId={null}
+          runningSessionId={runningSessionId}
           onSelectSession={setSelectedSession}
           onNewChat={() => setSelectedSession(null)}
           onRefresh={handleRefresh}
@@ -57,7 +61,7 @@ function AppContent() {
 
       <main className="flex min-w-0 flex-1 flex-col overflow-hidden">
         {activeTab === "chat" && (
-          <ChatInterface sessions={sessions} setSessions={setSessions} selectedSession={selectedSession} />
+          <ChatInterface sessions={sessions} setSessions={setSessions} selectedSession={selectedSession} onRunningSessionChange={setRunningSessionId} />
         )}
         <div
           style={{ display: activeTab === "terminal" ? "flex" : "none" }}
@@ -72,6 +76,7 @@ function AppContent() {
           <FileManager />
         </div>
       </main>
+      {showSettings && <SettingsPanel onClose={() => setShowSettings(false)} />}
     </div>
   );
 }
