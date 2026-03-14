@@ -5,13 +5,14 @@ import type { ChatStateResult } from "./useChatState";
 interface SseHandlerDeps {
   latestEvent: SseEvent | null;
   loadHistory: () => Promise<import("../types").ChatSession[]>;
+  newChatKeyRef: { current: number };
 }
 
 export function useSseHandlers(
   sseState: SseHandlerDeps,
   chatState: ChatStateResult & { setSessions: (s: import("../types").ChatSession[]) => void },
 ) {
-  const { latestEvent, loadHistory } = sseState;
+  const { latestEvent, loadHistory, newChatKeyRef } = sseState;
   const {
     viewSessionId,
     runningSessionId,
@@ -41,6 +42,9 @@ export function useSseHandlers(
   // Track current thinking message id
   const thinkingMsgId = useRef<string | null>(null);
 
+  // Track the newChatKey when the current null-session started
+  const sessionStartChatKey = useRef(0);
+
   // Track current assistant message id (accumulating text)
   const assistantMsgId = useRef<string | null>(null);
 
@@ -55,6 +59,9 @@ export function useSseHandlers(
         const id = generateId();
         thinkingMsgId.current = id;
         assistantMsgId.current = null;
+        if (session === null) {
+          sessionStartChatKey.current = newChatKeyRef.current;
+        }
         addMessage(session, {
           id,
           type: "assistant",
@@ -152,12 +159,18 @@ export function useSseHandlers(
         toolIdToMsgId.current.clear();
 
         if (session_id && completedSession === viewRef.current) {
-          const msgs = getMessages(completedSession);
-          setMessages(session_id, msgs);
-          if (completedSession === null) {
+          const newChatKeyUnchanged = completedSession !== null || sessionStartChatKey.current === newChatKeyRef.current;
+          if (newChatKeyUnchanged) {
+            const msgs = getMessages(completedSession);
+            setMessages(session_id, msgs);
+            if (completedSession === null) {
+              setMessages(null, []);
+            }
+            setViewSessionId(session_id);
+          } else if (completedSession === null) {
+            // New Chat was clicked after this session started — discard stale messages
             setMessages(null, []);
           }
-          setViewSessionId(session_id);
         }
 
         loadHistory().then(setSessions).catch(console.error);

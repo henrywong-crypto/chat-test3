@@ -73,6 +73,8 @@ interface ChatInterfaceProps {
 export default function ChatInterface({ sessions, setSessions, selectedSession, newChatKey, onRunningSessionChange }: ChatInterfaceProps) {
   const sseCtx = useSse();
   const chatState = useChatState();
+  const newChatKeyRef = useRef(newChatKey);
+  newChatKeyRef.current = newChatKey;
 
   const {
     viewSessionId,
@@ -91,7 +93,7 @@ export default function ChatInterface({ sessions, setSessions, selectedSession, 
 
   // Wire SSE events to chat state
   useSseHandlers(
-    { latestEvent: sseCtx.latestEvent, loadHistory: sseCtx.loadHistory },
+    { latestEvent: sseCtx.latestEvent, loadHistory: sseCtx.loadHistory, newChatKeyRef },
     { ...chatState, setSessions },
   );
 
