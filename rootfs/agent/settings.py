@@ -1,3 +1,6 @@
+# /// script
+# requires-python = ">=3.11"
+# ///
 import json
 import sys
 from pathlib import Path
@@ -59,3 +62,6 @@ def main() -> None:
         print(json.dumps(clear_bedrock()))
     else:
         print(json.dumps({"error": f"unknown type: {cmd_type}"}))
+
+
+main()

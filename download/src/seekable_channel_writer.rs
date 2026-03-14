@@ -178,6 +178,17 @@ mod tests {
     // ── write ─────────────────────────────────────────────────────────────────
 
     #[test]
+    fn test_write_position_overflow_returns_invalid_input() {
+        let (tx, _rx) = mpsc::channel(64);
+        let mut writer = SeekableChannelWriter::new(tx);
+        writer.base = u64::MAX;
+        writer.pos = u64::MAX;
+        writer.high_water = u64::MAX;
+        let err = writer.write(&[1]).unwrap_err();
+        assert_eq!(err.kind(), io::ErrorKind::InvalidInput);
+    }
+
+    #[test]
     fn test_write_fills_buffer_without_flushing() {
         let (tx, mut rx) = mpsc::channel(64);
         let mut writer = SeekableChannelWriter::new(tx);

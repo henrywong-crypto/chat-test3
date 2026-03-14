@@ -4,7 +4,7 @@ use russh::{ChannelMsg, client};
 use ssh_client::{SshClient, connect_ssh, open_exec_channel};
 use std::{path::Path, str::from_utf8};
 
-const SETTINGS_CMD: &str = "bash -lc '/opt/agent/.venv/bin/agent-settings'";
+const SETTINGS_CMD: &str = "bash -lc '/usr/local/bin/uv run /opt/settings.py'";
 
 pub struct VmSettings {
     pub has_api_key: bool,

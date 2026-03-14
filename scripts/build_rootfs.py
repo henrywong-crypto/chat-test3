@@ -36,7 +36,10 @@ from pathlib import Path
 S3_BUCKET   = "https://s3.amazonaws.com/spec.ccfc.min"
 S3_ARTIFACTS = f"{S3_BUCKET}/firecracker-ci"
 INSTALL_DIR = Path("/var/lib/fc")
-AGENT_DIR = Path(__file__).parent.parent / "rootfs" / "agent"
+AGENT_DIR    = Path(__file__).parent.parent / "rootfs" / "agent"
+AGENT_PY     = AGENT_DIR / "agent.py"
+CONNECTOR_PY = AGENT_DIR / "connector.py"
+SETTINGS_PY  = AGENT_DIR / "settings.py"
 
 CLAUDE_SETTINGS = """\
 {
@@ -285,20 +288,22 @@ def install_claude_code(rootfs: Path) -> None:
 
 
 def install_agent(rootfs: Path) -> None:
-    agent_dest = rootfs / "opt/agent"
-    if agent_dest.exists():
-        shutil.rmtree(str(agent_dest))
-    shutil.copytree(str(AGENT_DIR), str(agent_dest))
-    run(["chown", "-R", "1000:1000", str(rootfs / "opt")])
+    opt = rootfs / "opt"
+    opt.mkdir(exist_ok=True)
+    shutil.copy(str(AGENT_PY),     str(opt / "agent.py"))
+    shutil.copy(str(CONNECTOR_PY), str(opt / "connector.py"))
+    shutil.copy(str(SETTINGS_PY),  str(opt / "settings.py"))
+    run(["chown", "-R", "1000:1000", str(opt)])
 
-    # Pre-warm the uv dependency cache as the ubuntu user so the first VM
-    # startup is instant.  uv sync installs deps into /opt/agent/.venv without
-    # running the daemon.
-    # bash -l sources ~/.profile → ~/.bashrc so uv is on PATH.
-    # Non-fatal: the agent works without the cache; it just installs on first run.
+    # Pre-warm the uv package cache as the ubuntu user so the first VM startup
+    # is instant.  Running any script with the same dependency set populates
+    # uv's global package cache; subsequent `uv run /opt/agent.py` calls
+    # install from the cache (no network needed).
+    # Non-fatal: the agent works without the cache; deps install on first run.
     result = subprocess.run(
         ["chroot", str(rootfs), "su", "-", "ubuntu", "-c",
-         "bash -lc '/usr/local/bin/uv sync --directory /opt/agent'"],
+         "bash -lc '/usr/local/bin/uv run --with claude-agent-sdk"
+         " python3 -c \"import claude_agent_sdk\"'"],
     )
     if result.returncode != 0:
         print("warning: uv prewarm failed (agent will install deps on first run)")
