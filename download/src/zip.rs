@@ -31,7 +31,7 @@ enum FileEvent {
 }
 
 pub fn build_streaming_zip_response(
-    sftp: SftpSession,
+    sftp: &SftpSession,
     dir_path: &Path,
     upload_dir: &Path,
     filename: &str,
