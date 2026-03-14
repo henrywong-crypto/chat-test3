@@ -130,6 +130,7 @@ Exceptions — these are fine to use inline without a `use` import:
 - `std::env::var`
 - `aws_smithy_types::Document::*`
 - `aws_config::load_defaults`
+- `russh::Error` (in `type Error = russh::Error;` associated type definitions)
 
 Combine `use` statements that share the same top-level crate into a single `use` with nested paths:
 
@@ -451,3 +452,17 @@ fn resolve_livestock_path(livestock_path: &str, barn_dir: &str) -> Result<String
 ### Versioning
 
 All crate versions use 3-part semver (e.g. `0.1.0`).
+
+### Network Addresses
+
+Use `std::net::SocketAddr` for all socket addresses — never format them as strings. Parse IP strings into `IpAddr` at the entry boundary and construct a `SocketAddr` with an explicit port.
+
+```rust
+// Good — typed address, port explicit, parse error caught early
+let guest_addr = SocketAddr::new(guest_ip.parse::<IpAddr>().context("invalid guest IP")?, 22);
+connect(config, guest_addr, client).await?;
+
+// Bad — raw string, malformed address only caught at connect time
+let addr = format!("{guest_ip}:22");
+connect(config, addr.as_str(), client).await?;
+```

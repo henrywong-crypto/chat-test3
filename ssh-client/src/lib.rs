@@ -1,18 +1,26 @@
-use anyhow::{bail, Context, Result};
+use anyhow::{Context, Result, bail};
+use chrono::{TimeDelta, Utc};
 use russh::{
     Channel,
-    Error,
-    client::{connect, Config, Handle, Handler, Msg},
-    keys::{load_public_key, load_secret_key, PrivateKey, PrivateKeyWithHashAlg, PublicKey},
+    client::{Config, Handle, Handler, Msg, connect},
+    keys::{PrivateKey, PrivateKeyWithHashAlg, PublicKey, load_public_key, load_secret_key},
 };
-use std::{future::Future, path::Path, sync::Arc, time::Duration};
+use std::{
+    future::Future,
+    net::{IpAddr, SocketAddr},
+    path::Path,
+    sync::Arc,
+    time::Duration,
+};
+
+const TERMINAL_EXEC_CMD: &str = "bash -ic 'claude; exec bash'";
 
 pub struct SshClient {
     vm_host_key: Option<PublicKey>,
 }
 
 impl Handler for SshClient {
-    type Error = Error;
+    type Error = russh::Error;
 
     fn check_server_key(
         &mut self,
@@ -33,17 +41,19 @@ pub async fn connect_ssh(
     vm_host_key_path: &Path,
 ) -> Result<Handle<SshClient>> {
     let vm_host_key = load_vm_host_key(vm_host_key_path)?;
-    let ssh_keypair = load_ssh_keypair(ssh_key_path)?;
+    let ssh_keypair = Arc::new(load_ssh_keypair(ssh_key_path)?);
     let ssh_config = Arc::new(Config::default());
-    let addr = format!("{guest_ip}:22");
-    let connect_deadline = tokio::time::Instant::now() + Duration::from_secs(60);
+    let guest_addr = SocketAddr::new(guest_ip.parse::<IpAddr>().context("invalid guest IP")?, 22);
+    let connect_deadline = Utc::now()
+        .checked_add_signed(TimeDelta::seconds(60))
+        .context("connect deadline overflow")?;
     let mut ssh_handle = loop {
         let ssh_client = SshClient {
             vm_host_key: vm_host_key.clone(),
         };
-        match connect(ssh_config.clone(), addr.as_str(), ssh_client).await {
+        match connect(ssh_config.clone(), guest_addr, ssh_client).await {
             Ok(ssh_handle) => break ssh_handle,
-            Err(_) if tokio::time::Instant::now() < connect_deadline => {
+            Err(_) if Utc::now() < connect_deadline => {
                 tokio::time::sleep(Duration::from_millis(500)).await;
             }
             Err(connect_error) => bail!("SSH connect timed out: {connect_error}"),
@@ -61,10 +71,8 @@ fn load_vm_host_key(vm_host_key_path: &Path) -> Result<Option<PublicKey>> {
     Ok(Some(vm_host_key))
 }
 
-fn load_ssh_keypair(ssh_key_path: &Path) -> Result<Arc<PrivateKey>> {
-    let ssh_keypair =
-        Arc::new(load_secret_key(ssh_key_path, None).context("failed to load SSH key")?);
-    Ok(ssh_keypair)
+fn load_ssh_keypair(ssh_key_path: &Path) -> Result<PrivateKey> {
+    load_secret_key(ssh_key_path, None).context("failed to load SSH key")
 }
 
 async fn authenticate_ssh_handle(
@@ -81,16 +89,12 @@ async fn authenticate_ssh_handle(
     Ok(())
 }
 
-pub async fn open_terminal_channel(
-    ssh_handle: &mut Handle<SshClient>,
-) -> Result<Channel<Msg>> {
+pub async fn open_terminal_channel(ssh_handle: &mut Handle<SshClient>) -> Result<Channel<Msg>> {
     let ssh_channel = ssh_handle.channel_open_session().await?;
     ssh_channel
         .request_pty(false, "xterm-256color", 80, 24, 0, 0, &[])
         .await?;
-    ssh_channel
-        .exec(false, "bash -ic 'claude; exec bash'")
-        .await?;
+    ssh_channel.exec(false, TERMINAL_EXEC_CMD).await?;
     Ok(ssh_channel)
 }
 
