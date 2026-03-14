@@ -34,7 +34,7 @@ pub(crate) fn spawn_firecracker_jailed(vm_id: &str, jailer: &JailerConfig) -> Re
         .spawn()?)
 }
 
-pub(crate) async fn copy_rootfs(src: &Path, dst: &Path) -> Result<()> {
+pub async fn copy_rootfs(src: &Path, dst: &Path) -> Result<()> {
     let status = Command::new("cp")
         .args([
             "--sparse=always",

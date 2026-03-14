@@ -10,3 +10,4 @@ pub use firecracker_client::put_mmds;
 pub use mmds_iam::{ImdsCredential, build_mmds_with_iam};
 pub use network::setup_host_networking;
 pub use vm::{JailerConfig, Vm, VmConfig, create_vm};
+pub use process::copy_rootfs;

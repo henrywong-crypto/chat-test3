@@ -4,6 +4,7 @@ use std::{
     path::{Path, PathBuf},
     time::Duration,
 };
+use firecracker_manager::copy_rootfs;
 use tokio::{fs, sync::Mutex as AsyncMutex, time::timeout};
 use tracing::{error, info, warn};
 use uuid::Uuid;
@@ -21,6 +22,7 @@ pub fn find_user_rootfs(user_rootfs_dir: &Path, user_id: Uuid) -> Option<PathBuf
     rootfs_path.exists().then_some(rootfs_path)
 }
 
+// Creates a per-user rootfs by copying the base image if one does not already exist.
 pub async fn ensure_user_rootfs(
     user_rootfs_dir: &Path,
     base_rootfs_path: &Path,
@@ -35,7 +37,7 @@ pub async fn ensure_user_rootfs(
         return Ok(rootfs_path);
     }
     fs::create_dir_all(user_rootfs_dir).await?;
-    fs::copy(base_rootfs_path, &rootfs_path).await?;
+    copy_rootfs(base_rootfs_path, &rootfs_path).await?;
     Ok(rootfs_path)
 }
 
