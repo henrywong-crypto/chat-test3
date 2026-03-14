@@ -140,7 +140,7 @@ async fn check_vm_limit_and_create(
     )
     .await?;
     info!("using rootfs");
-    let vm_config = build_vm_config(&state.vm_build_config(), iam_creds, &user_rootfs)?;
+    let vm_config = build_vm_config(&state.vm_build_config(), &iam_creds, &user_rootfs)?;
     let vm = create_vm(&vm_config).await?;
     info!("vm started");
     let vm_id = vm.id.clone();

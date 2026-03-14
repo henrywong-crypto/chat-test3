@@ -23,7 +23,7 @@ pub async fn fetch_host_iam_credentials(role_name: &str) -> Result<HostIamCreden
     info!("fetched host IAM credentials");
     Ok(HostIamCredential {
         role_name: role_name.to_owned(),
-        credential: build_imds_credential(&credentials, expiration)?,
+        credential: build_imds_credential(&credentials, &expiration)?,
     })
 }
 
@@ -40,7 +40,7 @@ fn format_credential_expiry(credentials: &Credentials) -> Result<String> {
         .context("missing credential expiry")
 }
 
-fn build_imds_credential(credentials: &Credentials, expiration: String) -> Result<ImdsCredential> {
+fn build_imds_credential(credentials: &Credentials, expiration: &str) -> Result<ImdsCredential> {
     let session_token = credentials
         .session_token()
         .context("missing session token")?;

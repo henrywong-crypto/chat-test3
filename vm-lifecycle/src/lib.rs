@@ -33,7 +33,7 @@ pub struct VmEntry {
 
 pub fn build_vm_config(
     vm_build_config: &VmBuildConfig,
-    iam_creds: HostIamCredential,
+    iam_creds: &HostIamCredential,
     user_rootfs: &Path,
 ) -> Result<VmConfig> {
     let vm_id = Uuid::new_v4().to_string();
