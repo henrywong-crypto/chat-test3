@@ -2,7 +2,7 @@
 name = "server"
 version = "0.1.0"
 description = "Axum web server providing browser-based terminal access to Firecracker microVMs"
-edition = "2021"
+edition = "2024"
 
 [[bin]]
 name = "server"

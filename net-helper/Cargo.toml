@@ -2,7 +2,7 @@
 name = "net-helper"
 version = "0.1.0"
 description = "Privileged helper binary for TAP device management and NAT setup"
-edition = "2021"
+edition = "2024"
 
 [[bin]]
 name = "net-helper"
