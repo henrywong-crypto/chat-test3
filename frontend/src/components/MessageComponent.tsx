@@ -110,16 +110,16 @@ const MessageComponent = memo(({ message, prevMessage }: MessageComponentProps) 
           </div>
           <span className="text-xs font-semibold text-foreground">Claude</span>
           <span className="text-[10px] text-muted-foreground/60">{formattedTime}</span>
-          <div className="ml-auto">
-            {hovered && <MessageCopyControl content={message.content} messageType="assistant" />}
+          <div className={`ml-auto transition-opacity duration-150 ${hovered ? "opacity-100" : "opacity-0 pointer-events-none"}`}>
+            <MessageCopyControl content={message.content} messageType="assistant" />
           </div>
         </div>
       )}
       <div className={twMerge("min-w-0 overflow-x-auto text-sm leading-relaxed text-foreground", isGrouped ? "" : "pl-[34px]")}>
         <MarkdownContent content={message.content} />
       </div>
-      {isGrouped && hovered && (
-        <div className="flex justify-end pt-0.5 pl-[34px]">
+      {isGrouped && (
+        <div className={`flex justify-end pt-0.5 pl-[34px] transition-opacity duration-150 ${hovered ? "opacity-100" : "opacity-0 pointer-events-none"}`}>
           <MessageCopyControl content={message.content} messageType="assistant" />
         </div>
       )}

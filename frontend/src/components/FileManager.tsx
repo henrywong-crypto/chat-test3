@@ -79,7 +79,7 @@ export default function FileManager() {
           Upload
           <input
             type="file"
-            className="hidden"
+            className="absolute h-px w-px overflow-hidden opacity-0"
             onChange={(e) => { const f = e.target.files?.[0]; if (f) { handleUpload(f); e.target.value = ""; } }}
           />
         </label>

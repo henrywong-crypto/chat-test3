@@ -98,9 +98,25 @@ export function makeSession(overrides: Partial<Session> = {}): Session {
   };
 }
 
+// ── File entry type ───────────────────────────────────────────────────────
+
+export interface FileEntry {
+  name: string;
+  is_dir: boolean;
+  size: number;
+}
+
+// ── Settings data type ────────────────────────────────────────────────────
+
+export interface SettingsData {
+  uses_bedrock: boolean;
+  has_api_key: boolean;
+  base_url: string | null;
+}
+
 // ── App HTML ──────────────────────────────────────────────────────────────
 
-function buildAppHtml(): string {
+function buildAppHtml(hasUserRootfs: boolean): string {
   return `<!DOCTYPE html>
 <html lang="en">
 <head>
@@ -115,7 +131,7 @@ function buildAppHtml(): string {
     data-csrf-token="${CSRF_TOKEN}"
     data-upload-dir="/tmp"
     data-upload-action="/sessions/${VM_ID}/upload"
-    data-has-user-rootfs="false"
+    data-has-user-rootfs="${hasUserRootfs}"
   ></div>
   <div id="app" class="flex h-screen w-screen overflow-hidden"></div>
   <script src="/static/app.js" defer></script>
@@ -130,6 +146,8 @@ export interface AppController {
   sendSseEvents(events: SseEvent[]): void;
   /** Replace the session list returned by subsequent /chat-history calls. */
   setSessions(sessions: Session[]): void;
+  /** Replace the file entries returned for a given directory path. */
+  setFiles(dirPath: string, entries: FileEntry[]): void;
   /** Body of the most recent POST /chat, or null. */
   lastChatBody(): { content: string; session_id: string | null } | null;
   /** Bodies of every POST /chat in order. */
@@ -138,18 +156,47 @@ export interface AppController {
   stopRequested(): boolean;
   /** Body of the most recent POST /chat-question-answer, or null. */
   lastAnswerBody(): { request_id: string; answers: Record<string, string> } | null;
+  /** Body of the most recent PUT /api/settings, or null. */
+  lastSettingsSave(): { api_key: string } | null;
+  /** Whether an upload POST was received. */
+  uploadReceived(): boolean;
+  /** Raw form body of the most recent POST /rootfs/delete, or null. */
+  lastResetFormData(): string | null;
+}
+
+export interface SetupOpts {
+  sessions?: Session[];
+  transcripts?: Record<string, unknown[]>;
+  /** Map of directory path → file entries for the /ls endpoint. */
+  files?: Record<string, FileEntry[]>;
+  /** Mock settings response. Defaults to no API key, no bedrock. */
+  settings?: Partial<SettingsData>;
+  /** When true, PUT /api/settings returns a 500 error. */
+  settingsSaveError?: boolean;
+  /** When true, data-has-user-rootfs is set to "true" so the reset button is rendered. */
+  hasUserRootfs?: boolean;
 }
 
 export async function setupApp(
   page: Page,
-  opts: { sessions?: Session[]; transcripts?: Record<string, unknown[]> } = {},
+  opts: SetupOpts = {},
 ): Promise<AppController> {
   let sessions: Session[] = opts.sessions ?? [];
   const transcripts: Record<string, unknown[]> = opts.transcripts ?? {};
+  const filesByPath: Record<string, FileEntry[]> = opts.files ?? {};
+  const settingsData: SettingsData = {
+    uses_bedrock: false,
+    has_api_key: false,
+    base_url: null,
+    ...opts.settings,
+  };
 
   const chatBodies: Array<{ content: string; session_id: string | null }> = [];
   let stopReceived = false;
   let lastAnswer: { request_id: string; answers: Record<string, string> } | null = null;
+  let lastSettingsSaveBody: { api_key: string } | null = null;
+  let uploadWasReceived = false;
+  let lastResetBody: string | null = null;
 
   // resolveSse is set each time the EventSource connects/reconnects.
   // sendSseEvents calls it to deliver events and close the stream.
@@ -157,7 +204,7 @@ export async function setupApp(
 
   // ── App HTML page ────────────────────────────────────────────────────────
   await page.route("http://localhost/", (route) =>
-    route.fulfill({ status: 200, contentType: "text/html", body: buildAppHtml() }),
+    route.fulfill({ status: 200, contentType: "text/html", body: buildAppHtml(opts.hasUserRootfs ?? false) }),
   );
 
   // ── Static files ────────────────────────────────────────────────────────
@@ -197,18 +244,52 @@ export async function setupApp(
   });
 
   // ── File listing (for Files tab) ─────────────────────────────────────────
-  await page.route(`**/sessions/${VM_ID}/ls**`, (route) =>
-    route.fulfill({
+  await page.route(`**/sessions/${VM_ID}/ls**`, (route) => {
+    const url = new URL(route.request().url());
+    const dirPath = url.searchParams.get("path") ?? "/tmp";
+    const entries = filesByPath[dirPath] ?? [];
+    return route.fulfill({
       status: 200,
       contentType: "application/json",
-      body: JSON.stringify({ entries: [] }),
-    }),
-  );
+      body: JSON.stringify({ entries }),
+    });
+  });
+
+  // ── File upload endpoint ──────────────────────────────────────────────────
+  await page.route(`**/sessions/${VM_ID}/upload`, async (route) => {
+    uploadWasReceived = true;
+    await route.fulfill({ status: 200, body: "" });
+  });
+
+  // ── Settings endpoints ────────────────────────────────────────────────────
+  await page.route("**/api/settings", async (route) => {
+    if (route.request().method() === "PUT") {
+      if (opts.settingsSaveError) {
+        await route.fulfill({ status: 500, body: "Internal Server Error" });
+      } else {
+        lastSettingsSaveBody = route.request().postDataJSON() as { api_key: string };
+        await route.fulfill({ status: 200, body: "" });
+      }
+    } else {
+      await route.fulfill({
+        status: 200,
+        contentType: "application/json",
+        body: JSON.stringify(settingsData),
+      });
+    }
+  });
 
   // ── Stop endpoint ────────────────────────────────────────────────────────
   await page.route(`**/sessions/${VM_ID}/chat-stop`, async (route) => {
     stopReceived = true;
     await route.fulfill({ status: 200, body: "" });
+  });
+
+  // ── Reset (rootfs delete) endpoint ────────────────────────────────────────
+  await page.route("**/rootfs/delete", async (route) => {
+    lastResetBody = route.request().postData();
+    // Redirect back to the app so the page reloads cleanly after reset.
+    await route.fulfill({ status: 303, headers: { Location: "http://localhost/" } });
   });
 
   // ── Question answer endpoint ──────────────────────────────────────────────
@@ -261,10 +342,16 @@ export async function setupApp(
     setSessions: (s) => {
       sessions = s;
     },
+    setFiles: (dirPath, entries) => {
+      filesByPath[dirPath] = entries;
+    },
     lastChatBody: () => chatBodies[chatBodies.length - 1] ?? null,
     allChatBodies: () => [...chatBodies],
     stopRequested: () => stopReceived,
     lastAnswerBody: () => lastAnswer,
+    lastSettingsSave: () => lastSettingsSaveBody,
+    uploadReceived: () => uploadWasReceived,
+    lastResetFormData: () => lastResetBody,
   };
 }
 

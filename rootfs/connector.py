@@ -17,12 +17,9 @@ async def connect_to_agent() -> tuple[asyncio.StreamReader, asyncio.StreamWriter
         except (ConnectionRefusedError, FileNotFoundError, OSError):
             pass
         if attempt == 0:
-            log_file = open(os.path.expanduser("~/agent.log"), "a")
             subprocess.Popen(
                 AGENT_CMD,
-                stdout=log_file,
-                stderr=log_file,
-                env={**os.environ, "PYTHONUNBUFFERED": "1"},
+                stdout=subprocess.DEVNULL,  # prevent accidental stdout writes from corrupting the SSH protocol pipe
             )
         await asyncio.sleep(0.5)
     raise RuntimeError("agent daemon failed to start after 30s")

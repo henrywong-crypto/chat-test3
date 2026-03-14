@@ -113,7 +113,7 @@ function ResetButton({ csrfToken }: { csrfToken: string }) {
               >
                 Cancel
               </button>
-              <form method="post" action="/rootfs/delete" onSubmit={() => setOpen(false)}>
+              <form method="post" action="/rootfs/delete">
                 <input type="hidden" name="csrf_token" value={csrfToken} />
                 <button
                   type="submit"
