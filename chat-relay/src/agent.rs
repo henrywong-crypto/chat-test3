@@ -38,7 +38,7 @@ pub fn start_agent_relay(
     ssh_user: String,
     vm_host_key_path: &Path,
     inbound: mpsc::Receiver<AgentMessage>,
-) -> impl Stream<Item = Bytes> {
+) -> impl Stream<Item = Bytes> + use<> {
     let (tx, rx) = mpsc::channel::<Bytes>(1);
     tokio::spawn(run_agent_relay(
         guest_ip,
