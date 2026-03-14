@@ -154,6 +154,9 @@ export function useSseHandlers(
         if (session_id && completedSession === viewRef.current) {
           const msgs = getMessages(completedSession);
           setMessages(session_id, msgs);
+          if (completedSession === null) {
+            setMessages(null, []);
+          }
           setViewSessionId(session_id);
         }
 
