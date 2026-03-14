@@ -137,7 +137,8 @@ export function SseProvider({ children }: { children: React.ReactNode }) {
     const params = new URLSearchParams({ session_id: sessionId, project_dir: projectDir });
     const res = await fetch(`/sessions/${vmId}/chat-transcript?${params}`, { signal });
     if (!res.ok) throw new Error(`HTTP ${res.status}`);
-    return res.json();
+    const data = await res.json();
+    return data.messages as TranscriptMessage[];
   }, [vmId]);
 
   const deleteSession = useCallback(async (sessionId: string, projectDir: string) => {

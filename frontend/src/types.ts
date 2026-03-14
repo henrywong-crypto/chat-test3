@@ -6,9 +6,9 @@ export interface ChatSession {
 }
 
 export interface TranscriptMessage {
-  type: string;
-  role?: string;
-  content?: string | ContentBlock[];
+  role: string;
+  content: string | ContentBlock[];
+  isCompactSummary: boolean;
 }
 
 export interface ContentBlock {

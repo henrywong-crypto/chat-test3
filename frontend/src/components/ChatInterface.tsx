@@ -15,19 +15,18 @@ function buildMessagesFromTranscript(transcript: TranscriptMessage[]): ChatMessa
 
   for (const entry of transcript) {
     const role = entry.role;
-    if (!role) continue;
 
     if (role === "user") {
       const content = typeof entry.content === "string"
         ? entry.content
-        : entry.content?.map((b) => (b.type === "text" ? b.text ?? "" : "")).join("") ?? "";
+        : entry.content.map((b) => (b.type === "text" ? b.text ?? "" : "")).join("");
       if (content.trim()) {
         messages.push({ id: nextId(), type: "user", content, timestamp: Date.now() });
       }
     } else if (role === "assistant") {
       const blocks = typeof entry.content === "string"
         ? [{ type: "text", text: entry.content }]
-        : entry.content ?? [];
+        : entry.content;
 
       for (const block of blocks) {
         if (block.type === "thinking" && block.thinking) {
@@ -57,15 +56,6 @@ function buildMessagesFromTranscript(transcript: TranscriptMessage[]): ChatMessa
             toolInput: block.input as Record<string, unknown>,
           });
         }
-      }
-    } else if (role === "tool") {
-      const content = typeof entry.content === "string"
-        ? entry.content
-        : entry.content?.map((b) => (b.type === "text" ? b.text ?? "" : "")).join("") ?? "";
-      // Tool results are attached to the preceding tool_use block
-      const lastTool = [...messages].reverse().find((m) => m.isToolUse && !m.toolResult);
-      if (lastTool) {
-        lastTool.toolResult = { content, isError: false };
       }
     }
   }
