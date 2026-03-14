@@ -293,13 +293,13 @@ def install_agent(rootfs: Path) -> None:
     shutil.copy(str(SETTINGS_PY), str(rootfs / "opt/settings.py"))
 
     # Pre-warm the uv dependency cache as the ubuntu user so the first VM
-    # startup is instant.  An immediate EOF on stdin causes agent.py to exit
-    # cleanly after uv has downloaded and cached claude-agent-sdk.
+    # startup is instant.  Import the package directly — agent.py is now a
+    # daemon that never exits, so we cannot run it to prime the cache.
     # bash -l sources ~/.profile → ~/.bashrc so the claude binary is on PATH.
     # Non-fatal: the agent works without the cache; it just downloads on first run.
     result = subprocess.run(
         ["chroot", str(rootfs), "su", "-", "ubuntu", "-c",
-         "echo | bash -lc '/usr/local/bin/uv run /opt/agent.py'"],
+         "bash -lc '/usr/local/bin/uv run --with claude-agent-sdk python3 -c \"import claude_agent_sdk\"'"],
     )
     if result.returncode != 0:
         print("warning: uv prewarm failed (agent will cache deps on first run)")
