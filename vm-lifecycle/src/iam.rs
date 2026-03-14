@@ -1,9 +1,9 @@
 use anyhow::{Context, Result};
 use aws_config::BehaviorVersion;
 use aws_credential_types::{Credentials, provider::ProvideCredentials};
+use chrono::{DateTime, Utc};
 use firecracker_manager::ImdsCredential;
 use std::time::SystemTime;
-use time::{OffsetDateTime, format_description::well_known::Rfc3339};
 use tracing::info;
 
 pub struct HostIamCredential {
@@ -28,9 +28,8 @@ pub async fn fetch_host_iam_credentials(role_name: &str) -> Result<HostIamCreden
 }
 
 fn system_time_to_iso8601(t: SystemTime) -> Result<String> {
-    let dt = OffsetDateTime::try_from(t).context("system time out of range")?;
-    dt.format(&Rfc3339)
-        .context("failed to format time as RFC 3339")
+    let dt: DateTime<Utc> = t.into();
+    Ok(dt.to_rfc3339())
 }
 
 fn format_credential_expiry(credentials: &Credentials) -> Result<String> {
