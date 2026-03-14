@@ -1,4 +1,5 @@
 use anyhow::{Context, Result};
+use common::copy_sparse;
 use firecracker_client::{start_instance, stop_instance};
 use nix::{
     sys::signal::{Signal, kill},
@@ -19,7 +20,7 @@ use crate::network::{
     create_tap, delete_tap, format_guest_ip, format_guest_mac, format_tap_ip, format_tap_name,
 };
 use crate::process::{
-    build_chroot_dir, build_vm_boot_args, copy_rootfs, prepare_jail_resources,
+    build_chroot_dir, build_vm_boot_args, prepare_jail_resources,
     spawn_firecracker_jailed, wait_for_socket,
 };
 
@@ -91,7 +92,7 @@ impl Vm {
         stop_vm(&self.socket_path(), self.pid).await;
         let rootfs_copy = self.rootfs_copy();
         if rename(&rootfs_copy, dest).await.is_err() {
-            copy_rootfs(&rootfs_copy, dest)
+            copy_sparse(&rootfs_copy, dest)
                 .await
                 .with_context(|| format!("failed to copy rootfs to {}", dest.display()))?;
         }
@@ -169,7 +170,7 @@ async fn launch_vm(
 
     prepare_jail_resources(chroot_dir, &vm_config.kernel_path).await?;
     info!("copying rootfs");
-    copy_rootfs(&vm_config.rootfs_path, &rootfs_copy).await?;
+    copy_sparse(&vm_config.rootfs_path, &rootfs_copy).await?;
     let child = spawn_firecracker_jailed(&vm_config.id, &vm_config.jailer)?;
     let pid = child
         .id()

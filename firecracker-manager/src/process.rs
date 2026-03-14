@@ -1,4 +1,4 @@
-use anyhow::{Context, Result, bail};
+use anyhow::{Context, Result};
 use std::{
     net::Ipv4Addr,
     path::{Path, PathBuf},
@@ -32,25 +32,6 @@ pub(crate) fn spawn_firecracker_jailed(vm_id: &str, jailer: &JailerConfig) -> Re
         .kill_on_drop(false)
         .process_group(0)
         .spawn()?)
-}
-
-pub async fn copy_rootfs(src: &Path, dst: &Path) -> Result<()> {
-    let status = Command::new("cp")
-        .args([
-            "--sparse=always",
-            &src.to_string_lossy(),
-            &dst.to_string_lossy(),
-        ])
-        .status()
-        .await?;
-    if !status.success() {
-        bail!(
-            "failed to copy rootfs from {} to {}",
-            src.display(),
-            dst.display()
-        );
-    }
-    Ok(())
 }
 
 pub(crate) async fn wait_for_socket(socket_path: &Path) -> Result<()> {

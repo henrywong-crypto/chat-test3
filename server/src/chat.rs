@@ -10,8 +10,9 @@ use chat_relay::{AgentMessage, start_agent_relay};
 use futures::StreamExt;
 use serde::Deserialize;
 use std::convert::Infallible;
+use std::time::Duration;
 use store::upsert_user;
-use tokio::sync::mpsc;
+use tokio::{sync::mpsc, time::timeout};
 use tower_sessions::Session;
 use tracing::{error, info};
 use uuid::Uuid;
@@ -20,6 +21,8 @@ use crate::{
     auth::User,
     state::{AppError, AppState, find_vm_guest_ip_for_user, mark_vm_ws_connected},
 };
+
+const SEND_TIMEOUT_SECS: u64 = 30;
 
 pub(crate) async fn handle_chat_stream(
     user: User,
@@ -88,15 +91,20 @@ pub(crate) async fn handle_chat_query(
         content: body.content,
         session_id: body.session_id,
     };
-    if agent_tx.send(agent_message).await.is_err() {
-        info!("agent sender closed");
-        return (StatusCode::SERVICE_UNAVAILABLE, "Agent not available").into_response();
+    match timeout(Duration::from_secs(SEND_TIMEOUT_SECS), agent_tx.send(agent_message)).await {
+        Ok(Ok(())) => {}
+        Ok(Err(_)) => {
+            info!("agent sender closed");
+            return (StatusCode::SERVICE_UNAVAILABLE, "Agent not available").into_response();
+        }
+        Err(_) => {
+            error!("send timed out, agent likely stuck");
+            return (StatusCode::SERVICE_UNAVAILABLE, "Agent not available").into_response();
+        }
     }
     info!("query forwarded  content_len={content_len}");
     (StatusCode::OK, "").into_response()
 }
-
-pub(crate) fn find_agent_sender(
     state: &AppState,
     vm_id: &str,
 ) -> Option<mpsc::Sender<AgentMessage>> {
@@ -132,16 +140,20 @@ pub(crate) async fn handle_chat_question_answer(
         request_id: body.request_id,
         answers: body.answers,
     };
-    if agent_tx.send(agent_message).await.is_err() {
-        info!("agent sender closed");
-        return (StatusCode::SERVICE_UNAVAILABLE, "Agent not available").into_response();
+    match timeout(Duration::from_secs(SEND_TIMEOUT_SECS), agent_tx.send(agent_message)).await {
+        Ok(Ok(())) => {}
+        Ok(Err(_)) => {
+            info!("agent sender closed");
+            return (StatusCode::SERVICE_UNAVAILABLE, "Agent not available").into_response();
+        }
+        Err(_) => {
+            error!("send timed out, agent likely stuck");
+            return (StatusCode::SERVICE_UNAVAILABLE, "Agent not available").into_response();
+        }
     }
     info!("question answer forwarded  request_id={request_id}");
     (StatusCode::OK, "").into_response()
 }
-
-#[derive(Deserialize)]
-pub(crate) struct StopBody {
     csrf_token: String,
 }
 
@@ -162,9 +174,16 @@ pub(crate) async fn handle_chat_stop(
         info!("no active chat stream to stop");
         return (StatusCode::NOT_FOUND, "No active chat stream").into_response();
     };
-    if agent_tx.send(AgentMessage::Interrupt).await.is_err() {
-        info!("agent sender closed");
-        return (StatusCode::SERVICE_UNAVAILABLE, "Agent not available").into_response();
+    match timeout(Duration::from_secs(SEND_TIMEOUT_SECS), agent_tx.send(AgentMessage::Interrupt)).await {
+        Ok(Ok(())) => {}
+        Ok(Err(_)) => {
+            info!("agent sender closed");
+            return (StatusCode::SERVICE_UNAVAILABLE, "Agent not available").into_response();
+        }
+        Err(_) => {
+            error!("send timed out, agent likely stuck");
+            return (StatusCode::SERVICE_UNAVAILABLE, "Agent not available").into_response();
+        }
     }
     info!("interrupt forwarded");
     (StatusCode::OK, "").into_response()

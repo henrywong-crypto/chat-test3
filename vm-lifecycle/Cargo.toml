@@ -5,6 +5,7 @@ edition = "2024"
 
 [dependencies]
 anyhow = "1.0.102"
+common = { path = "../common" }
 aws-config = "1.8.15"
 aws-credential-types = "1.2.14"
 firecracker-manager = { path = "../firecracker-manager" }

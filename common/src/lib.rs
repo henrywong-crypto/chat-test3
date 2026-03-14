@@ -1,5 +1,25 @@
 use anyhow::Result;
 use std::path::Path;
+use tokio::process::Command;
+
+pub async fn copy_sparse(src: &Path, dst: &Path) -> Result<()> {
+    let status = Command::new("cp")
+        .args([
+            "--sparse=always",
+            &src.to_string_lossy(),
+            &dst.to_string_lossy(),
+        ])
+        .status()
+        .await?;
+    if !status.success() {
+        anyhow::bail!(
+            "failed to sparse copy from {} to {}",
+            src.display(),
+            dst.display()
+        );
+    }
+    Ok(())
+}
 
 pub fn validate_within_dir(real_path: &Path, allowed_dir: &Path) -> Result<()> {
     if !real_path.starts_with(allowed_dir) {

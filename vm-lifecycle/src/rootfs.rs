@@ -4,7 +4,7 @@ use std::{
     path::{Path, PathBuf},
     time::Duration,
 };
-use firecracker_manager::copy_rootfs;
+use common::copy_sparse;
 use tokio::{fs, sync::Mutex as AsyncMutex, time::timeout};
 use tracing::{error, info, warn};
 use uuid::Uuid;
@@ -37,7 +37,7 @@ pub async fn ensure_user_rootfs(
         return Ok(rootfs_path);
     }
     fs::create_dir_all(user_rootfs_dir).await?;
-    copy_rootfs(base_rootfs_path, &rootfs_path).await?;
+    copy_sparse(base_rootfs_path, &rootfs_path).await?;
     Ok(rootfs_path)
 }
 
