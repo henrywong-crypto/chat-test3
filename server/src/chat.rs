@@ -105,6 +105,8 @@ pub(crate) async fn handle_chat_query(
     info!("query forwarded  content_len={content_len}");
     (StatusCode::OK, "").into_response()
 }
+
+fn find_agent_sender(
     state: &AppState,
     vm_id: &str,
 ) -> Option<mpsc::Sender<AgentMessage>> {
@@ -154,6 +156,9 @@ pub(crate) async fn handle_chat_question_answer(
     info!("question answer forwarded  request_id={request_id}");
     (StatusCode::OK, "").into_response()
 }
+
+#[derive(Deserialize)]
+struct StopBody {
     csrf_token: String,
 }
 
