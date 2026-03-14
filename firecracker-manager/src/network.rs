@@ -1,12 +1,13 @@
 use anyhow::{Context, Result, bail};
+use ipnetwork::Ipv4Network;
 use macaddr::MacAddr6;
 use std::{net::Ipv4Addr, path::Path};
 use tokio::process::Command;
 use tracing::warn;
 
-pub(crate) async fn create_tap(net_helper_path: &Path, tap_name: &str, tap_ip: &str) -> Result<()> {
+pub(crate) async fn create_tap(net_helper_path: &Path, tap_name: &str, tap_ip: &Ipv4Network) -> Result<()> {
     let status = Command::new(net_helper_path)
-        .args(["tap-create", tap_name, tap_ip])
+        .args(["tap-create", tap_name, &tap_ip.to_string()])
         .status()
         .await?;
     if !status.success() {
@@ -26,8 +27,8 @@ pub(crate) fn format_tap_name(idx: u32) -> String {
     format!("tap{idx}")
 }
 
-pub(crate) fn format_tap_ip(idx: u32) -> String {
-    format!("172.16.{idx}.1/30")
+pub(crate) fn format_tap_ip(idx: u32) -> Ipv4Network {
+    Ipv4Network::new(Ipv4Addr::new(172, 16, idx as u8, 1), 30).expect("prefix 30 is valid")
 }
 
 pub(crate) fn format_guest_ip(idx: u32) -> Ipv4Addr {
@@ -98,9 +99,9 @@ mod tests {
 
     #[test]
     fn test_format_tap_ip_structure() {
-        assert_eq!(format_tap_ip(0), "172.16.0.1/30");
-        assert_eq!(format_tap_ip(1), "172.16.1.1/30");
-        assert_eq!(format_tap_ip(255), "172.16.255.1/30");
+        assert_eq!(format_tap_ip(0), Ipv4Network::new(Ipv4Addr::new(172, 16, 0, 1), 30).unwrap());
+        assert_eq!(format_tap_ip(1), Ipv4Network::new(Ipv4Addr::new(172, 16, 1, 1), 30).unwrap());
+        assert_eq!(format_tap_ip(255), Ipv4Network::new(Ipv4Addr::new(172, 16, 255, 1), 30).unwrap());
     }
 
     // ── format_guest_ip ───────────────────────────────────────────────────────
@@ -117,10 +118,8 @@ mod tests {
         // For each idx, tap (.1) and guest (.2) are in the same /30 block.
         for idx in [0u32, 1, 128, 253] {
             let tap_ip = format_tap_ip(idx);
-            let guest_str = format_guest_ip(idx).to_string();
-            let tap_prefix = tap_ip.trim_end_matches(".1/30");
-            let guest_prefix = guest_str.trim_end_matches(".2");
-            assert_eq!(tap_prefix, guest_prefix, "idx={idx}: subnet mismatch");
+            let guest_ip = format_guest_ip(idx);
+            assert!(tap_ip.contains(guest_ip), "idx={idx}: guest_ip not in tap subnet");
         }
     }
 

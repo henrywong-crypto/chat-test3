@@ -3,6 +3,7 @@ use firecracker_client::{
     BootSource, Drive, MachineConfig, MmdsConfig, NetworkInterface, put_mmds, set_boot_source,
     set_drive, set_machine_config, set_mmds_config, set_network_interface,
 };
+use macaddr::MacAddr6;
 use std::path::Path;
 
 use crate::vm::VmConfig;
@@ -13,7 +14,7 @@ pub(crate) async fn configure_vm(
     kernel_path: &Path,
     vm_config: &VmConfig,
     tap_name: &str,
-    mac: &str,
+    mac: &MacAddr6,
     boot_args: &str,
 ) -> Result<()> {
     configure_machine_config(socket_path, vm_config).await?;
@@ -65,7 +66,7 @@ async fn configure_rootfs_drive(socket_path: &Path, rootfs_copy: &Path) -> Resul
     .await
 }
 
-async fn configure_network_interface(socket_path: &Path, tap_name: &str, mac: &str) -> Result<()> {
+async fn configure_network_interface(socket_path: &Path, tap_name: &str, mac: &MacAddr6) -> Result<()> {
     set_network_interface(
         socket_path,
         &NetworkInterface {
