@@ -1,49 +1,48 @@
 use anyhow::{bail, Context, Result};
-#[cfg(target_os = "linux")]
 use caps::{CapSet, Capability};
+use clap::{Parser, Subcommand};
 use ipnet::Ipv4Net;
 use std::process::Command;
 
+#[derive(Parser)]
+struct Args {
+    #[command(subcommand)]
+    command: Cmd,
+}
+
+#[derive(Subcommand)]
+enum Cmd {
+    TapCreate { tap_name: String, cidr: String },
+    TapDelete { tap_name: String },
+    SetupNat { host_iface: String },
+}
+
 fn main() {
-    let args: Vec<String> = std::env::args().collect();
-    if let Err(e) = run(&args) {
+    let args = Args::parse();
+    if let Err(e) = run(args) {
         eprintln!("error: {e}");
         std::process::exit(1);
     }
 }
 
-fn run(args: &[String]) -> Result<()> {
+fn run(args: Args) -> Result<()> {
     raise_ambient_net_admin()
         .context("failed to raise ambient cap_net_admin — deploy with 'sudo setcap cap_net_admin=eip /usr/local/bin/net-helper'")?;
 
-    match args.get(1).map(|s| s.as_str()) {
-        Some("tap-create") => {
-            if args.len() != 4 {
-                bail!("usage: net-helper tap-create <tap-name> <cidr>");
-            }
-            let tap_name = &args[2];
-            let cidr = &args[3];
-            validate_tap_name(tap_name)?;
-            validate_cidr(cidr)?;
-            cmd_tap_create(tap_name, cidr)
+    match args.command {
+        Cmd::TapCreate { tap_name, cidr } => {
+            validate_tap_name(&tap_name)?;
+            validate_cidr(&cidr)?;
+            cmd_tap_create(&tap_name, &cidr)
         }
-        Some("tap-delete") => {
-            if args.len() != 3 {
-                bail!("usage: net-helper tap-delete <tap-name>");
-            }
-            let tap_name = &args[2];
-            validate_tap_name(tap_name)?;
-            cmd_tap_delete(tap_name)
+        Cmd::TapDelete { tap_name } => {
+            validate_tap_name(&tap_name)?;
+            cmd_tap_delete(&tap_name)
         }
-        Some("setup-nat") => {
-            if args.len() != 3 {
-                bail!("usage: net-helper setup-nat <host-iface>");
-            }
-            let iface = &args[2];
-            validate_iface_name(iface)?;
-            cmd_setup_nat(iface)
+        Cmd::SetupNat { host_iface } => {
+            validate_iface_name(&host_iface)?;
+            cmd_setup_nat(&host_iface)
         }
-        _ => bail!("usage: net-helper <tap-create|tap-delete|setup-nat> ..."),
     }
 }
 
@@ -144,13 +143,10 @@ fn cmd_setup_nat(iface: &str) -> Result<()> {
 }
 
 fn raise_ambient_net_admin() -> Result<()> {
-    #[cfg(target_os = "linux")]
-    {
-        caps::raise(None, CapSet::Inheritable, Capability::CAP_NET_ADMIN)
-            .context("failed to raise CAP_NET_ADMIN inheritable")?;
-        caps::raise(None, CapSet::Ambient, Capability::CAP_NET_ADMIN)
-            .context("failed to raise CAP_NET_ADMIN ambient")?;
-    }
+    caps::raise(None, CapSet::Inheritable, Capability::CAP_NET_ADMIN)
+        .context("failed to raise CAP_NET_ADMIN inheritable")?;
+    caps::raise(None, CapSet::Ambient, Capability::CAP_NET_ADMIN)
+        .context("failed to raise CAP_NET_ADMIN ambient")?;
     Ok(())
 }
 
