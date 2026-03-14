@@ -7,7 +7,7 @@
 :root {
   --background: 222.2 84% 4.9%;
   --foreground: 210 40% 98%;
-  --card: 222.2 84% 4.9%;
+  --card: 217.2 91.2% 8%;
   --card-foreground: 210 40% 98%;
   --primary: 217.2 91.2% 59.8%;
   --primary-foreground: 222.2 47.4% 11.2%;
@@ -21,7 +21,17 @@
   --destructive-foreground: 210 40% 98%;
   --border: 217.2 32.6% 17.5%;
   --input: 220 13% 46%;
-  --ring: 224.3 76.3% 48%;
+  --ring: 217.2 91.2% 59.8%;
+  --nav-glass-bg: 217.2 91.2% 8% / 0.55;
+  --nav-glass-blur: 24px;
+  --nav-glass-saturate: 1.6;
+  --nav-tab-glow: 217.2 91.2% 59.8% / 0.25;
+  --nav-tab-ring: 217.2 91.2% 59.8% / 0.15;
+  --nav-float-shadow: 0 0% 0% / 0.35;
+  --nav-float-ring: 217.2 32.6% 17.5% / 0.3;
+  --nav-divider-color: 217.2 32.6% 17.5% / 0.5;
+  --nav-input-bg: 217.2 32.6% 17.5% / 0.5;
+  --nav-input-focus-ring: 217.2 91.2% 59.8% / 0.25;
   --radius: 0.5rem;
 }
 
@@ -47,6 +57,16 @@
 
 * {
   border-color: hsl(var(--border));
+  transition: none;
+  box-sizing: border-box;
+}
+button, a, input, textarea, select, [role="button"], .transition-all {
+  transition: all 150ms cubic-bezier(0.4, 0, 0.2, 1);
+}
+body, div, section, header, footer, nav, main, p, span, h1, h2, h3, h4, h5, h6 {
+  transition: background-color 200ms ease-in-out,
+              border-color 200ms ease-in-out,
+              color 200ms ease-in-out;
 }
 
 body {
@@ -55,27 +75,51 @@ body {
   font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Oxygen, Ubuntu, sans-serif;
 }
 
-/* Smooth transitions for interactive elements */
-button, a, input, textarea {
-  transition: background-color 150ms cubic-bezier(0.4, 0, 0.2, 1),
-              border-color 150ms cubic-bezier(0.4, 0, 0.2, 1),
-              opacity 150ms cubic-bezier(0.4, 0, 0.2, 1);
-}
-
 /* Custom scrollbar */
 ::-webkit-scrollbar {
   width: 6px;
-  height: 6px;
 }
 ::-webkit-scrollbar-track {
   background: transparent;
 }
 ::-webkit-scrollbar-thumb {
-  background: hsl(var(--border));
+  background: rgba(107, 114, 128, 0.5);
   border-radius: 3px;
 }
 ::-webkit-scrollbar-thumb:hover {
-  background: hsl(var(--muted-foreground) / 0.5);
+  background: rgba(107, 114, 128, 0.7);
+}
+
+@layer utilities {
+  .nav-glass {
+    background: hsl(var(--nav-glass-bg));
+    backdrop-filter: blur(var(--nav-glass-blur)) saturate(var(--nav-glass-saturate));
+    -webkit-backdrop-filter: blur(var(--nav-glass-blur)) saturate(var(--nav-glass-saturate));
+  }
+  .nav-tab-active {
+    box-shadow: 0 1px 8px hsl(var(--nav-tab-glow)), 0 0 0 1px hsl(var(--nav-tab-ring));
+  }
+  .sidebar-transition {
+    transition: transform 300ms cubic-bezier(0.4, 0, 0.2, 1), opacity 300ms ease-in-out;
+  }
+  .scrollbar-thin {
+    scrollbar-width: thin;
+    scrollbar-color: rgba(156, 163, 175, 0.5) transparent;
+  }
+  .scrollbar-thin::-webkit-scrollbar {
+    width: 6px;
+  }
+  .scrollbar-thin::-webkit-scrollbar-thumb {
+    background-color: rgba(156, 163, 175, 0.5);
+    border-radius: 3px;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  *, ::before, ::after {
+    animation-duration: 0.01ms !important;
+    transition-duration: 0.01ms !important;
+  }
 }
 
 /* Markdown prose adjustments */

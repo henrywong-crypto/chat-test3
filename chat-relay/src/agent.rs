@@ -5,7 +5,8 @@ use russh::{Channel, ChannelMsg, client};
 use serde::Serialize;
 use ssh_client::{SshClient, connect_ssh, open_exec_channel};
 use std::{
-    path::{Path, PathBuf},
+    net::Ipv4Addr,
+    path::Path,
     str::from_utf8,
 };
 use tokio::{
@@ -36,29 +37,28 @@ pub enum AgentMessage {
 }
 
 pub fn start_agent_relay(
-    guest_ip: String,
+    guest_ip: Ipv4Addr,
     ssh_key_path: &Path,
-    ssh_user: String,
+    ssh_user: &str,
     vm_host_key_path: &Path,
+    // owned: tokio::spawn requires 'static and Receiver must be consumed to call recv
     inbound: mpsc::Receiver<AgentMessage>,
 ) -> impl Stream<Item = Bytes> + use<> {
     let (tx, rx) = mpsc::channel::<Bytes>(1);
-    tokio::spawn(run_agent_relay(
-        guest_ip,
-        ssh_key_path.to_path_buf(),
-        ssh_user,
-        vm_host_key_path.to_path_buf(),
-        inbound,
-        tx,
-    ));
+    let ssh_key_path = ssh_key_path.to_owned();
+    let ssh_user = ssh_user.to_owned();
+    let vm_host_key_path = vm_host_key_path.to_owned();
+    tokio::spawn(async move {
+        run_agent_relay(guest_ip, &ssh_key_path, &ssh_user, &vm_host_key_path, inbound, tx).await
+    });
     ReceiverStream::new(rx)
 }
 
 async fn run_agent_relay(
-    guest_ip: String,
-    ssh_key_path: PathBuf,
-    ssh_user: String,
-    vm_host_key_path: PathBuf,
+    guest_ip: Ipv4Addr,
+    ssh_key_path: &Path,
+    ssh_user: &str,
+    vm_host_key_path: &Path,
     inbound: mpsc::Receiver<AgentMessage>,
     tx: mpsc::Sender<Bytes>,
 ) {
@@ -115,14 +115,14 @@ async fn run_agent_relay(
 }
 
 async fn connect_agent_relay(
-    guest_ip: &str,
+    guest_ip: Ipv4Addr,
     ssh_key_path: &Path,
     ssh_user: &str,
     vm_host_key_path: &Path,
     inbound: mpsc::Receiver<AgentMessage>,
     tx: mpsc::Sender<Bytes>,
 ) -> Result<()> {
-    let mut ssh_handle = connect_ssh(guest_ip, ssh_key_path, ssh_user, vm_host_key_path).await?;
+    let mut ssh_handle = connect_ssh(&guest_ip.to_string(), ssh_key_path, ssh_user, vm_host_key_path).await?;
     info!("agent ssh channel opened");
     let ssh_channel = open_exec_channel(&mut ssh_handle, AGENT_CMD).await?;
     run_relay(ssh_handle, ssh_channel, inbound, tx).await

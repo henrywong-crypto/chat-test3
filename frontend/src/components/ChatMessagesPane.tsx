@@ -1,4 +1,5 @@
-import React, { useEffect, useRef } from "react";
+import React, { useEffect, useRef, useState } from "react";
+import { ChevronDown } from "lucide-react";
 import type { ChatMessage } from "../types";
 import MessageComponent from "./MessageComponent";
 
@@ -10,6 +11,7 @@ interface ChatMessagesPaneProps {
 export default function ChatMessagesPane({ messages, isLoading }: ChatMessagesPaneProps) {
   const scrollRef = useRef<HTMLDivElement>(null);
   const userScrolledRef = useRef(false);
+  const [showScrollBtn, setShowScrollBtn] = useState(false);
 
   // Auto-scroll on new messages unless user has scrolled up
   useEffect(() => {
@@ -24,13 +26,25 @@ export default function ChatMessagesPane({ messages, isLoading }: ChatMessagesPa
     if (!el) return;
     const atBottom = el.scrollHeight - el.scrollTop - el.clientHeight < 40;
     userScrolledRef.current = !atBottom;
+    setShowScrollBtn(!atBottom);
   };
 
   const handleScroll = () => {
     const el = scrollRef.current;
     if (!el) return;
     const atBottom = el.scrollHeight - el.scrollTop - el.clientHeight < 40;
-    if (atBottom) userScrolledRef.current = false;
+    if (atBottom) {
+      userScrolledRef.current = false;
+      setShowScrollBtn(false);
+    }
+  };
+
+  const scrollToBottom = () => {
+    const el = scrollRef.current;
+    if (!el) return;
+    el.scrollTop = el.scrollHeight;
+    userScrolledRef.current = false;
+    setShowScrollBtn(false);
   };
 
   if (messages.length === 0 && !isLoading) {
@@ -48,22 +62,35 @@ export default function ChatMessagesPane({ messages, isLoading }: ChatMessagesPa
   }
 
   return (
-    <div
-      ref={scrollRef}
-      onWheel={handleWheel}
-      onScroll={handleScroll}
-      className="flex-1 space-y-1 overflow-y-auto py-4"
-    >
-      {messages.map((message, index) => {
-        const prevMessage = index > 0 ? messages[index - 1] : null;
-        return (
-          <MessageComponent
-            key={message.id}
-            message={message}
-            prevMessage={prevMessage}
-          />
-        );
-      })}
+    <div className="relative flex-1 overflow-hidden">
+      <div
+        ref={scrollRef}
+        onWheel={handleWheel}
+        onScroll={handleScroll}
+        className="h-full space-y-3 overflow-y-auto px-0 py-3 sm:space-y-4 sm:p-4"
+      >
+        {messages.map((message, index) => {
+          const prevMessage = index > 0 ? messages[index - 1] : null;
+          return (
+            <div key={message.id} className="message-slide-in">
+              <MessageComponent
+                message={message}
+                prevMessage={prevMessage}
+              />
+            </div>
+          );
+        })}
+      </div>
+      {showScrollBtn && (
+        <button
+          type="button"
+          onClick={scrollToBottom}
+          title="Scroll to bottom"
+          className="absolute bottom-4 right-4 flex h-8 w-8 items-center justify-center rounded-full bg-primary text-primary-foreground shadow-md transition-all hover:bg-primary/90"
+        >
+          <ChevronDown className="h-4 w-4" />
+        </button>
+      )}
     </div>
   );
 }

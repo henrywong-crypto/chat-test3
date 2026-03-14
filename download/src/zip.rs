@@ -25,7 +25,9 @@ pub fn build_streaming_zip_response(
     filename: &str,
 ) -> Result<Response<Body>> {
     let (zip_writer, zip_reader) = tokio::io::duplex(FILE_CHUNK_SIZE);
-    tokio::spawn(write_zip(sftp, dir_path.to_owned(), upload_dir.to_owned(), zip_writer));
+    let dir_path = dir_path.to_owned();
+    let upload_dir = upload_dir.to_owned();
+    tokio::spawn(async move { write_zip(sftp, &dir_path, &upload_dir, zip_writer).await });
     let content_disposition =
         HeaderValue::from_str(&format!("attachment; filename=\"{filename}\""))
             .context("failed to build content disposition header")?;
@@ -36,10 +38,10 @@ pub fn build_streaming_zip_response(
         .context("failed to build zip response")
 }
 
-async fn write_zip(sftp: SftpSession, dir_path: PathBuf, upload_dir: PathBuf, writer: DuplexStream) {
+async fn write_zip(sftp: SftpSession, dir_path: &Path, upload_dir: &Path, writer: DuplexStream) {
     let mut zip = ZipFileWriter::with_tokio(writer);
     let mut total_bytes: usize = 0;
-    let mut dirs_to_visit: Vec<(PathBuf, usize)> = vec![(dir_path.clone(), 0)];
+    let mut dirs_to_visit: Vec<(PathBuf, usize)> = vec![(dir_path.to_owned(), 0)];
     while let Some((dir, depth)) = dirs_to_visit.pop() {
         let Some(dir_str) = dir.to_str() else { return };
         let read_dir = match sftp.read_dir(dir_str).await {
@@ -55,7 +57,7 @@ async fn write_zip(sftp: SftpSession, dir_path: PathBuf, upload_dir: PathBuf, wr
             if entry.file_type().is_symlink() {
                 continue;
             }
-            if validate_within_dir(&child_path, &upload_dir).is_err() {
+            if validate_within_dir(&child_path, upload_dir).is_err() {
                 continue;
             }
             if entry.file_type().is_dir() {
@@ -65,7 +67,7 @@ async fn write_zip(sftp: SftpSession, dir_path: PathBuf, upload_dir: PathBuf, wr
                 continue;
             }
             let relative = match child_path
-                .strip_prefix(&dir_path)
+                .strip_prefix(dir_path)
                 .unwrap_or(&child_path)
                 .to_str()
             {

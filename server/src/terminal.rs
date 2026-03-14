@@ -36,10 +36,12 @@ pub(crate) async fn handle_ws_upgrade(
         return Ok((StatusCode::NOT_FOUND, "Not found").into_response());
     }
     let db_user = upsert_user(&state.db, &user.email).await?;
-    Ok(ws.on_upgrade(move |socket| run_terminal_session(socket, state, vm_id, db_user.id)))
+    Ok(ws.on_upgrade(move |socket| async move {
+        run_terminal_session(socket, state, &vm_id, db_user.id).await
+    }))
 }
 
-async fn run_terminal_session(ws: WebSocket, state: AppState, vm_id: String, user_id: Uuid) {
+async fn run_terminal_session(ws: WebSocket, state: AppState, vm_id: &str, user_id: Uuid) {
     let Some(guest_ip) = find_vm_guest_ip_for_user(&state.vms, &vm_id, user_id)
         .inspect_err(|e| error!("vm registry error: {e}"))
         .ok()
