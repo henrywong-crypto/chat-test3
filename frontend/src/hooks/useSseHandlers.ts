@@ -17,8 +17,7 @@ export function useSseHandlers(
     runningSessionId,
     setRunningSessionId,
     setIsStreaming,
-    setAwaitingQuestion,
-    setPendingQuestion,
+    setSessionPendingQuestion,
     setSessions,
     addMessage,
     updateLastMessage,
@@ -138,8 +137,7 @@ export function useSseHandlers(
         const { request_id, questions } = event.payload;
         thinkingMsgId.current = null;
         assistantMsgId.current = null;
-        setAwaitingQuestion(true);
-        setPendingQuestion({ requestId: request_id, questions });
+        setSessionPendingQuestion(session, { requestId: request_id, questions });
         break;
       }
 
@@ -148,8 +146,7 @@ export function useSseHandlers(
         const completedSession = runningRef.current;
         setRunningSessionId(null);
         setIsStreaming(false);
-        setAwaitingQuestion(false);
-        setPendingQuestion(null);
+        setSessionPendingQuestion(completedSession, null);
         thinkingMsgId.current = null;
         assistantMsgId.current = null;
         toolIdToMsgId.current.clear();
@@ -168,8 +165,7 @@ export function useSseHandlers(
         const { message } = event.payload;
         setRunningSessionId(null);
         setIsStreaming(false);
-        setAwaitingQuestion(false);
-        setPendingQuestion(null);
+        setSessionPendingQuestion(session, null);
         thinkingMsgId.current = null;
         assistantMsgId.current = null;
         toolIdToMsgId.current.clear();

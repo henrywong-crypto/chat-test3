@@ -13,10 +13,8 @@ export interface ChatStateResult {
   setRunningSessionId: (id: string | null) => void;
   isStreaming: boolean;
   setIsStreaming: (v: boolean) => void;
-  awaitingQuestion: boolean;
-  setAwaitingQuestion: (v: boolean) => void;
-  pendingQuestion: PendingQuestion | null;
-  setPendingQuestion: (q: PendingQuestion | null) => void;
+  getSessionPendingQuestion: (sessionId: string | null) => PendingQuestion | null;
+  setSessionPendingQuestion: (sessionId: string | null, q: PendingQuestion | null) => void;
   sessions: ChatSession[];
   setSessions: (s: ChatSession[]) => void;
   getMessages: (sessionId: string | null) => ChatMessage[];
@@ -34,15 +32,27 @@ import React from "react";
 
 export function useChatState(): ChatStateResult {
   const messagesBySession = useRef<Map<string | null, ChatMessage[]>>(new Map());
+  const pendingQuestionsBySession = useRef<Map<string | null, PendingQuestion>>(new Map());
   const [viewSessionId, setViewSessionId] = useState<string | null>(null);
   const [runningSessionId, setRunningSessionId] = useState<string | null>(null);
   const [isStreaming, setIsStreaming] = useState(false);
-  const [awaitingQuestion, setAwaitingQuestion] = useState(false);
-  const [pendingQuestion, setPendingQuestion] = useState<PendingQuestion | null>(null);
   const [sessions, setSessions] = useState<ChatSession[]>([]);
   const [renderTick, setRenderTick] = useState(0);
 
   const bumpRender = useCallback(() => setRenderTick((t) => t + 1), []);
+
+  const getSessionPendingQuestion = useCallback((sessionId: string | null): PendingQuestion | null => {
+    return pendingQuestionsBySession.current.get(sessionId) ?? null;
+  }, []);
+
+  const setSessionPendingQuestion = useCallback((sessionId: string | null, q: PendingQuestion | null) => {
+    if (q === null) {
+      pendingQuestionsBySession.current.delete(sessionId);
+    } else {
+      pendingQuestionsBySession.current.set(sessionId, q);
+    }
+    setRenderTick((t) => t + 1);
+  }, []);
 
   const getMessages = useCallback((sessionId: string | null): ChatMessage[] => {
     return messagesBySession.current.get(sessionId) ?? [];
@@ -90,10 +100,8 @@ export function useChatState(): ChatStateResult {
     setRunningSessionId,
     isStreaming,
     setIsStreaming,
-    awaitingQuestion,
-    setAwaitingQuestion,
-    pendingQuestion,
-    setPendingQuestion,
+    getSessionPendingQuestion,
+    setSessionPendingQuestion,
     sessions,
     setSessions,
     getMessages,

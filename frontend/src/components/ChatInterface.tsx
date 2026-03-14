@@ -80,15 +80,12 @@ export default function ChatInterface({ sessions, setSessions, selectedSession, 
     setRunningSessionId,
     isStreaming,
     setIsStreaming,
-    awaitingQuestion,
-    setAwaitingQuestion,
-    pendingQuestion,
-    setPendingQuestion,
+    getSessionPendingQuestion,
+    setSessionPendingQuestion,
     getMessages,
     addMessage,
     setMessages,
     generateId,
-    renderTick,
   } = chatState;
 
   // Wire SSE events to chat state
@@ -119,13 +116,9 @@ export default function ChatInterface({ sessions, setSessions, selectedSession, 
   useEffect(() => {
     if (!selectedSession) {
       setViewSessionId(null);
-      setAwaitingQuestion(false);
-      setPendingQuestion(null);
       return;
     }
     setViewSessionId(selectedSession.session_id);
-    setAwaitingQuestion(false);
-    setPendingQuestion(null);
     loadTranscriptForSession(selectedSession);
   }, [selectedSession]); // eslint-disable-line react-hooks/exhaustive-deps
 
@@ -168,30 +161,29 @@ export default function ChatInterface({ sessions, setSessions, selectedSession, 
 
   const handleAnswerQuestion = useCallback(
     async (requestId: string, answers: Record<string, string>) => {
-      setAwaitingQuestion(false);
-      setPendingQuestion(null);
+      setSessionPendingQuestion(viewSessionId, null);
       await sseCtx.answerQuestion(requestId, answers);
     },
-    [sseCtx, setAwaitingQuestion, setPendingQuestion],
+    [sseCtx, setSessionPendingQuestion, viewSessionId],
   );
 
   const handleSkipQuestion = useCallback(
     async (requestId: string) => {
-      setAwaitingQuestion(false);
-      setPendingQuestion(null);
+      setSessionPendingQuestion(viewSessionId, null);
       await sseCtx.answerQuestion(requestId, {});
     },
-    [sseCtx, setAwaitingQuestion, setPendingQuestion],
+    [sseCtx, setSessionPendingQuestion, viewSessionId],
   );
 
   const messages = getMessages(viewSessionId);
+  const pendingQuestion = getSessionPendingQuestion(viewSessionId);
   const isLoading = isStreaming && runningSessionId === viewSessionId;
 
   return (
-    <div className="flex min-h-0 flex-1 flex-col" key={renderTick}>
+    <div className="flex min-h-0 flex-1 flex-col">
       <ChatMessagesPane messages={messages} isLoading={isLoading} />
       <ClaudeStatus isLoading={isLoading} onAbort={handleStop} />
-      {awaitingQuestion && pendingQuestion ? (
+      {pendingQuestion ? (
         <div className="flex-shrink-0 border-t border-border p-4">
           <div className="mx-auto max-w-3xl">
             <AskUserQuestionPanel
