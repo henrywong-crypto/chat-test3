@@ -1,22 +1,23 @@
-use anyhow::{Context, Result, bail};
+use anyhow::{bail, Context, Result};
 use russh::{
     Channel,
-    client::{self, Handle},
-    keys::{PrivateKey, PrivateKeyWithHashAlg, PublicKey, load_public_key, load_secret_key},
+    Error,
+    client::{connect, Config, Handle, Handler, Msg},
+    keys::{load_public_key, load_secret_key, PrivateKey, PrivateKeyWithHashAlg, PublicKey},
 };
-use std::{path::Path, sync::Arc, time::Duration};
+use std::{future::Future, path::Path, sync::Arc, time::Duration};
 
 pub struct SshClient {
     vm_host_key: Option<PublicKey>,
 }
 
-impl client::Handler for SshClient {
-    type Error = russh::Error;
+impl Handler for SshClient {
+    type Error = Error;
 
     fn check_server_key(
         &mut self,
         server_public_key: &PublicKey,
-    ) -> impl std::future::Future<Output = Result<bool, Self::Error>> + Send {
+    ) -> impl Future<Output = Result<bool, Self::Error>> + Send {
         let matches = self
             .vm_host_key
             .as_ref()
@@ -33,14 +34,14 @@ pub async fn connect_ssh(
 ) -> Result<Handle<SshClient>> {
     let vm_host_key = load_vm_host_key(vm_host_key_path)?;
     let ssh_keypair = load_ssh_keypair(ssh_key_path)?;
-    let ssh_config = Arc::new(client::Config::default());
+    let ssh_config = Arc::new(Config::default());
     let addr = format!("{guest_ip}:22");
     let connect_deadline = tokio::time::Instant::now() + Duration::from_secs(60);
     let mut ssh_handle = loop {
         let ssh_client = SshClient {
             vm_host_key: vm_host_key.clone(),
         };
-        match client::connect(ssh_config.clone(), addr.as_str(), ssh_client).await {
+        match connect(ssh_config.clone(), addr.as_str(), ssh_client).await {
             Ok(ssh_handle) => break ssh_handle,
             Err(_) if tokio::time::Instant::now() < connect_deadline => {
                 tokio::time::sleep(Duration::from_millis(500)).await;
@@ -82,7 +83,7 @@ async fn authenticate_ssh_handle(
 
 pub async fn open_terminal_channel(
     ssh_handle: &mut Handle<SshClient>,
-) -> Result<Channel<client::Msg>> {
+) -> Result<Channel<Msg>> {
     let ssh_channel = ssh_handle.channel_open_session().await?;
     ssh_channel
         .request_pty(false, "xterm-256color", 80, 24, 0, 0, &[])
@@ -96,7 +97,7 @@ pub async fn open_terminal_channel(
 pub async fn open_exec_channel(
     ssh_handle: &mut Handle<SshClient>,
     command: &str,
-) -> Result<Channel<client::Msg>> {
+) -> Result<Channel<Msg>> {
     let ssh_channel = ssh_handle.channel_open_session().await?;
     ssh_channel.exec(false, command).await?;
     Ok(ssh_channel)
