@@ -24,7 +24,9 @@ use common::validate_within_dir;
 const MAX_DOWNLOAD_BYTES: usize = 100 * 1024 * 1024; // 100 MB
 const MAX_ZIP_DEPTH: usize = 10;
 const FILE_CHUNK_SIZE: usize = 64 * 1024; // 64 KB
-const SEND_TIMEOUT_SECS: u64 = 30;
+// Timeout on sends from the SFTP reader to the zip writer. The zip writer runs in
+// spawn_blocking and should consume file events almost immediately; 30 s is ample.
+const FILE_EVENT_SEND_TIMEOUT_SECS: u64 = 30;
 
 enum FileEvent {
     Start(String),
@@ -98,7 +100,7 @@ async fn collect_zip_files(
                 None => return,
             };
             match timeout(
-                Duration::from_secs(SEND_TIMEOUT_SECS),
+                Duration::from_secs(FILE_EVENT_SEND_TIMEOUT_SECS),
                 file_tx.send(FileEvent::Start(relative)),
             )
             .await
@@ -141,7 +143,7 @@ async fn stream_file(
             bail!("download size limit exceeded");
         }
         match timeout(
-            Duration::from_secs(SEND_TIMEOUT_SECS),
+            Duration::from_secs(FILE_EVENT_SEND_TIMEOUT_SECS),
             file_tx.send(FileEvent::Chunk(Bytes::copy_from_slice(&buf[..n]))),
         )
         .await

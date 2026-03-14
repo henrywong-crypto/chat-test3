@@ -6,7 +6,10 @@ use tokio::{
     time::{Duration, timeout},
 };
 
-const SEND_TIMEOUT_SECS: u64 = 30;
+// Timeout on sends from the zip writer to the HTTP body channel. This is bounded
+// by how slowly a client can consume a download; 5 minutes covers slow connections
+// without hanging indefinitely when a client disconnects without closing the socket.
+const SEND_TIMEOUT_SECS: u64 = 300;
 
 // zip 2.x requires Write + Seek. For each file it follows this pattern:
 //   1. Write local header (pos → header_end)
@@ -107,7 +110,9 @@ impl io::Write for SeekableChannelWriter {
             self.buf.resize(end, 0);
         }
         self.buf[start..end].copy_from_slice(data);
-        self.pos += data.len() as u64;
+        self.pos = self.base
+            + u64::try_from(end)
+                .map_err(|_| io::Error::new(io::ErrorKind::InvalidInput, "write end overflows u64"))?;
         self.high_water = self.high_water.max(self.pos);
         Ok(data.len())
     }
