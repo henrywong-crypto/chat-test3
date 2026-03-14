@@ -1,6 +1,6 @@
 use anyhow::Result;
 use firecracker_manager::{JailerConfig, VmConfig, build_mmds_with_iam};
-use std::path::{Path, PathBuf};
+use std::path::Path;
 use tracing::info;
 use uuid::Uuid;
 

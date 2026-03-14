@@ -31,7 +31,7 @@ enum FileEvent {
 }
 
 pub fn build_streaming_zip_response(
-    sftp: &SftpSession,
+    sftp: SftpSession,
     dir_path: &Path,
     upload_dir: &Path,
     filename: &str,
@@ -39,7 +39,7 @@ pub fn build_streaming_zip_response(
     let (zip_tx, zip_rx) = mpsc::channel::<Result<Bytes, IoError>>(4);
     let (file_tx, file_rx) = tokio_mpsc::channel::<FileEvent>(4);
 
-    tokio::spawn(collect_zip_files(sftp.to_owned(), dir_path.to_owned(), upload_dir.to_owned(), file_tx));
+    tokio::spawn(collect_zip_files(sftp, dir_path.to_owned(), upload_dir.to_owned(), file_tx));
     tokio::task::spawn_blocking(move || write_zip_to_channel(file_rx, zip_tx));
 
     let content_disposition =
