@@ -335,6 +335,8 @@ const chatState = {
   streamHadText:          false,
   pendingTitle:           null,
   sessionHasNewContent:   new Set(),
+  awaitingQuestion:       false,  // true while the running session is paused on ask_user_question
+  pendingQuestion:        null,   // {sessionId, requestId, questions} while awaiting, else null
   render:                 newRenderContext(), // cleared atomically on every view switch
   sessionDomCache:        new Map(), // sessionId → <div> holding that session's messages
   sessionRenderContexts:  new Map(), // sessionId → renderContext (DOM refs for active stream)
@@ -397,7 +399,17 @@ function restoreSession(sessionId) {
   while (container.firstChild) messages.appendChild(container.firstChild);
   chatState.render = chatState.sessionRenderContexts.get(key) ?? newRenderContext();
   chatState.sessionRenderContexts.delete(key);
+  renderPendingQuestionIfNeeded(sessionId);
   return true;
+}
+
+// If the running session has a pending ask_user_question and the panel is not
+// already in the DOM, render it now.  Called after DOM is ready for sessionId.
+function renderPendingQuestionIfNeeded(sessionId) {
+  const pq = chatState.pendingQuestion;
+  if (!pq || pq.sessionId !== sessionId) return;
+  if (document.getElementById('question-panel-' + pq.requestId)) return;
+  renderQuestionPanel(pq.requestId, pq.questions);
 }
 
 // Switch the visible session and wipe all per-view render state atomically.
@@ -595,6 +607,8 @@ function connectChatSse() {
       chatState.es = null;
       chatState.runningSessionId = null;
       chatState.streaming = false;
+      chatState.awaitingQuestion = false;
+      chatState.pendingQuestion = null;
       chatState.streamHadText = false;
       sealAssistantMessage();
       applyChatInputState();
@@ -631,6 +645,9 @@ function connectChatSse() {
   chatState.es.addEventListener('ask_user_question', e => {
     const payload = JSON.parse(e.data);
     console.log('[chat] event: ask_user_question  request_id=' + payload.request_id);
+    chatState.awaitingQuestion = true;
+    chatState.pendingQuestion = { sessionId: chatState.runningSessionId, requestId: payload.request_id, questions: payload.questions || [] };
+    applyChatInputState();
     if (!runningMatchesView()) return;
     removeThinkingIndicator();
     sealAssistantMessage();
@@ -649,6 +666,8 @@ function connectChatSse() {
     chatState.runningSessionId = null;
     chatState.streamHadText = false;
     chatState.streaming = false;
+    chatState.awaitingQuestion = false;
+    chatState.pendingQuestion = null;
     const currentViewKey = viewKey();
     if (completedSessionId !== null && completedSessionId !== currentViewKey) {
       // Completed in background — invalidate cache and mark it for list refresh.
@@ -673,6 +692,8 @@ function connectChatSse() {
     chatState.runningSessionId = null;
     chatState.streamHadText = false;
     chatState.streaming = false;
+    chatState.awaitingQuestion = false;
+    chatState.pendingQuestion = null;
     const currentViewKey = viewKey();
     if (completedSessionId !== null && completedSessionId !== currentViewKey) {
       loadChatHistory();
@@ -1021,6 +1042,7 @@ function renderQuestionPanel(requestId, questions) {
       const sel = Array.from(selections.get(qi));
       if (sel.length > 0) answers[q.question] = sel.join(', ');
     });
+    chatState.pendingQuestion = null;
     panel.remove();
     submitQuestionAnswer(requestId, answers);
   });
@@ -1491,14 +1513,14 @@ function applyChatInputState() {
     stopBtn.classList.remove('hidden');
     sendBtn.classList.add('hidden');
     input.disabled = true;
-  } else if (chatState.streaming) {
-    // Running in another session — block new queries to prevent cross-session corruption.
+  } else if (chatState.streaming && !chatState.awaitingQuestion) {
+    // Actively streaming in another session — block new queries to prevent cross-session corruption.
     stopBtn.classList.add('hidden');
     sendBtn.classList.remove('hidden');
     sendBtn.disabled = true;
     input.disabled = true;
   } else {
-    // Nothing running — fully enabled.
+    // Nothing running (or running session is paused on a question) — fully enabled.
     stopBtn.classList.add('hidden');
     sendBtn.classList.remove('hidden');
     sendBtn.disabled = false;
@@ -1664,6 +1686,7 @@ async function loadAndRenderTranscript(sessionId, projectDir) {
     if (chatState.viewSessionId !== sessionId) return;  // view switched while parsing
     document.getElementById('chat-messages').innerHTML = '';
     renderTranscriptMessages(transcript.messages);
+    renderPendingQuestionIfNeeded(sessionId);
   } catch (e) {
     if (e.name !== 'AbortError') throw e;
   } finally {
