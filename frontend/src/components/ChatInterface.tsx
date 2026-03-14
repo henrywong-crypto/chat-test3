@@ -1,4 +1,4 @@
-import React, { useCallback, useEffect, useState } from "react";
+import React, { useCallback, useEffect } from "react";
 import type { ChatSession, TranscriptMessage } from "../types";
 import { useSse } from "../contexts/SseContext";
 import { useChatState } from "../hooks/useChatState";
@@ -65,9 +65,10 @@ function buildMessagesFromTranscript(transcript: TranscriptMessage[]): ChatMessa
 interface ChatInterfaceProps {
   sessions: ChatSession[];
   setSessions: (s: ChatSession[]) => void;
+  selectedSession: ChatSession | null;
 }
 
-export default function ChatInterface({ sessions, setSessions }: ChatInterfaceProps) {
+export default function ChatInterface({ sessions, setSessions, selectedSession }: ChatInterfaceProps) {
   const sseCtx = useSse();
   const chatState = useChatState();
 
@@ -113,14 +114,15 @@ export default function ChatInterface({ sessions, setSessions }: ChatInterfacePr
     }
   }, [sseCtx, getMessages, setMessages]);
 
-  const handleSelectSession = useCallback((session: ChatSession) => {
-    setViewSessionId(session.session_id);
-    loadTranscriptForSession(session);
-  }, [setViewSessionId, loadTranscriptForSession]);
-
-  const handleNewChat = useCallback(() => {
-    setViewSessionId(null);
-  }, [setViewSessionId]);
+  // React to session selection from the sidebar (driven by App.tsx)
+  useEffect(() => {
+    if (!selectedSession) {
+      setViewSessionId(null);
+      return;
+    }
+    setViewSessionId(selectedSession.session_id);
+    loadTranscriptForSession(selectedSession);
+  }, [selectedSession]); // eslint-disable-line react-hooks/exhaustive-deps
 
   const handleSend = useCallback(async (text: string) => {
     const sessionId = viewSessionId;

@@ -11,7 +11,7 @@ function AppContent() {
   const { hasUserRootfs, csrfToken, loadHistory, deleteSession } = useSse();
   const [activeTab, setActiveTab] = useState<ViewTab>("chat");
   const [sessions, setSessions] = useState<ChatSession[]>([]);
-  const [viewSessionId, setViewSessionId] = useState<string | null>(null);
+  const [selectedSession, setSelectedSession] = useState<ChatSession | null>(null);
 
   useEffect(() => {
     loadHistory().then(setSessions).catch(console.error);
@@ -22,13 +22,13 @@ function AppContent() {
     try {
       await deleteSession(session.session_id, session.project_dir);
       setSessions((prev) => prev.filter((s) => s.session_id !== session.session_id));
-      if (viewSessionId === session.session_id) {
-        setViewSessionId(null);
+      if (selectedSession?.session_id === session.session_id) {
+        setSelectedSession(null);
       }
     } catch (err) {
       console.error("Failed to delete session", err);
     }
-  }, [deleteSession, viewSessionId]);
+  }, [deleteSession, selectedSession]);
 
   const handleRefresh = useCallback(() => {
     loadHistory().then(setSessions).catch(console.error);
@@ -46,10 +46,10 @@ function AppContent() {
       {activeTab === "chat" && (
         <Sidebar
           sessions={sessions}
-          viewSessionId={viewSessionId}
+          viewSessionId={selectedSession?.session_id ?? null}
           runningSessionId={null}
-          onSelectSession={(session) => setViewSessionId(session.session_id)}
-          onNewChat={() => setViewSessionId(null)}
+          onSelectSession={setSelectedSession}
+          onNewChat={() => setSelectedSession(null)}
           onRefresh={handleRefresh}
           onDeleteSession={handleDeleteSession}
         />
@@ -57,7 +57,7 @@ function AppContent() {
 
       <main className="flex min-w-0 flex-1 flex-col overflow-hidden">
         {activeTab === "chat" && (
-          <ChatInterface sessions={sessions} setSessions={setSessions} />
+          <ChatInterface sessions={sessions} setSessions={setSessions} selectedSession={selectedSession} />
         )}
         <div
           style={{ display: activeTab === "terminal" ? "flex" : "none" }}
