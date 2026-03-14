@@ -17,10 +17,7 @@ def get_settings() -> dict:
         return {"has_api_key": False}
     env = data.get("env", {})
     has_api_key = bool(env.get("ANTHROPIC_AUTH_TOKEN"))
-    if has_api_key:
-        env = {k: ("***" if k == "ANTHROPIC_AUTH_TOKEN" else v) for k, v in env.items()}
-        data = {**data, "env": env}
-    return {**data, "has_api_key": has_api_key}
+    return {"has_api_key": has_api_key}
 
 
 def set_settings(content: str) -> dict:

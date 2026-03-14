@@ -1,4 +1,5 @@
 import React, { useCallback, useEffect, useState } from "react";
+import { flushSync } from "react-dom";
 import { ChevronRight, Download, Folder, File, Upload, Home } from "lucide-react";
 import { useSse } from "../contexts/SseContext";
 import type { FileEntry } from "../types";
@@ -45,7 +46,7 @@ export default function FileManager() {
   }, [uploadDir, loadDir]);
 
   const handleUpload = useCallback(async (file: File) => {
-    setUploadStatus("Uploading…");
+    flushSync(() => setUploadStatus("Uploading…"));
     const formData = new FormData();
     formData.append("csrf_token", csrfToken);
     formData.append("path", currentPath.replace(/\/$/, "") + "/" + file.name);
@@ -79,7 +80,7 @@ export default function FileManager() {
           Upload
           <input
             type="file"
-            className="absolute h-px w-px overflow-hidden opacity-0"
+            className="hidden"
             onChange={(e) => { const f = e.target.files?.[0]; if (f) { handleUpload(f); e.target.value = ""; } }}
           />
         </label>
