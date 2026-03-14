@@ -6,7 +6,7 @@ use serde::Serialize;
 use ssh_client::{SshClient, connect_ssh, open_exec_channel};
 use std::{
     net::Ipv4Addr,
-    path::PathBuf,
+    path::{Path, PathBuf},
     str::from_utf8,
 };
 use tokio::{
