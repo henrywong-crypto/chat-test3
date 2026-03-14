@@ -1,9 +1,9 @@
-use anyhow::{anyhow, Context, Result};
+use anyhow::{Context, Result, anyhow};
 use axum::{
+    Json,
     extract::{Form, Multipart, Path as RoutePath, Query, State},
     http::StatusCode,
     response::{Html, IntoResponse, Redirect, Response},
-    Json,
 };
 use chat_history::{delete_chat_session, fetch_chat_history, list_chat_sessions};
 use firecracker_manager::create_vm;
@@ -17,20 +17,20 @@ use std::{
     path::Path,
     time::{Instant, SystemTime, UNIX_EPOCH},
 };
-use store::{upsert_user, User as DbUser};
+use store::{User as DbUser, upsert_user};
 use tokio::io::{AsyncRead, AsyncWriteExt};
 use tokio_util::io::StreamReader;
 use tower_sessions::Session;
 use tracing::{error, info};
 use uuid::Uuid;
 use vm_lifecycle::{
-    build_user_rootfs_path, build_vm_config, ensure_user_rootfs, fetch_host_iam_credentials,
-    find_user_rootfs, VmEntry, VmRegistry,
+    VmEntry, VmRegistry, build_user_rootfs_path, build_vm_config, ensure_user_rootfs,
+    fetch_host_iam_credentials, find_user_rootfs,
 };
 
 use crate::{
     auth::User,
-    state::{find_vm_guest_ip_for_user, AppError, AppState},
+    state::{AppError, AppState, find_vm_guest_ip_for_user},
     static_files::{app_js_version, styles_css_version},
     templates::render_terminal_page,
 };

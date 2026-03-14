@@ -1,7 +1,7 @@
 use anyhow::{Context, Result};
 use chrono::{DateTime, Utc};
 use futures::future::BoxFuture;
-use russh_sftp::client::{fs::DirEntry, SftpSession};
+use russh_sftp::client::{SftpSession, fs::DirEntry};
 use serde::Serialize;
 use sftp_client::open_sftp_session;
 use ssh_client::connect_ssh;
@@ -9,10 +9,10 @@ use std::path::Path;
 use tokio::io::AsyncReadExt;
 
 use crate::{
+    Content,
     history::{is_interrupted_request, is_local_command_output, is_slash_command},
     journal::JournalEntry,
     project::find_all_project_dirs,
-    Content,
 };
 
 #[derive(Serialize)]
@@ -66,13 +66,21 @@ pub async fn delete_chat_session(
     let mut ssh_handle = connect_ssh(guest_ip, ssh_key_path, ssh_user, vm_host_key_path).await?;
     let sftp = open_sftp_session(&mut ssh_handle).await?;
     let path = project_dir.join(Path::new(session_id).with_extension("jsonl"));
-    sftp.remove_file(path.to_str().expect("path is valid UTF-8")).await?;
+    sftp.remove_file(path.to_str().expect("path is valid UTF-8"))
+        .await?;
     delete_session_dir(&sftp, project_dir, session_id).await
 }
 
-async fn delete_session_dir(sftp: &SftpSession, project_dir: &Path, session_id: &str) -> Result<()> {
+async fn delete_session_dir(
+    sftp: &SftpSession,
+    project_dir: &Path,
+    session_id: &str,
+) -> Result<()> {
     let dir_path = project_dir.join(session_id);
-    match sftp.try_exists(dir_path.to_str().expect("path is valid UTF-8")).await {
+    match sftp
+        .try_exists(dir_path.to_str().expect("path is valid UTF-8"))
+        .await
+    {
         Ok(true) => remove_dir_all(sftp, &dir_path, 2).await,
         _ => Ok(()),
     }
@@ -84,10 +92,7 @@ fn remove_dir_all<'a>(
     max_depth: usize,
 ) -> BoxFuture<'a, Result<()>> {
     Box::pin(async move {
-        let entries: Vec<DirEntry> = sftp
-            .read_dir(path.to_str().expect("path is valid UTF-8"))
-            .await?
-            .collect();
+        let entries = list_dir_entries(sftp, path).await?;
         for entry in &entries {
             let entry_path = path.join(entry.file_name());
             if entry.file_type().is_dir() {
@@ -96,12 +101,25 @@ fn remove_dir_all<'a>(
                 }
                 remove_dir_all(sftp, &entry_path, max_depth - 1).await?;
             } else {
-                sftp.remove_file(entry_path.to_str().expect("path is valid UTF-8")).await?;
+                sftp.remove_file(entry_path.to_str().expect("path is valid UTF-8"))
+                    .await?;
             }
         }
-        sftp.remove_dir(path.to_str().expect("path is valid UTF-8")).await?;
-        Ok(())
+        remove_sftp_dir(sftp, path).await
     })
+}
+
+async fn list_dir_entries(sftp: &SftpSession, path: &Path) -> Result<Vec<DirEntry>> {
+    Ok(sftp
+        .read_dir(path.to_str().expect("path is valid UTF-8"))
+        .await?
+        .collect())
+}
+
+async fn remove_sftp_dir(sftp: &SftpSession, path: &Path) -> Result<()> {
+    sftp.remove_dir(path.to_str().expect("path is valid UTF-8"))
+        .await?;
+    Ok(())
 }
 
 pub(crate) fn extract_last_user_title(contents: &str) -> Option<String> {
@@ -147,14 +165,19 @@ async fn build_chat_session_with_title(
     };
     Ok(Some(ChatSession {
         session_id: session_id.to_owned(),
-        project_dir: project_dir.to_str().expect("path is valid UTF-8").to_owned(),
+        project_dir: project_dir
+            .to_str()
+            .expect("path is valid UTF-8")
+            .to_owned(),
         title,
         last_active_at,
     }))
 }
 
 async fn fetch_session_title(sftp: &SftpSession, path: &Path) -> Result<Option<String>> {
-    let mut file = sftp.open(path.to_str().expect("path is valid UTF-8")).await?;
+    let mut file = sftp
+        .open(path.to_str().expect("path is valid UTF-8"))
+        .await?;
     let mut contents = String::new();
     file.read_to_string(&mut contents).await?;
     Ok(extract_last_user_title(&contents))

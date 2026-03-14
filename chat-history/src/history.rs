@@ -5,7 +5,7 @@ use ssh_client::connect_ssh;
 use std::path::Path;
 use tokio::io::AsyncReadExt;
 
-use crate::{journal::JournalEntry, Content};
+use crate::{Content, journal::JournalEntry};
 
 #[derive(Serialize)]
 pub struct ChatHistory {
@@ -31,7 +31,9 @@ pub async fn fetch_chat_history(
     let mut ssh_handle = connect_ssh(guest_ip, ssh_key_path, ssh_user, vm_host_key_path).await?;
     let sftp = open_sftp_session(&mut ssh_handle).await?;
     let path = project_dir.join(Path::new(session_id).with_extension("jsonl"));
-    let mut file = sftp.open(path.to_str().expect("path is valid UTF-8")).await?;
+    let mut file = sftp
+        .open(path.to_str().expect("path is valid UTF-8"))
+        .await?;
     let mut contents = String::new();
     file.read_to_string(&mut contents).await?;
     Ok(parse_chat_history(&contents))

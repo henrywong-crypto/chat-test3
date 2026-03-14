@@ -1,4 +1,4 @@
-use anyhow::{anyhow, Context, Result};
+use anyhow::{Context, Result, anyhow};
 use axum::{
     extract::{Multipart, Path as AxumPath, State},
     http::StatusCode,
@@ -19,7 +19,7 @@ use uuid::Uuid;
 
 use crate::{
     auth::User,
-    state::{find_vm_guest_ip_for_user, AppError, AppState},
+    state::{AppError, AppState, find_vm_guest_ip_for_user},
 };
 
 struct UploadMetadata {
@@ -53,7 +53,13 @@ pub(crate) async fn upload_file_handler(
     )
     .await?;
     let sftp = open_sftp_session(&mut ssh_handle).await?;
-    stream_upload_file(&mut multipart, &sftp, Path::new(&upload_metadata.remote_path), Path::new(&state.upload_dir)).await?;
+    stream_upload_file(
+        &mut multipart,
+        &sftp,
+        Path::new(&upload_metadata.remote_path),
+        Path::new(&state.upload_dir),
+    )
+    .await?;
     Ok((StatusCode::OK, "").into_response())
 }
 
@@ -91,7 +97,10 @@ async fn extract_upload_metadata(multipart: &mut Multipart) -> Result<UploadMeta
     }
     let csrf_token = csrf_token.ok_or_else(|| anyhow!("missing 'csrf_token' field"))?;
     let remote_path = remote_path.ok_or_else(|| anyhow!("missing 'path' field"))?;
-    Ok(UploadMetadata { csrf_token, remote_path })
+    Ok(UploadMetadata {
+        csrf_token,
+        remote_path,
+    })
 }
 
 async fn stream_upload_file(

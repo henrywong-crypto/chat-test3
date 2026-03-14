@@ -1,8 +1,8 @@
 use axum::{
+    Json,
     extract::State,
     http::StatusCode,
     response::{IntoResponse, Response},
-    Json,
 };
 use chat_relay::{build_api_key_settings_json, get_vm_settings, set_vm_settings};
 use serde::{Deserialize, Serialize};
@@ -11,7 +11,7 @@ use tower_sessions::Session;
 
 use crate::{
     auth::User,
-    state::{find_user_vm_guest_ip, AppError, AppState},
+    state::{AppError, AppState, find_user_vm_guest_ip},
 };
 
 #[derive(Serialize)]

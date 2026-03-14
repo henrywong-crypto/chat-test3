@@ -1,8 +1,8 @@
-use anyhow::{bail, Context, Result};
+use anyhow::{Context, Result, bail};
 use russh::{
-    client::{self, Handle},
-    keys::{load_public_key, load_secret_key, PrivateKey, PrivateKeyWithHashAlg, PublicKey},
     Channel,
+    client::{self, Handle},
+    keys::{PrivateKey, PrivateKeyWithHashAlg, PublicKey, load_public_key, load_secret_key},
 };
 use std::{path::Path, sync::Arc, time::Duration};
 

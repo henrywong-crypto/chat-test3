@@ -1,12 +1,12 @@
 use anyhow::anyhow;
 use axum::{
+    Json,
     body::Body,
     extract::{Path, State},
-    http::{header, StatusCode},
+    http::{StatusCode, header},
     response::{IntoResponse, Response},
-    Json,
 };
-use chat_relay::{start_agent_relay, AgentMessage};
+use chat_relay::{AgentMessage, start_agent_relay};
 use futures::StreamExt;
 use serde::Deserialize;
 use std::convert::Infallible;
@@ -18,7 +18,7 @@ use uuid::Uuid;
 
 use crate::{
     auth::User,
-    state::{find_vm_guest_ip_for_user, mark_vm_ws_connected, AppError, AppState},
+    state::{AppError, AppState, find_vm_guest_ip_for_user, mark_vm_ws_connected},
 };
 
 pub(crate) async fn handle_chat_stream(
@@ -96,7 +96,10 @@ pub(crate) async fn handle_chat_query(
     (StatusCode::OK, "").into_response()
 }
 
-pub(crate) fn find_agent_sender(state: &AppState, vm_id: &str) -> Option<mpsc::Sender<AgentMessage>> {
+pub(crate) fn find_agent_sender(
+    state: &AppState,
+    vm_id: &str,
+) -> Option<mpsc::Sender<AgentMessage>> {
     state.chat_senders.lock().ok()?.get(vm_id).cloned()
 }
 

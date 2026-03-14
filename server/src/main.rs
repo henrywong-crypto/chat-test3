@@ -12,17 +12,17 @@ mod upload;
 
 use anyhow::{Context, Result};
 use axum::{
+    Router,
     extract::{DefaultBodyLimit, Request},
     http::HeaderValue,
     middleware::{self, Next},
     response::Response,
     routing::{get, post},
-    Router,
 };
 use firecracker_manager::{cleanup_stale_vms, setup_host_networking};
 use time::Duration;
 use tokio::{net::TcpListener, signal, sync::oneshot, task::AbortHandle};
-use tower_sessions::{cookie::SameSite, ExpiredDeletion, Expiry, SessionManagerLayer};
+use tower_sessions::{ExpiredDeletion, Expiry, SessionManagerLayer, cookie::SameSite};
 use tower_sessions_sqlx_store::PostgresStore;
 use tracing::info;
 use vm_lifecycle::{refresh_all_vm_mmds, save_all_vm_rootfs, sweep_idle_vms};
@@ -39,7 +39,7 @@ use crate::{
         get_or_create_terminal, get_terminal_page, handle_chat_upload, list_chat_sessions_handler,
     },
     settings::{get_settings_handler, put_settings_handler},
-    state::{load_config, AppState},
+    state::{AppState, load_config},
     static_files::{serve_app_js, serve_styles_css},
     terminal::handle_ws_upgrade,
     upload::upload_file_handler,
@@ -94,7 +94,10 @@ fn build_router(app_state: AppState, session_store: PostgresStore) -> Router {
         )
         .route("/sessions/{id}/chat-stream", get(handle_chat_stream))
         .route("/sessions/{id}/chat", post(handle_chat_query))
-        .route("/sessions/{id}/chat-question-answer", post(handle_chat_question_answer))
+        .route(
+            "/sessions/{id}/chat-question-answer",
+            post(handle_chat_question_answer),
+        )
         .route("/sessions/{id}/chat-stop", post(handle_chat_stop))
         .route(
             "/sessions/{id}/chat-history",

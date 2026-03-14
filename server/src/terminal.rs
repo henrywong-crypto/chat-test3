@@ -1,25 +1,25 @@
 use anyhow::{Context, Result};
 use axum::{
     extract::{
-        ws::{Message, WebSocket, WebSocketUpgrade},
         Path, State,
+        ws::{Message, WebSocket, WebSocketUpgrade},
     },
     http::StatusCode,
     response::{IntoResponse, Response},
 };
 use bytes::Bytes;
 use futures::{SinkExt, StreamExt};
-use russh::{client::Msg, Channel, ChannelMsg};
+use russh::{Channel, ChannelMsg, client::Msg};
 use ssh_client::{connect_ssh, open_terminal_channel};
 use std::time::Duration;
 use store::upsert_user;
 use tracing::{error, info, warn};
 use uuid::Uuid;
-use vm_lifecycle::{build_user_rootfs_path, VmEntry};
+use vm_lifecycle::{VmEntry, build_user_rootfs_path};
 
 use crate::{
     auth::User,
-    state::{find_vm_guest_ip_for_user, mark_vm_ws_connected, AppError, AppState},
+    state::{AppError, AppState, find_vm_guest_ip_for_user, mark_vm_ws_connected},
 };
 
 pub(crate) async fn handle_ws_upgrade(

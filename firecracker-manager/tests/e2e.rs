@@ -1,5 +1,5 @@
 use anyhow::{Context, Result};
-use firecracker_manager::{create_vm, setup_host_networking, JailerConfig, VmConfig};
+use firecracker_manager::{JailerConfig, VmConfig, create_vm, setup_host_networking};
 use nix::{sys::signal::kill, unistd::Pid};
 use serde::Deserialize;
 use std::path::PathBuf;

@@ -1,16 +1,19 @@
-use anyhow::{bail, Context, Result};
+use anyhow::{Context, Result, bail};
 use axum::{
     body::Body,
-    http::{header, HeaderValue, Response},
+    http::{HeaderValue, Response, header},
 };
 use bytes::Bytes;
 use futures::channel::mpsc;
 use russh_sftp::client::SftpSession;
-use std::{io::{Error as IoError, Write}, path::PathBuf};
+use std::{
+    io::{Error as IoError, Write},
+    path::PathBuf,
+};
 use tokio::{
     io::AsyncReadExt,
     sync::mpsc as tokio_mpsc,
-    time::{timeout, Duration},
+    time::{Duration, timeout},
 };
 use zip::write::SimpleFileOptions;
 

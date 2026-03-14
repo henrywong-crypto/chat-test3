@@ -1,7 +1,7 @@
 use anyhow::{Context, Result};
 use bytes::Bytes;
-use russh::{client, ChannelMsg};
-use ssh_client::{connect_ssh, open_exec_channel, SshClient};
+use russh::{ChannelMsg, client};
+use ssh_client::{SshClient, connect_ssh, open_exec_channel};
 use std::{path::Path, str::from_utf8};
 
 const SETTINGS_CMD: &str = "bash -lc '/usr/local/bin/uv run /opt/settings.py'";

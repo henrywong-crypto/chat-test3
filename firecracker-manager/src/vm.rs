@@ -1,7 +1,7 @@
 use anyhow::{Context, Result};
 use firecracker_client::{start_instance, stop_instance};
 use nix::{
-    sys::signal::{kill, Signal},
+    sys::signal::{Signal, kill},
     unistd::Pid,
 };
 use std::{

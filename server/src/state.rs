@@ -1,4 +1,4 @@
-use anyhow::{anyhow, Result};
+use anyhow::{Result, anyhow};
 use axum::{
     http::StatusCode,
     response::{IntoResponse, Response},
@@ -12,7 +12,7 @@ use std::{
     sync::{Arc, Mutex},
 };
 use store::PgPool;
-use tokio::sync::{mpsc, Mutex as AsyncMutex};
+use tokio::sync::{Mutex as AsyncMutex, mpsc};
 use tracing::error;
 use uuid::Uuid;
 use vm_lifecycle::VmRegistry;

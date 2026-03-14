@@ -1,6 +1,6 @@
-use anyhow::{bail, Context, Result};
+use anyhow::{Context, Result, bail};
 use http_body_util::{BodyExt, Full};
-use hyper::{body::Bytes, client::conn::http1, Method, Request};
+use hyper::{Method, Request, body::Bytes, client::conn::http1};
 use hyper_util::rt::TokioIo;
 use serde::Serialize;
 use std::path::Path;

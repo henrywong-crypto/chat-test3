@@ -1,7 +1,7 @@
 use anyhow::Result;
 use firecracker_client::{
-    put_mmds, set_boot_source, set_drive, set_machine_config, set_mmds_config,
-    set_network_interface, BootSource, Drive, MachineConfig, MmdsConfig, NetworkInterface,
+    BootSource, Drive, MachineConfig, MmdsConfig, NetworkInterface, put_mmds, set_boot_source,
+    set_drive, set_machine_config, set_mmds_config, set_network_interface,
 };
 use std::path::Path;
 

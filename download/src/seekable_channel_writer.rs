@@ -1,5 +1,5 @@
 use bytes::Bytes;
-use futures::{channel::mpsc, SinkExt};
+use futures::{SinkExt, channel::mpsc};
 use std::io;
 
 // zip 2.x requires Write + Seek. For each file it follows this pattern:

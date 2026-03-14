@@ -1,9 +1,9 @@
 use axum::{
     extract::{FromRequestParts, Query, State},
-    http::{request::Parts, StatusCode},
+    http::{StatusCode, request::Parts},
     response::{Html, IntoResponse, Redirect, Response},
 };
-use handlers::{callback, login, AppState as CognitoState, CallbackQuery};
+use handlers::{AppState as CognitoState, CallbackQuery, callback, login};
 use tower_sessions::Session;
 
 use crate::{state::AppState, templates::render_login_page};

@@ -1,13 +1,16 @@
 use anyhow::Result;
 use bytes::Bytes;
 use futures::stream::Stream;
-use russh::{client, Channel, ChannelMsg};
+use russh::{Channel, ChannelMsg, client};
 use serde::Serialize;
-use ssh_client::{connect_ssh, open_exec_channel, SshClient};
-use std::{path::{Path, PathBuf}, str::from_utf8};
+use ssh_client::{SshClient, connect_ssh, open_exec_channel};
+use std::{
+    path::{Path, PathBuf},
+    str::from_utf8,
+};
 use tokio::{
     sync::mpsc,
-    time::{interval, timeout, Duration},
+    time::{Duration, interval, timeout},
 };
 use tokio_stream::wrappers::ReceiverStream;
 use tracing::{debug, error, info};

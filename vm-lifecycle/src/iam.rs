@@ -1,9 +1,9 @@
 use anyhow::{Context, Result};
 use aws_config::BehaviorVersion;
-use aws_credential_types::{provider::ProvideCredentials, Credentials};
+use aws_credential_types::{Credentials, provider::ProvideCredentials};
 use firecracker_manager::ImdsCredential;
 use std::time::SystemTime;
-use time::{format_description::well_known::Rfc3339, OffsetDateTime};
+use time::{OffsetDateTime, format_description::well_known::Rfc3339};
 use tracing::info;
 
 pub struct HostIamCredential {

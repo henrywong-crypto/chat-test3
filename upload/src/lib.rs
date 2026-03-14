@@ -1,7 +1,7 @@
 use anyhow::{Context, Result};
 use russh_sftp::client::SftpSession;
 use std::path::{Path, PathBuf};
-use tokio::io::{copy, AsyncRead, AsyncWriteExt};
+use tokio::io::{AsyncRead, AsyncWriteExt, copy};
 
 use common::validate_within_dir;
 
@@ -12,7 +12,9 @@ pub async fn write_file_via_sftp(
     source: &mut (impl AsyncRead + Unpin),
 ) -> Result<()> {
     let resolved = resolve_upload_path(&sftp, remote_path, upload_dir).await?;
-    let resolved_str = resolved.to_str().context("resolved path is not valid UTF-8")?;
+    let resolved_str = resolved
+        .to_str()
+        .context("resolved path is not valid UTF-8")?;
     let mut file = sftp
         .create(resolved_str)
         .await

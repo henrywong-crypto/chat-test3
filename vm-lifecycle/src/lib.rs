@@ -1,5 +1,5 @@
 use anyhow::Result;
-use firecracker_manager::{build_mmds_with_iam, put_mmds, JailerConfig, Vm, VmConfig};
+use firecracker_manager::{JailerConfig, Vm, VmConfig, build_mmds_with_iam, put_mmds};
 use std::{
     collections::HashMap,
     path::{Path, PathBuf},
@@ -13,7 +13,7 @@ use vm_settings::VmBuildConfig;
 mod iam;
 mod rootfs;
 
-pub use iam::{fetch_host_iam_credentials, HostIamCredential};
+pub use iam::{HostIamCredential, fetch_host_iam_credentials};
 pub use rootfs::{
     build_user_rootfs_path, ensure_user_rootfs, find_user_rootfs, save_all_vm_rootfs,
 };

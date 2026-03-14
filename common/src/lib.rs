@@ -14,12 +14,16 @@ mod tests {
 
     #[test]
     fn test_path_within_dir_passes() {
-        assert!(validate_within_dir(Path::new("/uploads/user/file.txt"), Path::new("/uploads")).is_ok());
+        assert!(
+            validate_within_dir(Path::new("/uploads/user/file.txt"), Path::new("/uploads")).is_ok()
+        );
     }
 
     #[test]
     fn test_path_in_nested_subdir_passes() {
-        assert!(validate_within_dir(Path::new("/uploads/a/b/c/d.txt"), Path::new("/uploads")).is_ok());
+        assert!(
+            validate_within_dir(Path::new("/uploads/a/b/c/d.txt"), Path::new("/uploads")).is_ok()
+        );
     }
 
     #[test]
@@ -36,7 +40,10 @@ mod tests {
     fn test_path_with_shared_string_prefix_but_different_component_fails() {
         // "/uploads-evil" shares the string prefix "/uploads" but is a different
         // directory component — starts_with is component-based, not string-based.
-        assert!(validate_within_dir(Path::new("/uploads-evil/file.txt"), Path::new("/uploads")).is_err());
+        assert!(
+            validate_within_dir(Path::new("/uploads-evil/file.txt"), Path::new("/uploads"))
+                .is_err()
+        );
     }
 
     #[test]
@@ -49,6 +56,8 @@ mod tests {
         // Path::starts_with does not resolve "..": the components of
         // "/uploads/../etc/passwd" start with [/, uploads] so the check passes.
         // This documents why callers must canonicalize paths before calling this function.
-        assert!(validate_within_dir(Path::new("/uploads/../etc/passwd"), Path::new("/uploads")).is_ok());
+        assert!(
+            validate_within_dir(Path::new("/uploads/../etc/passwd"), Path::new("/uploads")).is_ok()
+        );
     }
 }

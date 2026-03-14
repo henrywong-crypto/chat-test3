@@ -15,7 +15,7 @@ use uuid::Uuid;
 
 use crate::{
     auth::User,
-    state::{find_user_vm_guest_ip, find_vm_guest_ip_for_user, AppError, AppState},
+    state::{AppError, AppState, find_user_vm_guest_ip, find_vm_guest_ip_for_user},
 };
 
 #[derive(Deserialize)]
@@ -38,7 +38,7 @@ pub(crate) async fn download_file_handler(
         None => match find_user_vm_guest_ip(&state.vms, db_user.id)? {
             Some(ip) => ip,
             None => {
-                return Ok((StatusCode::NOT_FOUND, "Session not found or expired").into_response())
+                return Ok((StatusCode::NOT_FOUND, "Session not found or expired").into_response());
             }
         },
     };
@@ -77,10 +77,8 @@ pub(crate) async fn download_file_handler(
             &format!("{dirname}.zip"),
         )?)
     } else {
-        Ok(
-            build_streaming_file_response(sftp, &real_path)
-                .await
-                .context("failed to build file response")?,
-        )
+        Ok(build_streaming_file_response(sftp, &real_path)
+            .await
+            .context("failed to build file response")?)
     }
 }

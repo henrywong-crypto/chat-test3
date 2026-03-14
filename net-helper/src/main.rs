@@ -1,4 +1,4 @@
-use anyhow::{anyhow, bail, Context, Result};
+use anyhow::{Context, Result, anyhow, bail};
 use caps::{CapSet, Capability};
 use clap::{Parser, Subcommand};
 use ipnet::Ipv4Net;
@@ -109,10 +109,31 @@ fn cmd_setup_nat(iface: &str) -> Result<()> {
     run_cmd("iptables", &["-P", "FORWARD", "ACCEPT"])?;
     // Best-effort delete to avoid duplicates on restart
     let _ = Command::new("iptables")
-        .args(["-t", "nat", "-D", "POSTROUTING", "-o", iface, "-j", "MASQUERADE"])
+        .args([
+            "-t",
+            "nat",
+            "-D",
+            "POSTROUTING",
+            "-o",
+            iface,
+            "-j",
+            "MASQUERADE",
+        ])
         .stderr(std::process::Stdio::null())
         .status();
-    run_cmd("iptables", &["-t", "nat", "-A", "POSTROUTING", "-o", iface, "-j", "MASQUERADE"])
+    run_cmd(
+        "iptables",
+        &[
+            "-t",
+            "nat",
+            "-A",
+            "POSTROUTING",
+            "-o",
+            iface,
+            "-j",
+            "MASQUERADE",
+        ],
+    )
 }
 
 fn raise_ambient_net_admin() -> Result<()> {

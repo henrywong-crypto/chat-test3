@@ -1,12 +1,12 @@
 use anyhow::{Context, Result};
 use axum::{
+    Json,
     extract::{Path, Query, State},
     http::StatusCode,
     response::IntoResponse,
-    Json,
 };
 use common::validate_within_dir;
-use russh_sftp::client::{fs::DirEntry, SftpSession};
+use russh_sftp::client::{SftpSession, fs::DirEntry};
 use serde::{Deserialize, Serialize};
 use sftp_client::open_sftp_session;
 use ssh_client::connect_ssh;
@@ -16,7 +16,7 @@ use uuid::Uuid;
 
 use crate::{
     auth::User,
-    state::{find_user_vm_guest_ip, find_vm_guest_ip_for_user, AppError, AppState},
+    state::{AppError, AppState, find_user_vm_guest_ip, find_vm_guest_ip_for_user},
 };
 
 #[derive(Deserialize)]
@@ -51,7 +51,7 @@ pub(crate) async fn list_files_handler(
         None => match find_user_vm_guest_ip(&state.vms, db_user.id)? {
             Some(ip) => ip,
             None => {
-                return Ok((StatusCode::NOT_FOUND, "Session not found or expired").into_response())
+                return Ok((StatusCode::NOT_FOUND, "Session not found or expired").into_response());
             }
         },
     };
