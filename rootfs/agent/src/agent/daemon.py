@@ -16,8 +16,16 @@ def log(msg: str) -> None:
 
 
 def emit_sse(event_name: str, data: dict) -> None:
-    """Write a properly formatted SSE event to the query-scoped writer."""
+    """Write a properly formatted SSE event to the query-scoped writer.
+
+    Uses the task-captured writer (ContextVar) so that concurrent connections
+    don't interfere with each other.  If that writer has already closed (e.g.
+    the client disconnected and reconnected), falls back to _current_writer so
+    events are delivered to the new connection.
+    """
     writer = _emit_writer.get()
+    if writer is None or writer.is_closing():
+        writer = _current_writer
     if writer is None or writer.is_closing():
         return
     payload = f"event: {event_name}\ndata: {json.dumps(data, cls=_Encoder)}\n\n"
@@ -90,15 +98,18 @@ async def handle_connection(reader: asyncio.StreamReader, writer: asyncio.Stream
     """Handle a single client connection."""
     global _current_writer
     log("client connected")
-    previous_writer = _current_writer
-    previous_dropped = previous_writer is None or previous_writer.is_closing()
-    if previous_dropped:
-        _current_writer = writer
-        if _pending_question_data:
-            log("re-emitting pending question to reconnected client")
-            token = _emit_writer.set(writer)
-            emit_sse('ask_user_question', _pending_question_data)
-            _emit_writer.reset(token)
+    # Always take over as the active writer.  When the old connection is still
+    # alive (e.g. the browser reloaded before the relay detected the disconnect),
+    # this ensures the running task can fall back to the new writer once the old
+    # one closes.  When a second browser window opens, the ContextVar in the
+    # running task still points to its original writer, so it won't be affected
+    # until that writer closes.
+    _current_writer = writer
+    if _pending_question_data:
+        log("re-emitting pending question to reconnected client")
+        token = _emit_writer.set(writer)
+        emit_sse('ask_user_question', _pending_question_data)
+        _emit_writer.reset(token)
     await route_connection(reader, writer)
     if _current_writer is writer:
         _current_writer = None

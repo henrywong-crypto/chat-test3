@@ -113,9 +113,13 @@ impl io::Write for SeekableChannelWriter {
             self.buf.resize(end, 0);
         }
         self.buf[start..end].copy_from_slice(data);
-        self.pos = self.base
-            + u64::try_from(end)
-                .map_err(|_| io::Error::new(io::ErrorKind::InvalidInput, "write end overflows u64"))?;
+        self.pos = self
+            .base
+            .checked_add(
+                u64::try_from(end)
+                    .map_err(|_| io::Error::new(io::ErrorKind::InvalidInput, "write end overflows u64"))?,
+            )
+            .ok_or_else(|| io::Error::new(io::ErrorKind::InvalidInput, "write position overflows u64"))?;
         self.high_water = self.high_water.max(self.pos);
         Ok(data.len())
     }

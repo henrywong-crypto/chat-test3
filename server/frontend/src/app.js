@@ -543,13 +543,13 @@ function connectChatSse() {
   };
   chatEs.addEventListener('init', () => {
     console.log('[chat] event: init');
-    if (runningSessionId !== null && runningSessionId !== chatSessionId) return;
+    if (runningSessionId !== null && runningSessionId !== (chatSessionId ?? '__new__')) return;
     showThinkingIndicator();
   });
   chatEs.addEventListener('text_delta', e => {
     const payload = JSON.parse(e.data);
     console.log('[chat] event: text_delta  len=' + payload.text.length);
-    if (runningSessionId !== null && runningSessionId !== chatSessionId) return;
+    if (runningSessionId !== null && runningSessionId !== (chatSessionId ?? '__new__')) return;
     removeThinkingIndicator();
     streamHadText = true;
     appendToAssistantMessage(payload.text);
@@ -557,13 +557,13 @@ function connectChatSse() {
   chatEs.addEventListener('thinking_delta', e => {
     const payload = JSON.parse(e.data);
     console.log('[chat] event: thinking_delta  len=' + payload.thinking.length);
-    if (runningSessionId !== null && runningSessionId !== chatSessionId) return;
+    if (runningSessionId !== null && runningSessionId !== (chatSessionId ?? '__new__')) return;
     appendToThinkingBlock(payload.thinking);
   });
   chatEs.addEventListener('tool_start', e => {
     const payload = JSON.parse(e.data);
     console.log('[chat] event: tool_start  name=' + payload.name);
-    if (runningSessionId !== null && runningSessionId !== chatSessionId) return;
+    if (runningSessionId !== null && runningSessionId !== (chatSessionId ?? '__new__')) return;
     // AskUserQuestion is handled interactively via the ask_user_question event.
     if (payload.name === 'AskUserQuestion') return;
     sealAssistantMessage();
@@ -572,7 +572,7 @@ function connectChatSse() {
   chatEs.addEventListener('ask_user_question', e => {
     const payload = JSON.parse(e.data);
     console.log('[chat] event: ask_user_question  request_id=' + payload.request_id);
-    if (runningSessionId !== null && runningSessionId !== chatSessionId) return;
+    if (runningSessionId !== null && runningSessionId !== (chatSessionId ?? '__new__')) return;
     removeThinkingIndicator();
     sealAssistantMessage();
     renderQuestionPanel(payload.request_id, payload.questions || []);
@@ -580,7 +580,7 @@ function connectChatSse() {
   chatEs.addEventListener('tool_result', e => {
     const payload = JSON.parse(e.data);
     console.log('[chat] event: tool_result  tool_use_id=' + payload.tool_use_id + '  is_error=' + payload.is_error);
-    if (runningSessionId !== null && runningSessionId !== chatSessionId) return;
+    if (runningSessionId !== null && runningSessionId !== (chatSessionId ?? '__new__')) return;
     fillToolResult(payload.tool_use_id, payload.content, payload.is_error);
   });
   chatEs.addEventListener('done', e => {
@@ -590,7 +590,8 @@ function connectChatSse() {
     runningSessionId = null;
     streamHadText = false;
     chatStreaming = false;
-    if (completedSessionId !== null && completedSessionId !== chatSessionId) {
+    const currentViewId = chatSessionId ?? '__new__';
+    if (completedSessionId !== null && completedSessionId !== currentViewId) {
       // Completed in background — mark it and refresh the list.
       sessionHasNewContent.add(completedSessionId);
       loadChatHistory();
@@ -611,7 +612,8 @@ function connectChatSse() {
     runningSessionId = null;
     streamHadText = false;
     chatStreaming = false;
-    if (completedSessionId !== null && completedSessionId !== chatSessionId) {
+    const currentViewId = chatSessionId ?? '__new__';
+    if (completedSessionId !== null && completedSessionId !== currentViewId) {
       loadChatHistory();
     } else {
       removeThinkingIndicator();
@@ -624,7 +626,7 @@ function connectChatSse() {
 }
 
 function prepareForQuery(content) {
-  runningSessionId = chatSessionId;
+  runningSessionId = chatSessionId ?? '__new__';
   appendUserMessage(content);
   sealAssistantTurn();
   streamHadText = false;
@@ -1425,7 +1427,7 @@ function applyChatInputState() {
   const stopBtn = document.getElementById('chat-stop-btn');
   const sendBtn = document.getElementById('chat-send-btn');
   const input = document.getElementById('chat-input');
-  if (runningSessionId !== null && runningSessionId === chatSessionId) {
+  if (runningSessionId !== null && runningSessionId === (chatSessionId ?? '__new__')) {
     // Viewing the running session — show the stop button.
     stopBtn.classList.remove('hidden');
     sendBtn.classList.add('hidden');
