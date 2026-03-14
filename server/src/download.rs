@@ -49,13 +49,14 @@ pub(crate) async fn download_file_handler(
         &state.vm_host_key_path,
     )
     .await?;
-    let sftp = Arc::new(open_sftp_session(&mut ssh_handle).await?);
+    let sftp = open_sftp_session(&mut ssh_handle).await?;
     let real_path = PathBuf::from(
         sftp.canonicalize(&query.path)
             .await
             .context("failed to resolve remote path")?,
     );
-    validate_within_dir(&real_path, &PathBuf::from(&state.upload_dir))?;
+    let upload_dir = PathBuf::from(&state.upload_dir);
+    validate_within_dir(&real_path, &upload_dir)?;
     let real_path_str = real_path
         .to_str()
         .context("resolved path is not valid UTF-8")?
@@ -71,9 +72,9 @@ pub(crate) async fn download_file_handler(
             .context("path has no final component")?
             .to_owned();
         Ok(build_streaming_zip_response(
-            sftp,
+            Arc::new(sftp),
             &real_path,
-            Path::new(&state.upload_dir),
+            &upload_dir,
             &format!("{dirname}.zip"),
         )?)
     } else {
