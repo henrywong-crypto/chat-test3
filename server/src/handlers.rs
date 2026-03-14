@@ -1,6 +1,6 @@
 use anyhow::{anyhow, Context, Result};
 use axum::{
-    extract::{Form, Multipart, Path, Query, State},
+    extract::{Form, Multipart, Path as RoutePath, Query, State},
     http::StatusCode,
     response::{Html, IntoResponse, Redirect, Response},
     Json,
@@ -14,6 +14,7 @@ use sftp_client::open_sftp_session;
 use ssh_client::connect_ssh;
 use std::{
     io::{Error as IoError, ErrorKind},
+    path::Path,
     time::{Instant, SystemTime, UNIX_EPOCH},
 };
 use store::{upsert_user, User as DbUser};
@@ -187,7 +188,7 @@ pub(crate) async fn delete_user_rootfs_handler(
 pub(crate) async fn get_terminal_page(
     user: User,
     session: Session,
-    Path(vm_id): Path<String>,
+    RoutePath(vm_id): RoutePath<String>,
     State(state): State<AppState>,
 ) -> Result<Response, AppError> {
     if !validate_vm_id(&vm_id) {
@@ -219,7 +220,7 @@ pub(crate) async fn get_terminal_page(
 
 pub(crate) async fn list_chat_sessions_handler(
     user: User,
-    Path(vm_id): Path<String>,
+    RoutePath(vm_id): RoutePath<String>,
     State(state): State<AppState>,
 ) -> Result<Response, AppError> {
     if !validate_vm_id(&vm_id) {
@@ -234,7 +235,7 @@ pub(crate) async fn list_chat_sessions_handler(
         &state.ssh_key_path,
         &state.ssh_user,
         &state.vm_host_key_path,
-        &state.ssh_user_home,
+        Path::new(&state.ssh_user_home),
     )
     .await
     .map(|sessions| Json(sessions).into_response())
@@ -252,7 +253,7 @@ pub(crate) struct TranscriptQuery {
 
 pub(crate) async fn get_chat_transcript_handler(
     user: User,
-    Path(vm_id): Path<String>,
+    RoutePath(vm_id): RoutePath<String>,
     Query(query): Query<TranscriptQuery>,
     State(state): State<AppState>,
 ) -> Result<Response, AppError> {
@@ -269,7 +270,7 @@ pub(crate) async fn get_chat_transcript_handler(
         &state.ssh_user,
         &state.vm_host_key_path,
         &query.session_id,
-        &query.project_dir,
+        Path::new(&query.project_dir),
     )
     .await
     .map(|history| Json(history).into_response())
@@ -288,7 +289,7 @@ pub(crate) struct DeleteChatSessionForm {
 
 pub(crate) async fn delete_chat_session_handler(
     user: User,
-    Path(vm_id): Path<String>,
+    RoutePath(vm_id): RoutePath<String>,
     session: Session,
     State(state): State<AppState>,
     Form(form): Form<DeleteChatSessionForm>,
@@ -309,7 +310,7 @@ pub(crate) async fn delete_chat_session_handler(
         &state.ssh_user,
         &state.vm_host_key_path,
         &form.session_id,
-        &form.project_dir,
+        Path::new(&form.project_dir),
     )
     .await?;
     Ok(StatusCode::NO_CONTENT.into_response())
@@ -322,7 +323,7 @@ struct ChatUploadMetadata {
 pub(crate) async fn handle_chat_upload(
     user: User,
     session: Session,
-    Path(vm_id): Path<String>,
+    RoutePath(vm_id): RoutePath<String>,
     State(state): State<AppState>,
     mut multipart: Multipart,
 ) -> Result<Response, AppError> {

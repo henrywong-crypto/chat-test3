@@ -26,12 +26,12 @@ pub async fn fetch_chat_history(
     ssh_user: &str,
     vm_host_key_path: &Path,
     session_id: &str,
-    project_dir: &str,
+    project_dir: &Path,
 ) -> Result<ChatHistory> {
     let mut ssh_handle = connect_ssh(guest_ip, ssh_key_path, ssh_user, vm_host_key_path).await?;
     let sftp = open_sftp_session(&mut ssh_handle).await?;
-    let path = format!("{project_dir}/{session_id}.jsonl");
-    let mut file = sftp.open(&path).await?;
+    let path = project_dir.join(Path::new(session_id).with_extension("jsonl"));
+    let mut file = sftp.open(path.to_str().expect("path is valid UTF-8")).await?;
     let mut contents = String::new();
     file.read_to_string(&mut contents).await?;
     Ok(parse_chat_history(&contents))

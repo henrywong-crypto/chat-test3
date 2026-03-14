@@ -28,14 +28,17 @@ pub async fn list_chat_sessions(
     ssh_key_path: &Path,
     ssh_user: &str,
     vm_host_key_path: &Path,
-    ssh_user_home: &str,
+    ssh_user_home: &Path,
 ) -> Result<Vec<ChatSession>> {
     let mut ssh_handle = connect_ssh(guest_ip, ssh_key_path, ssh_user, vm_host_key_path).await?;
     let sftp = open_sftp_session(&mut ssh_handle).await?;
     let project_dirs = find_all_project_dirs(&sftp, ssh_user_home).await;
     let mut all_chat_sessions = Vec::new();
     for project_dir in &project_dirs {
-        let dir_entries: Vec<DirEntry> = sftp.read_dir(project_dir).await?.collect();
+        let dir_entries: Vec<DirEntry> = sftp
+            .read_dir(project_dir.to_str().expect("path is valid UTF-8"))
+            .await?
+            .collect();
         for dir_entry in &dir_entries {
             let name = dir_entry.file_name();
             let Some(session_id) = name.strip_suffix(".jsonl") else {
@@ -58,18 +61,18 @@ pub async fn delete_chat_session(
     ssh_user: &str,
     vm_host_key_path: &Path,
     session_id: &str,
-    project_dir: &str,
+    project_dir: &Path,
 ) -> Result<()> {
     let mut ssh_handle = connect_ssh(guest_ip, ssh_key_path, ssh_user, vm_host_key_path).await?;
     let sftp = open_sftp_session(&mut ssh_handle).await?;
-    let path = format!("{project_dir}/{session_id}.jsonl");
-    sftp.remove_file(&path).await?;
+    let path = project_dir.join(Path::new(session_id).with_extension("jsonl"));
+    sftp.remove_file(path.to_str().expect("path is valid UTF-8")).await?;
     delete_session_dir(&sftp, project_dir, session_id).await
 }
 
-async fn delete_session_dir(sftp: &SftpSession, project_dir: &str, session_id: &str) -> Result<()> {
-    let dir_path = format!("{project_dir}/{session_id}");
-    match sftp.try_exists(&dir_path).await {
+async fn delete_session_dir(sftp: &SftpSession, project_dir: &Path, session_id: &str) -> Result<()> {
+    let dir_path = project_dir.join(session_id);
+    match sftp.try_exists(dir_path.to_str().expect("path is valid UTF-8")).await {
         Ok(true) => remove_dir_all(sftp, &dir_path, 2).await,
         _ => Ok(()),
     }
@@ -77,23 +80,26 @@ async fn delete_session_dir(sftp: &SftpSession, project_dir: &str, session_id: &
 
 fn remove_dir_all<'a>(
     sftp: &'a SftpSession,
-    path: &'a str,
+    path: &'a Path,
     max_depth: usize,
 ) -> BoxFuture<'a, Result<()>> {
     Box::pin(async move {
-        let entries: Vec<DirEntry> = sftp.read_dir(path).await?.collect();
+        let entries: Vec<DirEntry> = sftp
+            .read_dir(path.to_str().expect("path is valid UTF-8"))
+            .await?
+            .collect();
         for entry in &entries {
-            let entry_path = format!("{path}/{}", entry.file_name());
+            let entry_path = path.join(entry.file_name());
             if entry.file_type().is_dir() {
                 if max_depth == 0 {
                     continue;
                 }
                 remove_dir_all(sftp, &entry_path, max_depth - 1).await?;
             } else {
-                sftp.remove_file(&entry_path).await?;
+                sftp.remove_file(entry_path.to_str().expect("path is valid UTF-8")).await?;
             }
         }
-        sftp.remove_dir(path).await?;
+        sftp.remove_dir(path.to_str().expect("path is valid UTF-8")).await?;
         Ok(())
     })
 }
@@ -127,7 +133,7 @@ async fn build_chat_session_with_title(
     sftp: &SftpSession,
     dir_entry: &DirEntry,
     session_id: &str,
-    project_dir: &str,
+    project_dir: &Path,
 ) -> Result<Option<ChatSession>> {
     let mtime = dir_entry
         .metadata()
@@ -135,20 +141,20 @@ async fn build_chat_session_with_title(
         .context("missing mtime on session file")?;
     let last_active_at = DateTime::from_timestamp(mtime as i64, 0)
         .context("mtime is out of range for a timestamp")?;
-    let path = format!("{project_dir}/{session_id}.jsonl");
+    let path = project_dir.join(Path::new(session_id).with_extension("jsonl"));
     let Some(title) = fetch_session_title(sftp, &path).await? else {
         return Ok(None);
     };
     Ok(Some(ChatSession {
         session_id: session_id.to_owned(),
-        project_dir: project_dir.to_owned(),
+        project_dir: project_dir.to_str().expect("path is valid UTF-8").to_owned(),
         title,
         last_active_at,
     }))
 }
 
-async fn fetch_session_title(sftp: &SftpSession, path: &str) -> Result<Option<String>> {
-    let mut file = sftp.open(path).await?;
+async fn fetch_session_title(sftp: &SftpSession, path: &Path) -> Result<Option<String>> {
+    let mut file = sftp.open(path.to_str().expect("path is valid UTF-8")).await?;
     let mut contents = String::new();
     file.read_to_string(&mut contents).await?;
     Ok(extract_last_user_title(&contents))
