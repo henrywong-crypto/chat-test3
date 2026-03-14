@@ -9,7 +9,7 @@ use download::{file::build_streaming_file_response, zip::build_streaming_zip_res
 use serde::Deserialize;
 use sftp_client::open_sftp_session;
 use ssh_client::connect_ssh;
-use std::{path::PathBuf, sync::Arc};
+use std::path::PathBuf;
 use store::upsert_user;
 use uuid::Uuid;
 
@@ -72,7 +72,7 @@ pub(crate) async fn download_file_handler(
             .context("path has no final component")?
             .to_owned();
         Ok(build_streaming_zip_response(
-            Arc::new(sftp),
+            sftp,
             &real_path,
             &upload_dir,
             &format!("{dirname}.zip"),

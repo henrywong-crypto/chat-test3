@@ -9,7 +9,6 @@ use russh_sftp::client::SftpSession;
 use std::{
     io::{Error as IoError, Write},
     path::{Path, PathBuf},
-    sync::Arc,
 };
 use tokio::{
     io::AsyncReadExt,
@@ -32,7 +31,7 @@ enum FileEvent {
 }
 
 pub fn build_streaming_zip_response(
-    sftp: Arc<SftpSession>,
+    sftp: SftpSession,
     dir_path: &Path,
     upload_dir: &Path,
     filename: &str,
@@ -54,7 +53,7 @@ pub fn build_streaming_zip_response(
 }
 
 async fn collect_zip_files(
-    sftp: Arc<SftpSession>,
+    sftp: SftpSession,
     dir_path: PathBuf,
     upload_dir: PathBuf,
     file_tx: tokio_mpsc::Sender<FileEvent>,
