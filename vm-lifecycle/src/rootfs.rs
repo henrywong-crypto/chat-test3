@@ -34,8 +34,8 @@ pub async fn ensure_user_rootfs(
     if rootfs_path.exists() {
         return Ok(rootfs_path);
     }
-    tokio::fs::create_dir_all(user_rootfs_dir).await?;
-    tokio::fs::copy(base_rootfs_path, &rootfs_path).await?;
+    fs::create_dir_all(user_rootfs_dir).await?;
+    fs::copy(base_rootfs_path, &rootfs_path).await?;
     Ok(rootfs_path)
 }
 
@@ -68,7 +68,7 @@ async fn save_vm_rootfs_to_dir(
     user_rootfs_dir: &Path,
     rootfs_lock: &AsyncMutex<()>,
 ) -> Result<()> {
-    tokio::fs::create_dir_all(user_rootfs_dir)
+    fs::create_dir_all(user_rootfs_dir)
         .await
         .context("failed to create user rootfs dir on shutdown")?;
     let _guard = timeout(Duration::from_secs(LOCK_TIMEOUT_SECS), rootfs_lock.lock())
