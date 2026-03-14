@@ -8,7 +8,8 @@ use futures::channel::mpsc;
 use russh_sftp::client::SftpSession;
 use std::{
     io::{Error as IoError, Write},
-    path::PathBuf,
+    path::{Path, PathBuf},
+    sync::Arc,
 };
 use tokio::{
     io::AsyncReadExt,
@@ -31,9 +32,9 @@ enum FileEvent {
 }
 
 pub fn build_streaming_zip_response(
-    sftp: SftpSession,
-    dir_path: PathBuf,
-    upload_dir: PathBuf,
+    sftp: Arc<SftpSession>,
+    dir_path: &Path,
+    upload_dir: &Path,
     filename: &str,
 ) -> Result<Response<Body>> {
     // zip bytes → HTTP body (bounded for backpressure)
@@ -41,7 +42,7 @@ pub fn build_streaming_zip_response(
     // file events → zip writer (bounded to limit SFTP read-ahead)
     let (file_tx, file_rx) = tokio_mpsc::channel::<FileEvent>(4);
 
-    tokio::spawn(collect_zip_files(sftp, dir_path, upload_dir, file_tx));
+    tokio::spawn(collect_zip_files(sftp, dir_path.to_owned(), upload_dir.to_owned(), file_tx));
     tokio::task::spawn_blocking(move || write_zip_to_channel(file_rx, zip_tx));
 
     let content_disposition =
@@ -55,7 +56,7 @@ pub fn build_streaming_zip_response(
 }
 
 async fn collect_zip_files(
-    sftp: SftpSession,
+    sftp: Arc<SftpSession>,
     dir_path: PathBuf,
     upload_dir: PathBuf,
     file_tx: tokio_mpsc::Sender<FileEvent>,
@@ -63,13 +64,12 @@ async fn collect_zip_files(
     let mut total_bytes: usize = 0;
     let mut dirs_to_visit: Vec<(PathBuf, usize)> = vec![(dir_path.clone(), 0)];
     while let Some((dir, depth)) = dirs_to_visit.pop() {
-        let dir_str = match dir.to_str() {
-            Some(s) => s,
+        let read_dir = match dir.to_str() {
+            Some(s) => match sftp.read_dir(s).await {
+                Ok(entries) => entries,
+                Err(_) => return,
+            },
             None => return,
-        };
-        let read_dir = match sftp.read_dir(dir_str).await {
-            Ok(entries) => entries,
-            Err(_) => return,
         };
         for entry in read_dir {
             let name = entry.file_name();
@@ -106,11 +106,7 @@ async fn collect_zip_files(
                 Ok(Ok(())) => {}
                 _ => return,
             }
-            let child_str = match child_path.to_str() {
-                Some(s) => s,
-                None => return,
-            };
-            if stream_file(&sftp, child_str, &file_tx, &mut total_bytes)
+            if stream_file(&sftp, &child_path, &file_tx, &mut total_bytes)
                 .await
                 .is_err()
             {
@@ -122,12 +118,13 @@ async fn collect_zip_files(
 
 async fn stream_file(
     sftp: &SftpSession,
-    path: &str,
+    path: &Path,
     file_tx: &tokio_mpsc::Sender<FileEvent>,
     total_bytes: &mut usize,
 ) -> Result<()> {
+    let path_str = path.to_str().context("invalid file path")?;
     let mut file = sftp
-        .open(path)
+        .open(path_str)
         .await
         .context("failed to open remote file")?;
     let mut buf = vec![0u8; FILE_CHUNK_SIZE];

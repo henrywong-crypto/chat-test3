@@ -9,7 +9,7 @@ use download::{file::build_streaming_file_response, zip::build_streaming_zip_res
 use serde::Deserialize;
 use sftp_client::open_sftp_session;
 use ssh_client::connect_ssh;
-use std::path::PathBuf;
+use std::{path::PathBuf, sync::Arc};
 use store::upsert_user;
 use uuid::Uuid;
 
@@ -49,7 +49,7 @@ pub(crate) async fn download_file_handler(
         &state.vm_host_key_path,
     )
     .await?;
-    let sftp = open_sftp_session(&mut ssh_handle).await?;
+    let sftp = Arc::new(open_sftp_session(&mut ssh_handle).await?);
     let real_path = PathBuf::from(
         sftp.canonicalize(&query.path)
             .await
@@ -72,8 +72,8 @@ pub(crate) async fn download_file_handler(
             .to_owned();
         Ok(build_streaming_zip_response(
             sftp,
-            real_path,
-            PathBuf::from(&state.upload_dir),
+            &real_path,
+            Path::new(&state.upload_dir),
             &format!("{dirname}.zip"),
         )?)
     } else {
