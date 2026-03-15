@@ -184,23 +184,23 @@ test.describe("navigation during streaming", () => {
     await expect(page.getByPlaceholder("Message Claude…")).toBeDisabled();
   });
 
-  test("UF-42 clicking an existing session while a null-session stream is pending hides the status bar", async ({
+  test("UF-42 clicking an existing session while a pending-session stream is running hides the status bar", async ({
     page,
   }) => {
     const session = makeSession({ session_id: "sess-a", title: "Previous Chat" });
     const ctrl = await setupApp(page, { sessions: [session] });
 
     await sendMessage(page, "Hello");
-    // null-session stream: runningSessionId=null, viewSessionId=null → isLoading=true
+    // pending-session stream: runningSessionId=pendingId, viewSessionId=pendingId → isLoading=true
     await expect(page.getByRole("status")).toBeVisible();
 
     // Navigate to the existing session
     await page.getByText("Previous Chat").click();
-    // viewSessionId="sess-a", runningSessionId=null → isLoading=false
+    // viewSessionId="sess-a", runningSessionId=pendingId → isCurrentRunning=false → status bar hidden
     await expect(page.getByRole("status")).not.toBeVisible();
 
-    // No pulsing indicator either (runningSessionId=null matches no session row)
-    await expect(page.locator(".animate-ping")).not.toBeVisible();
+    // Pending placeholder still pulses (runningSessionId=pendingId matches the placeholder row)
+    await expect(page.locator(".animate-ping")).toBeVisible();
   });
 
   // ── Thinking indicator visibility ─────────────────────────────────────────

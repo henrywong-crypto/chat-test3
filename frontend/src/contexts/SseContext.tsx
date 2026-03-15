@@ -108,9 +108,9 @@ export function SseProvider({ children }: { children: React.ReactNode }) {
     };
 
     es.onerror = () => {
-      setIsVmReady(false);
+      setIsConnected(false);
       if (es.readyState === EventSource.CLOSED) {
-        setIsConnected(false);
+        setIsVmReady(false);
         esRef.current = null;
       }
     };

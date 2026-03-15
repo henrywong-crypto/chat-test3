@@ -1,19 +1,10 @@
 use anyhow::Result;
-use serde::Serialize;
-
-#[derive(Serialize)]
-struct HelloPayload<'a> {
-    #[serde(rename = "type")]
-    type_: &'a str,
-    task_id: &'a str,
-}
 
 pub fn build_hello_payload(task_id: &str) -> Result<String> {
-    let hello_payload = HelloPayload {
-        type_: "hello",
-        task_id,
-    };
-    Ok(serde_json::to_string(&hello_payload)?)
+    Ok(serde_json::to_string(&serde_json::json!({
+        "type": "hello",
+        "task_id": task_id,
+    }))?)
 }
 
 #[cfg(test)]

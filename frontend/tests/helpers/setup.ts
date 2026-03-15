@@ -237,9 +237,12 @@ export async function setupApp(
   let lastDeleteCsrfTokenValue: string | null = null;
   let lastHelloBodyValue: HelloBody | null = null;
 
-  // resolveSse is set each time the EventSource connects/reconnects.
-  // sendSseEvents calls it to deliver events and close the stream.
+  // Two-phase SSE route:
+  // Phase 1 (first connection) — immediately delivers relay_ready so isVmReady becomes true.
+  // Phase 2+ (subsequent connections) — waits for sendSseEvents (or uses queued events).
   let resolveSse: ((events: SseEvent[]) => void) | null = null;
+  let queuedSseEvents: SseEvent[] | null = null;
+  let sseConnectionCount = 0;
 
   // ── App HTML page ────────────────────────────────────────────────────────
   await page.route("http://localhost/", (route) =>
@@ -347,14 +350,34 @@ export async function setupApp(
     await route.fulfill({ status: 200, body: "" });
   });
 
-  // ── SSE stream — deferred until sendSseEvents is called ───────────────────
-  // Each time the EventSource connects (initial or reconnect) the handler fires
-  // and waits. Calling sendSseEvents resolves it with the desired events.
+  // ── SSE stream — two-phase ────────────────────────────────────────────────
+  // Phase 1 (first connection): immediately delivers relay_ready so isVmReady
+  // becomes true and the composer renders before setupApp returns.
+  // Phase 2+ (subsequent connections): waits for sendSseEvents or uses queued events.
   await page.route(`**/sessions/${VM_ID}/chat-stream`, async (route) => {
-    const events = await new Promise<SseEvent[]>((resolve) => {
-      resolveSse = resolve;
-    });
-    resolveSse = null;
+    const connNumber = ++sseConnectionCount;
+    if (connNumber === 1) {
+      await route.fulfill({
+        status: 200,
+        headers: {
+          "Content-Type": "text/event-stream",
+          "Cache-Control": "no-cache",
+          "X-Accel-Buffering": "no",
+        },
+        body: "event: relay_ready\ndata: {}\n\nretry: 0\n\n",
+      });
+      return;
+    }
+    let events: SseEvent[];
+    if (queuedSseEvents !== null) {
+      events = queuedSseEvents;
+      queuedSseEvents = null;
+    } else {
+      events = await new Promise<SseEvent[]>((resolve) => {
+        resolveSse = resolve;
+      });
+      resolveSse = null;
+    }
     await route.fulfill({
       status: 200,
       headers: {
@@ -400,7 +423,13 @@ export async function setupApp(
   await page.waitForSelector('textarea[placeholder="Message Claude…"]');
 
   return {
-    sendSseEvents: (events) => resolveSse?.(events),
+    sendSseEvents: (events) => {
+      if (resolveSse) {
+        resolveSse(events);
+      } else {
+        queuedSseEvents = events;
+      }
+    },
     setSessions: (s) => {
       sessions = s;
     },

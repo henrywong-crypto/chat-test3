@@ -1,17 +1,4 @@
 use anyhow::Result;
-use serde::Serialize;
-
-#[derive(Serialize)]
-struct QueryPayload<'a> {
-    #[serde(rename = "type")]
-    type_: &'a str,
-    task_id: &'a str,
-    content: &'a str,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    session_id: Option<&'a str>,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    work_dir: Option<&'a str>,
-}
 
 pub fn build_query_payload(
     task_id: &str,
@@ -19,14 +6,18 @@ pub fn build_query_payload(
     session_id: Option<&str>,
     work_dir: Option<&str>,
 ) -> Result<String> {
-    let query_payload = QueryPayload {
-        type_: "query",
-        task_id,
-        content,
-        session_id,
-        work_dir,
-    };
-    Ok(serde_json::to_string(&query_payload)?)
+    let mut payload = serde_json::json!({
+        "type": "query",
+        "task_id": task_id,
+        "content": content,
+    });
+    if let Some(session_id) = session_id {
+        payload["session_id"] = serde_json::Value::String(session_id.to_string());
+    }
+    if let Some(work_dir) = work_dir {
+        payload["work_dir"] = serde_json::Value::String(work_dir.to_string());
+    }
+    Ok(serde_json::to_string(&payload)?)
 }
 
 #[cfg(test)]

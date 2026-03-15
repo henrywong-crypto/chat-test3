@@ -1,19 +1,10 @@
 use anyhow::Result;
-use serde::Serialize;
-
-#[derive(Serialize)]
-struct InterruptPayload<'a> {
-    #[serde(rename = "type")]
-    type_: &'a str,
-    task_id: &'a str,
-}
 
 pub fn build_interrupt_payload(task_id: &str) -> Result<String> {
-    let interrupt_payload = InterruptPayload {
-        type_: "interrupt",
-        task_id,
-    };
-    Ok(serde_json::to_string(&interrupt_payload)?)
+    Ok(serde_json::to_string(&serde_json::json!({
+        "type": "interrupt",
+        "task_id": task_id,
+    }))?)
 }
 
 #[cfg(test)]
