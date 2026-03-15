@@ -4,6 +4,8 @@
  * UF-32  Copy button hover  — hovering an assistant message reveals copy button
  * UF-33  Copy format picker — format dropdown shows markdown / text options
  * UF-56  New Chat auto-focus — clicking "New Chat" puts focus on the composer textarea
+ * UF-57  Post-send focus    — after sending a message the composer textarea regains focus
+ * UF-58  Session select focus — switching to a history session focuses the composer textarea
  */
 import { test, expect } from "@playwright/test";
 import { setupApp, sendMessage, sse, makeSession } from "./helpers/setup";
@@ -87,6 +89,29 @@ test.describe("composer", () => {
     await page.getByRole("button", { name: "New Chat" }).click();
 
     // The textarea should have focus immediately
+    const composer = page.getByPlaceholder("Message Claude…");
+    await expect(composer).toBeFocused();
+  });
+
+  test("UF-57 composer textarea regains focus after sending a message", async ({ page }) => {
+    const ctrl = await setupApp(page, { sessions: [] });
+
+    await sendMessage(page, "Hello");
+
+    // Complete the stream so loading ends and the composer re-enables
+    ctrl.sendSseEvents(sse.text("Hi there", "sess-1"));
+    await expect(page.getByRole("status")).not.toBeVisible();
+
+    const composer = page.getByPlaceholder("Message Claude…");
+    await expect(composer).toBeFocused();
+  });
+
+  test("UF-58 switching to a history session focuses the composer textarea", async ({ page }) => {
+    const session = makeSession({ session_id: "sess-abc", title: "Past chat" });
+    await setupApp(page, { sessions: [session] });
+
+    await page.getByText("Past chat").click();
+
     const composer = page.getByPlaceholder("Message Claude…");
     await expect(composer).toBeFocused();
   });

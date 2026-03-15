@@ -52,6 +52,13 @@ export default function ChatComposer({ isLoading, isOtherRunning, onSend, onStop
     textareaRef.current?.focus();
   }, [focusKey]);
 
+  // Refocus when the loading state clears (streaming finished) so the user can keep typing
+  useEffect(() => {
+    if (!isLoading) {
+      textareaRef.current?.focus();
+    }
+  }, [isLoading]);
+
   const busy = isLoading || uploading;
   const blocked = busy || (isOtherRunning ?? false);
 
@@ -102,6 +109,7 @@ export default function ChatComposer({ isLoading, isOtherRunning, onSend, onStop
     setInput("");
     setSlashMenuOpen(false);
     if (textareaRef.current) textareaRef.current.style.height = "auto";
+    textareaRef.current?.focus();
     onSend(finalText);
   }, [input, blocked, uploading, pendingFiles, uploadAction, csrfToken, uploadDir, onSend]);
 

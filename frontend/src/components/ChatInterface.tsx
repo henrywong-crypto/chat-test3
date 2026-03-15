@@ -1,4 +1,4 @@
-import React, { useCallback, useEffect, useRef } from "react";
+import React, { useCallback, useEffect, useRef, useState } from "react";
 import type { ChatMessage, ChatSession, ContentBlock, TranscriptMessage } from "../types";
 import { useSse } from "../contexts/SseContext";
 import { useChatState } from "../hooks/useChatState";
@@ -109,6 +109,9 @@ export default function ChatInterface({ sessions, setSessions, selectedSession, 
   // Snapshot of newChatKey at the time the current null-session request was sent
   const sessionStartKeyRef = useRef(newChatKey);
 
+  // Bumped whenever the composer should receive focus (new chat or session switch)
+  const [composerFocusKey, setComposerFocusKey] = useState(0);
+
   const {
     viewSessionId,
     setViewSessionId,
@@ -159,6 +162,7 @@ export default function ChatInterface({ sessions, setSessions, selectedSession, 
     }
     setViewSessionId(selectedSession.session_id);
     loadTranscriptForSession(selectedSession);
+    setComposerFocusKey((k) => k + 1);
   }, [selectedSession, setViewSessionId, loadTranscriptForSession]);
 
   // Refs for reading latest values inside effects without adding to deps
@@ -175,6 +179,7 @@ export default function ChatInterface({ sessions, setSessions, selectedSession, 
     }
     setMessages(null, []);
     setViewSessionId(null);
+    setComposerFocusKey((k) => k + 1);
   }, [newChatKey, setMessages, setViewSessionId, setNullOrphaned]);
 
   // Notify parent when the running session changes so Sidebar can show the active indicator
@@ -260,7 +265,7 @@ export default function ChatInterface({ sessions, setSessions, selectedSession, 
           isOtherRunning={isOtherRunning}
           onSend={handleSend}
           onStop={handleStop}
-          focusKey={newChatKey}
+          focusKey={composerFocusKey}
         />
       )}
     </div>
