@@ -14,7 +14,7 @@ axum = { version = "0.8.8", features = ["multipart", "ws"] }
 bytes = "1.11.1"
 chat-history = { git = "https://github.com/llm-proxy-rs/web" }
 chat-agent = { git = "https://github.com/llm-proxy-rs/web" }
-chat-settings = { path = "../chat-settings" }
+chat-settings = { git = "https://github.com/llm-proxy-rs/web" }
 chrono = { version = "0.4", features = ["serde"] }
 common = { git = "https://github.com/llm-proxy-rs/web" }
 config = "0.15.19"
