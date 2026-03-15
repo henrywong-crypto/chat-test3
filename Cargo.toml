@@ -3,7 +3,6 @@ members = [
     "chat-agent",
     "chat-relay",
     "common",
-    "net-helper",
     "server",
     "ssh-client",
     "store",
