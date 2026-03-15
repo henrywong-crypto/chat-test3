@@ -11,8 +11,8 @@ interface SseContextValue {
   latestEvent: SseEvent | null;
   isConnected: boolean;
   sendQuery: (content: string, sessionId: string | null) => Promise<void>;
-  sendStop: () => Promise<void>;
-  answerQuestion: (requestId: string, answers: Record<string, string>) => Promise<void>;
+  sendStop: (taskId: string) => Promise<void>;
+  answerQuestion: (taskId: string, requestId: string, answers: Record<string, string>) => Promise<void>;
   loadHistory: () => Promise<ChatSession[]>;
   loadTranscript: (sessionId: string, projectDir: string, signal?: AbortSignal) => Promise<TranscriptMessage[]>;
   deleteSession: (sessionId: string, projectDir: string) => Promise<void>;
@@ -62,6 +62,10 @@ export function SseProvider({ children }: { children: React.ReactNode }) {
     const addListener = (eventType: string, handler: (e: MessageEvent) => void) => {
       es.addEventListener(eventType, handler as EventListener);
     };
+
+    addListener("session_start", (e) => {
+      flushSync(() => setLatestEvent({ type: "session_start", payload: JSON.parse(e.data) }));
+    });
 
     addListener("init", () => {
       flushSync(() => setLatestEvent({ type: "init" }));
@@ -116,12 +120,12 @@ export function SseProvider({ children }: { children: React.ReactNode }) {
     await post(`/sessions/${vmId}/chat`, { content, session_id: sessionId });
   }, [post, vmId]);
 
-  const sendStop = useCallback(async () => {
-    await post(`/sessions/${vmId}/chat-stop`, {});
+  const sendStop = useCallback(async (taskId: string) => {
+    await post(`/sessions/${vmId}/chat-stop`, { task_id: taskId });
   }, [post, vmId]);
 
-  const answerQuestion = useCallback(async (requestId: string, answers: Record<string, string>) => {
-    await post(`/sessions/${vmId}/chat-question-answer`, { request_id: requestId, answers });
+  const answerQuestion = useCallback(async (taskId: string, requestId: string, answers: Record<string, string>) => {
+    await post(`/sessions/${vmId}/chat-question-answer`, { task_id: taskId, request_id: requestId, answers });
   }, [post, vmId]);
 
   const loadHistory = useCallback(async (): Promise<ChatSession[]> => {

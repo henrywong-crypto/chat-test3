@@ -20,6 +20,7 @@ export function useSseHandlers(
     setRunningSessionId,
     setIsStreaming,
     setSessionPendingQuestion,
+    setTaskId,
     setSessions,
     addMessage,
     removeMessage,
@@ -67,6 +68,12 @@ export function useSseHandlers(
     };
 
     switch (event.type) {
+      case "session_start": {
+        const { task_id } = event.payload;
+        setTaskId(session, task_id);
+        break;
+      }
+
       case "init": {
         // Push a thinking indicator as an assistant message
         const id = generateId();
@@ -147,10 +154,10 @@ export function useSseHandlers(
       }
 
       case "ask_user_question": {
-        const { request_id, questions } = event.payload;
+        const { request_id, task_id, questions } = event.payload;
         sealThinking();
         assistantMsgId.current = null;
-        setSessionPendingQuestion(session, { requestId: request_id, questions });
+        setSessionPendingQuestion(session, { requestId: request_id, taskId: task_id, questions });
         break;
       }
 

@@ -14,7 +14,7 @@ use sftp_client::open_sftp_session;
 use ssh_client::connect_ssh;
 use std::{
     io::{Error as IoError, ErrorKind},
-    path::Path,
+    path::{Path, PathBuf},
     time::{Duration, Instant, SystemTime, UNIX_EPOCH},
 };
 use store::{User as DbUser, upsert_user};
@@ -121,46 +121,64 @@ async fn check_vm_limit_and_create(
     state: AppState,
     db_user: DbUser,
 ) -> Result<Response, AppError> {
-    let vm_count = state
-        .vms
-        .lock()
-        .map_err(|_| anyhow!("vm registry lock poisoned"))?
-        .len();
-    if vm_count >= state.vm_max_count {
+    let vm_count = count_registered_vms(&state.vms)?;
+    if vm_count >= state.config.vm_max_count {
         return Ok((StatusCode::SERVICE_UNAVAILABLE, "VM limit reached").into_response());
     }
+    let vm_id = provision_new_vm(&state, db_user.id).await?;
+    build_terminal_response(&session, &state, db_user.id, &vm_id).await
+}
 
-    let iam_creds = fetch_host_iam_credentials(&state.iam_role_name)
+fn count_registered_vms(vms: &VmRegistry) -> Result<usize, AppError> {
+    Ok(vms
+        .lock()
+        .map_err(|_| anyhow!("vm registry lock poisoned"))?
+        .len())
+}
+
+async fn provision_new_vm(state: &AppState, user_id: Uuid) -> Result<String, AppError> {
+    let iam_creds = fetch_host_iam_credentials(&state.config.iam_role_name)
         .await
         .context("failed to fetch IAM credentials for VM")?;
     info!("building vm config");
     let user_rootfs = ensure_user_rootfs(
-        &state.user_rootfs_dir,
-        &state.rootfs_path,
-        db_user.id,
+        &state.config.user_rootfs_dir,
+        &state.config.rootfs_path,
+        user_id,
         &state.rootfs_lock,
     )
     .await?;
     info!("using rootfs");
-    let vm_config = build_vm_config(&state.vm_build_config(), &iam_creds, &user_rootfs)?;
+    let vm_config = build_vm_config(&state.config.vm_build_config(), &iam_creds, &user_rootfs)?;
     let vm = create_vm(&vm_config).await?;
     info!("vm started");
     let vm_id = vm.id.clone();
-    let vm_entry = VmEntry {
-        user_id: db_user.id,
-        has_iam_creds: true,
-        created_at: Instant::now(),
-        ws_connected: false,
-        vm,
-    };
-    register_vm(&state.vms, vm_id.clone(), vm_entry)?;
+    register_vm(
+        &state.vms,
+        vm_id.clone(),
+        VmEntry {
+            user_id,
+            has_iam_creds: true,
+            created_at: Instant::now(),
+            ws_connected: false,
+            vm,
+        },
+    )?;
+    Ok(vm_id)
+}
 
-    let csrf_token = get_csrf_token(&session).await?;
-    let has_user_rootfs = find_user_rootfs(&state.user_rootfs_dir, db_user.id).is_some();
+async fn build_terminal_response(
+    session: &Session,
+    state: &AppState,
+    user_id: Uuid,
+    vm_id: &str,
+) -> Result<Response, AppError> {
+    let csrf_token = get_csrf_token(session).await?;
+    let has_user_rootfs = find_user_rootfs(&state.config.user_rootfs_dir, user_id).is_some();
     Ok(Html(render_terminal_page(
-        &vm_id,
+        vm_id,
         &csrf_token,
-        &state.upload_dir,
+        &state.config.upload_dir,
         has_user_rootfs,
         app_js_version(),
         styles_css_version(),
@@ -178,7 +196,7 @@ pub(crate) async fn delete_user_rootfs_handler(
         return Ok((StatusCode::FORBIDDEN, "Forbidden").into_response());
     }
     let db_user = upsert_user(&state.db, &user.email).await?;
-    let rootfs_path = build_user_rootfs_path(&state.user_rootfs_dir, db_user.id);
+    let rootfs_path = build_user_rootfs_path(&state.config.user_rootfs_dir, db_user.id);
     info!("deleting saved rootfs");
     let _guard = timeout(Duration::from_secs(LOCK_TIMEOUT_SECS), state.rootfs_lock.lock())
         .await
@@ -209,17 +227,7 @@ pub(crate) async fn get_terminal_page(
     if !owned {
         return Ok((StatusCode::NOT_FOUND, "Not found").into_response());
     }
-    let csrf_token = get_csrf_token(&session).await?;
-    let has_user_rootfs = find_user_rootfs(&state.user_rootfs_dir, db_user.id).is_some();
-    Ok(Html(render_terminal_page(
-        &vm_id,
-        &csrf_token,
-        &state.upload_dir,
-        has_user_rootfs,
-        app_js_version(),
-        styles_css_version(),
-    ))
-    .into_response())
+    build_terminal_response(&session, &state, db_user.id, &vm_id).await
 }
 
 pub(crate) async fn list_chat_sessions_handler(
@@ -236,10 +244,10 @@ pub(crate) async fn list_chat_sessions_handler(
     };
     Ok(list_chat_sessions(
         guest_ip,
-        &state.ssh_key_path,
-        &state.ssh_user,
-        &state.vm_host_key_path,
-        Path::new(&state.ssh_user_home),
+        &state.config.ssh_key_path,
+        &state.config.ssh_user,
+        &state.config.vm_host_key_path,
+        Path::new(&state.config.ssh_user_home),
     )
     .await
     .map(|sessions| Json(sessions).into_response())
@@ -270,9 +278,9 @@ pub(crate) async fn get_chat_transcript_handler(
     };
     Ok(fetch_chat_history(
         guest_ip,
-        &state.ssh_key_path,
-        &state.ssh_user,
-        &state.vm_host_key_path,
+        &state.config.ssh_key_path,
+        &state.config.ssh_user,
+        &state.config.vm_host_key_path,
         &query.session_id,
         Path::new(&query.project_dir),
     )
@@ -310,9 +318,9 @@ pub(crate) async fn delete_chat_session_handler(
     };
     delete_chat_session(
         guest_ip,
-        &state.ssh_key_path,
-        &state.ssh_user,
-        &state.vm_host_key_path,
+        &state.config.ssh_key_path,
+        &state.config.ssh_user,
+        &state.config.vm_host_key_path,
         &form.session_id,
         Path::new(&form.project_dir),
     )
@@ -345,14 +353,17 @@ pub(crate) async fn handle_chat_upload(
     info!("uploading chat attachment via sftp");
     let mut ssh_handle = connect_ssh(
         guest_ip,
-        &state.ssh_key_path,
-        &state.ssh_user,
-        &state.vm_host_key_path,
+        &state.config.ssh_key_path,
+        &state.config.ssh_user,
+        &state.config.vm_host_key_path,
     )
     .await?;
     let sftp = open_sftp_session(&mut ssh_handle).await?;
     let remote_path = stream_chat_attachment(&mut multipart, &sftp).await?;
-    Ok(Json(serde_json::json!({"path": remote_path})).into_response())
+    let remote_path_str = remote_path
+        .to_str()
+        .context("remote path is not valid UTF-8")?;
+    Ok(Json(serde_json::json!({"path": remote_path_str})).into_response())
 }
 
 async fn extract_chat_upload_metadata(multipart: &mut Multipart) -> Result<ChatUploadMetadata> {
@@ -373,7 +384,7 @@ async fn extract_chat_upload_metadata(multipart: &mut Multipart) -> Result<ChatU
     Err(anyhow!("missing 'csrf_token' field"))
 }
 
-async fn stream_chat_attachment(multipart: &mut Multipart, sftp: &SftpSession) -> Result<String> {
+async fn stream_chat_attachment(multipart: &mut Multipart, sftp: &SftpSession) -> Result<PathBuf> {
     while let Some(field) = multipart
         .next_field()
         .await
@@ -394,10 +405,10 @@ async fn stream_chat_attachment(multipart: &mut Multipart, sftp: &SftpSession) -
     Err(anyhow!("missing 'file' field"))
 }
 
-fn build_chat_upload_path(filename: &str) -> String {
+fn build_chat_upload_path(filename: &str) -> PathBuf {
     let ts = SystemTime::now()
         .duration_since(UNIX_EPOCH)
-        .unwrap_or_default()
+        .expect("system clock is before Unix epoch")
         .as_millis();
     let safe_name: String = filename
         .chars()
@@ -409,16 +420,17 @@ fn build_chat_upload_path(filename: &str) -> String {
             }
         })
         .collect();
-    format!("/tmp/{ts}_{safe_name}")
+    PathBuf::from("/tmp").join(format!("{ts}_{safe_name}"))
 }
 
 async fn write_chat_file_via_sftp(
     sftp: &SftpSession,
-    path: &str,
+    path: &Path,
     reader: &mut (impl AsyncRead + Unpin),
 ) -> Result<()> {
+    let path_str = path.to_str().context("chat upload path is not valid UTF-8")?;
     let mut file = sftp
-        .create(path)
+        .create(path_str)
         .await
         .map_err(|e| anyhow!("sftp create: {e}"))?;
     tokio::io::copy(reader, &mut file)

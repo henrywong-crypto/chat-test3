@@ -8,6 +8,34 @@ import FileManager from "./components/FileManager";
 import SettingsPanel from "./components/SettingsPanel";
 import type { ChatSession, ViewTab } from "./types";
 
+class ErrorBoundary extends React.Component<
+  { children: React.ReactNode },
+  { error: Error | null }
+> {
+  constructor(props: { children: React.ReactNode }) {
+    super(props);
+    this.state = { error: null };
+  }
+
+  static getDerivedStateFromError(error: Error) {
+    return { error };
+  }
+
+  render() {
+    if (this.state.error) {
+      return (
+        <div className="flex h-screen w-screen items-center justify-center bg-background text-foreground">
+          <div className="max-w-md space-y-2 p-6 text-center">
+            <p className="text-sm font-medium">Something went wrong</p>
+            <p className="font-mono text-xs text-muted-foreground">{this.state.error.message}</p>
+          </div>
+        </div>
+      );
+    }
+    return this.props.children;
+  }
+}
+
 function AppContent() {
   const { hasUserRootfs, csrfToken, loadHistory, deleteSession } = useSse();
   const [activeTab, setActiveTab] = useState<ViewTab>("chat");
@@ -34,7 +62,7 @@ function AppContent() {
 
   useEffect(() => {
     loadHistory().then(setSessions).catch(console.error);
-  }, []); // eslint-disable-line react-hooks/exhaustive-deps
+  }, [loadHistory, setSessions]);
 
   const handleDeleteSession = useCallback(async (session: ChatSession) => {
     if (!session.project_dir) return;
@@ -111,8 +139,10 @@ function AppContent() {
 
 export default function App() {
   return (
-    <SseProvider>
-      <AppContent />
-    </SseProvider>
+    <ErrorBoundary>
+      <SseProvider>
+        <AppContent />
+      </SseProvider>
+    </ErrorBoundary>
   );
 }

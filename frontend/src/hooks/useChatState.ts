@@ -15,6 +15,8 @@ export interface ChatStateResult {
   setIsStreaming: (v: boolean) => void;
   getSessionPendingQuestion: (sessionId: string | null) => PendingQuestion | null;
   setSessionPendingQuestion: (sessionId: string | null, q: PendingQuestion | null) => void;
+  getTaskId: (sessionId: string | null) => string | undefined;
+  setTaskId: (sessionId: string | null, clientId: string) => void;
   sessions: ChatSession[];
   setSessions: (s: ChatSession[]) => void;
   getMessages: (sessionId: string | null) => ChatMessage[];
@@ -34,6 +36,7 @@ import React from "react";
 export function useChatState(): ChatStateResult {
   const messagesBySession = useRef<Map<string | null, ChatMessage[]>>(new Map());
   const pendingQuestionsBySession = useRef<Map<string | null, PendingQuestion>>(new Map());
+  const taskIdBySession = useRef<Map<string | null, string>>(new Map());
   const [viewSessionId, setViewSessionId] = useState<string | null>(null);
   const [runningSessionId, setRunningSessionId] = useState<string | null>(null);
   const [isStreaming, setIsStreaming] = useState(false);
@@ -41,6 +44,14 @@ export function useChatState(): ChatStateResult {
   const [renderTick, setRenderTick] = useState(0);
 
   const bumpRender = useCallback(() => setRenderTick((t) => t + 1), []);
+
+  const getTaskId = useCallback((sessionId: string | null): string | undefined => {
+    return taskIdBySession.current.get(sessionId);
+  }, []);
+
+  const setTaskId = useCallback((sessionId: string | null, clientId: string) => {
+    taskIdBySession.current.set(sessionId, clientId);
+  }, []);
 
   const getSessionPendingQuestion = useCallback((sessionId: string | null): PendingQuestion | null => {
     return pendingQuestionsBySession.current.get(sessionId) ?? null;
@@ -109,6 +120,8 @@ export function useChatState(): ChatStateResult {
     setIsStreaming,
     getSessionPendingQuestion,
     setSessionPendingQuestion,
+    getTaskId,
+    setTaskId,
     sessions,
     setSessions,
     getMessages,

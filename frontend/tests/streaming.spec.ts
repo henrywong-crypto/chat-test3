@@ -4,6 +4,8 @@
  * UF-08  Tool use with result    — tool card shows result after tool_result event
  * UF-09  Stop streaming          — Stop button sends stop request
  * UF-10  Ask user question       — panel shown; selecting an option and submitting works
+ * UF-11  Stop sends task_id      — stop request body includes task_id from session_start
+ * UF-12  Answer sends task_id    — answer request body includes task_id from ask_user_question
  */
 import { test, expect } from "@playwright/test";
 import { setupApp, sendMessage, sse } from "./helpers/setup";
@@ -108,5 +110,61 @@ test.describe("streaming", () => {
     const answerBody = ctrl.lastAnswerBody();
     expect(answerBody?.request_id).toBe("req-1");
     expect(answerBody?.answers["Which option do you prefer?"]).toContain("Option A");
+  });
+
+  test("UF-11 stop request body includes the task_id from session_start", async ({ page }) => {
+    const ctrl = await setupApp(page, { sessions: [] });
+
+    await sendMessage(page, "Long task");
+
+    ctrl.sendSseEvents([
+      { event: "session_start", data: { task_id: "task-abc" } },
+      { event: "init" },
+    ]);
+
+    await expect(page.locator(".thinking-dot").first()).toBeVisible();
+
+    const [stopReq] = await Promise.all([
+      page.waitForRequest((r) => r.url().includes("chat-stop") && r.method() === "POST"),
+      page.getByTitle("Stop (Esc)").first().click(),
+    ]);
+
+    const stopBody = JSON.parse(stopReq.postData() ?? "{}") as { task_id?: string };
+    expect(stopBody.task_id).toBe("task-abc");
+  });
+
+  test("UF-12 answer request body includes the task_id from ask_user_question", async ({
+    page,
+  }) => {
+    const ctrl = await setupApp(page, { sessions: [] });
+
+    await sendMessage(page, "Help me choose");
+    ctrl.sendSseEvents(
+      sse.question("req-2", [
+        {
+          question: "Pick one",
+          header: "Choice",
+          options: [
+            { label: "Yes", description: "Affirmative" },
+            { label: "No", description: "Negative" },
+          ],
+        },
+      ]),
+    );
+
+    await expect(page.getByText("Claude needs your input")).toBeVisible();
+    await page.getByRole("button", { name: "Yes" }).click();
+
+    const [answerReq] = await Promise.all([
+      page.waitForRequest((r) => r.url().includes("chat-question-answer") && r.method() === "POST"),
+      page.getByRole("button", { name: "Submit" }).click(),
+    ]);
+
+    const answerBody = JSON.parse(answerReq.postData() ?? "{}") as {
+      task_id?: string;
+      request_id?: string;
+    };
+    expect(answerBody.task_id).toBe("client-sess-test");
+    expect(answerBody.request_id).toBe("req-2");
   });
 });

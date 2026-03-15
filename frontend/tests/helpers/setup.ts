@@ -16,13 +16,14 @@ export interface Question {
 }
 
 export type SseEvent =
+  | { event: "session_start"; data: { task_id: string } }
   | { event: "init" }
   | { event: "text_delta"; data: { text: string } }
   | { event: "thinking_delta"; data: { thinking: string } }
   | { event: "tool_start"; data: { id: string; name: string; input: Record<string, unknown> } }
   | { event: "tool_result"; data: { tool_use_id: string; content: string; is_error: boolean } }
-  | { event: "ask_user_question"; data: { request_id: string; questions: Question[] } }
-  | { event: "done"; data: { session_id: string | null } }
+  | { event: "ask_user_question"; data: { request_id: string; task_id: string; questions: Question[] } }
+  | { event: "done"; data: { session_id: string | null; task_id: string } }
   | { event: "error_event"; data: { message: string } };
 
 export function buildSseBody(events: SseEvent[]): string {
@@ -36,25 +37,30 @@ export function buildSseBody(events: SseEvent[]): string {
 
 // Preset event sequences
 
+const DEFAULT_CLIENT_SESSION_ID = "client-sess-test";
+
 export const sse = {
   text: (text: string, sessionId: string): SseEvent[] => [
+    { event: "session_start", data: { task_id: DEFAULT_CLIENT_SESSION_ID } },
     { event: "init" },
     { event: "text_delta", data: { text } },
-    { event: "done", data: { session_id: sessionId } },
+    { event: "done", data: { session_id: sessionId, task_id: DEFAULT_CLIENT_SESSION_ID } },
   ],
 
   // init → text_delta with no thinking_delta in between (tests empty indicator removal)
   noThinking: (text: string, sessionId: string): SseEvent[] => [
+    { event: "session_start", data: { task_id: DEFAULT_CLIENT_SESSION_ID } },
     { event: "init" },
     { event: "text_delta", data: { text } },
-    { event: "done", data: { session_id: sessionId } },
+    { event: "done", data: { session_id: sessionId, task_id: DEFAULT_CLIENT_SESSION_ID } },
   ],
 
   withThinking: (thinking: string, text: string, sessionId: string): SseEvent[] => [
+    { event: "session_start", data: { task_id: DEFAULT_CLIENT_SESSION_ID } },
     { event: "init" },
     { event: "thinking_delta", data: { thinking } },
     { event: "text_delta", data: { text } },
-    { event: "done", data: { session_id: sessionId } },
+    { event: "done", data: { session_id: sessionId, task_id: DEFAULT_CLIENT_SESSION_ID } },
   ],
 
   withTool: (
@@ -65,16 +71,18 @@ export const sse = {
     text: string,
     sessionId: string,
   ): SseEvent[] => [
+    { event: "session_start", data: { task_id: DEFAULT_CLIENT_SESSION_ID } },
     { event: "init" },
     { event: "tool_start", data: { id: toolId, name: toolName, input } },
     { event: "tool_result", data: { tool_use_id: toolId, content: result, is_error: false } },
     { event: "text_delta", data: { text } },
-    { event: "done", data: { session_id: sessionId } },
+    { event: "done", data: { session_id: sessionId, task_id: DEFAULT_CLIENT_SESSION_ID } },
   ],
 
   question: (requestId: string, questions: Question[]): SseEvent[] => [
+    { event: "session_start", data: { task_id: DEFAULT_CLIENT_SESSION_ID } },
     { event: "init" },
-    { event: "ask_user_question", data: { request_id: requestId, questions } },
+    { event: "ask_user_question", data: { request_id: requestId, task_id: DEFAULT_CLIENT_SESSION_ID, questions } },
     // done is sent separately after the user answers
   ],
 };
@@ -154,8 +162,10 @@ export interface AppController {
   allChatBodies(): Array<{ content: string; session_id: string | null }>;
   /** Whether a stop request was received. */
   stopRequested(): boolean;
+  /** Body of the most recent POST /chat-stop, or null. */
+  lastStopBody(): { task_id: string } | null;
   /** Body of the most recent POST /chat-question-answer, or null. */
-  lastAnswerBody(): { request_id: string; answers: Record<string, string> } | null;
+  lastAnswerBody(): { task_id: string; request_id: string; answers: Record<string, string> } | null;
   /** Body of the most recent PUT /api/settings, or null. */
   lastSettingsSave(): { api_key: string } | null;
   /** Whether an upload POST was received. */
@@ -193,7 +203,8 @@ export async function setupApp(
 
   const chatBodies: Array<{ content: string; session_id: string | null }> = [];
   let stopReceived = false;
-  let lastAnswer: { request_id: string; answers: Record<string, string> } | null = null;
+  let lastStopBody: { task_id: string } | null = null;
+  let lastAnswer: { task_id: string; request_id: string; answers: Record<string, string> } | null = null;
   let lastSettingsSaveBody: { api_key: string } | null = null;
   let uploadWasReceived = false;
   let lastResetBody: string | null = null;
@@ -282,6 +293,8 @@ export async function setupApp(
   // ── Stop endpoint ────────────────────────────────────────────────────────
   await page.route(`**/sessions/${VM_ID}/chat-stop`, async (route) => {
     stopReceived = true;
+    const raw = route.request().postData();
+    lastStopBody = raw ? (JSON.parse(raw) as { task_id: string }) : null;
     await route.fulfill({ status: 200, body: "" });
   });
 
@@ -294,10 +307,10 @@ export async function setupApp(
 
   // ── Question answer endpoint ──────────────────────────────────────────────
   await page.route(`**/sessions/${VM_ID}/chat-question-answer`, async (route) => {
-    lastAnswer = route.request().postDataJSON() as {
-      request_id: string;
-      answers: Record<string, string>;
-    };
+    const raw = route.request().postData();
+    lastAnswer = raw
+      ? (JSON.parse(raw) as { task_id: string; request_id: string; answers: Record<string, string> })
+      : null;
     await route.fulfill({ status: 200, body: "" });
   });
 
@@ -348,6 +361,7 @@ export async function setupApp(
     lastChatBody: () => chatBodies[chatBodies.length - 1] ?? null,
     allChatBodies: () => [...chatBodies],
     stopRequested: () => stopReceived,
+    lastStopBody: () => lastStopBody,
     lastAnswerBody: () => lastAnswer,
     lastSettingsSave: () => lastSettingsSaveBody,
     uploadReceived: () => uploadWasReceived,
@@ -359,6 +373,7 @@ export async function setupApp(
 
 /** Fill the composer and submit with Enter. */
 export async function sendMessage(page: Page, text: string): Promise<void> {
-  await page.getByPlaceholder("Message Claude…").fill(text);
-  await page.keyboard.press("Enter");
+  const composer = page.getByPlaceholder("Message Claude…");
+  await composer.fill(text);
+  await composer.press("Enter");
 }

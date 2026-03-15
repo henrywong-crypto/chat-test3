@@ -67,6 +67,39 @@ let brand = BrandTag::from_str(&value).unwrap_or(BrandTag::default());
 
 Use `Option` only for values that are genuinely absent as part of normal logic (e.g. "livestock has no barn", "search found no match"). Use `Result` for anything that can fail due to I/O, missing data, or invalid input.
 
+## App State
+
+Never implement `Deref` (or `DerefMut`) on an app state struct to expose its config or any sub-field. All config access must go through an explicit field path (`state.config.field`). A `Deref` impl makes dependencies invisible — it becomes impossible to tell at a glance whether `state.ssh_key_path` is a field on the state struct or on something it derefs to.
+
+```rust
+// Good — explicit field path; dependency is obvious
+let ssh_handle = connect_ssh(guest_ip, &state.config.ssh_key_path, ...).await?;
+let vm_config = build_vm_config(&state.config.vm_build_config(), ...).await?;
+
+// Bad — Deref on AppState hides where the field comes from
+impl std::ops::Deref for AppState {
+    type Target = AppConfig;
+    fn deref(&self) -> &AppConfig { &self.config }
+}
+let ssh_handle = connect_ssh(guest_ip, &state.ssh_key_path, ...).await?;  // is this AppState or AppConfig?
+```
+
+## Authorization
+
+When a handler looks up a resource by a user-provided ID, return 404 if the lookup fails — never fall back to a different resource. A fallback silently operates on a resource the user did not request and may not own.
+
+```rust
+// Good — strict 404 on miss; no fallback
+let Some(guest_ip) = find_vm_guest_ip_for_user(&state.vms, &vm_id, db_user.id)? else {
+    return Ok((StatusCode::NOT_FOUND, "Session not found or expired").into_response());
+};
+
+// Bad — falls back to any VM owned by the user when the specific one is not found
+let guest_ip = find_vm_guest_ip_for_user(&state.vms, &vm_id, db_user.id)?
+    .or_else(|| find_any_vm_for_user(&state.vms, db_user.id))  // wrong VM, wrong resource
+    .context("no VM found")?;
+```
+
 ## Channel Sends
 
 Always wrap `mpsc::Sender::send` with `tokio::time::timeout`. A send with no timeout will block forever if the receiver is alive but not consuming — which can happen on an unstable network where the TCP connection appears open but the client is stalled. Use a three-arm match to distinguish the two failure modes:
@@ -90,6 +123,26 @@ tx.send(feed_delivery).await?;
 ```
 
 Define the timeout duration as a named const at the top of the file (e.g. `const SEND_TIMEOUT_SECS: u64 = 30`).
+
+When senders are stored in a registry (e.g. a `HashMap`), lazily remove closed entries at the point of lookup. Do not rely on a separate cleanup pass. Check `sender.is_closed()` before cloning and returning the sender; if it is closed, remove it and return `None`.
+
+```rust
+// Good — closed sender removed on access; no separate cleanup needed
+fn find_herd_relay_sender(state: &AppState, herd_id: &str) -> Option<mpsc::Sender<HerdMsg>> {
+    let mut senders = state.herd_senders.lock().ok()?;
+    let sender = senders.get(herd_id)?;
+    if sender.is_closed() {
+        senders.remove(herd_id);
+        return None;
+    }
+    Some(sender.clone())
+}
+
+// Bad — stale closed senders accumulate in the map indefinitely
+fn find_herd_relay_sender(state: &AppState, herd_id: &str) -> Option<mpsc::Sender<HerdMsg>> {
+    state.herd_senders.lock().ok()?.get(herd_id).cloned()
+}
+```
 
 ## Code Conventions
 
@@ -423,6 +476,17 @@ async fn stream_livestock_import_file(multipart: &mut Multipart, sftp: SftpSessi
 ### Path Handling
 
 Use `Path`/`PathBuf` for all path operations — no string manipulation for paths. Functions that receive paths take `&Path`; functions that construct a new path return `PathBuf`. Convert strings to `&Path` once at the entry boundary.
+
+When validating that a path stays within an allowed directory, always canonicalize the path first (e.g. via `sftp.canonicalize` or `std::fs::canonicalize`) before calling `validate_within_dir`. The `validate_within_dir` helper also rejects any path that contains a `..` component as defense-in-depth — callers must not rely on this alone and must canonicalize first.
+
+```rust
+// Good — canonicalize first, then validate; both layers active
+let real_path = PathBuf::from(sftp.canonicalize(&query.path).await.context("failed to resolve remote path")?);
+validate_within_dir(&real_path, &PathBuf::from(&state.config.upload_dir))?;
+
+// Bad — validates a raw user-supplied path; "../../../etc/passwd" bypasses the prefix check
+validate_within_dir(Path::new(&query.path), &PathBuf::from(&state.config.upload_dir))?;
+```
 
 ```rust
 // Good — &Path in, PathBuf out; Path::new() once at the entry point

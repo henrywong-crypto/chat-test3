@@ -16,7 +16,7 @@ use uuid::Uuid;
 
 use crate::{
     auth::User,
-    state::{AppError, AppState, find_user_vm_guest_ip, find_vm_guest_ip_for_user},
+    state::{AppError, AppState, find_vm_guest_ip_for_user},
 };
 
 #[derive(Deserialize)]
@@ -46,20 +46,14 @@ pub(crate) async fn list_files_handler(
         return Ok((StatusCode::NOT_FOUND, "Not found").into_response());
     }
     let db_user = upsert_user(&state.db, &user.email).await?;
-    let guest_ip = match find_vm_guest_ip_for_user(&state.vms, &vm_id, db_user.id)? {
-        Some(ip) => ip,
-        None => match find_user_vm_guest_ip(&state.vms, db_user.id)? {
-            Some(ip) => ip,
-            None => {
-                return Ok((StatusCode::NOT_FOUND, "Session not found or expired").into_response());
-            }
-        },
+    let Some(guest_ip) = find_vm_guest_ip_for_user(&state.vms, &vm_id, db_user.id)? else {
+        return Ok((StatusCode::NOT_FOUND, "Session not found or expired").into_response());
     };
     let mut ssh_handle = connect_ssh(
         guest_ip,
-        &state.ssh_key_path,
-        &state.ssh_user,
-        &state.vm_host_key_path,
+        &state.config.ssh_key_path,
+        &state.config.ssh_user,
+        &state.config.vm_host_key_path,
     )
     .await?;
     let sftp = open_sftp_session(&mut ssh_handle).await?;
@@ -68,7 +62,7 @@ pub(crate) async fn list_files_handler(
             .await
             .context("failed to resolve remote path")?,
     );
-    validate_within_dir(&real_path, &PathBuf::from(&state.upload_dir))?;
+    validate_within_dir(&real_path, &PathBuf::from(&state.config.upload_dir))?;
     let real_path_str = real_path
         .to_str()
         .context("resolved path is not valid UTF-8")?

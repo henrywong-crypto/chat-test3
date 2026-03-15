@@ -25,11 +25,11 @@ pub(crate) async fn get_settings_handler(
     user: User,
     State(state): State<AppState>,
 ) -> Result<Response, AppError> {
-    if state.use_iam_creds {
+    if state.config.use_iam_creds {
         return Ok(Json(SettingsResponse {
             uses_bedrock: true,
             has_api_key: false,
-            base_url: state.anthropic_base_url.clone(),
+            base_url: state.config.anthropic_base_url.clone(),
         })
         .into_response());
     }
@@ -39,21 +39,21 @@ pub(crate) async fn get_settings_handler(
         return Ok(Json(SettingsResponse {
             uses_bedrock: false,
             has_api_key: false,
-            base_url: state.anthropic_base_url.clone(),
+            base_url: state.config.anthropic_base_url.clone(),
         })
         .into_response());
     };
     let vm_settings = get_vm_settings(
         guest_ip,
-        &state.ssh_key_path,
-        &state.ssh_user,
-        &state.vm_host_key_path,
+        &state.config.ssh_key_path,
+        &state.config.ssh_user,
+        &state.config.vm_host_key_path,
     )
     .await?;
     Ok(Json(SettingsResponse {
         uses_bedrock: false,
         has_api_key: vm_settings.has_api_key,
-        base_url: state.anthropic_base_url.clone(),
+        base_url: state.config.anthropic_base_url.clone(),
     })
     .into_response())
 }
@@ -73,7 +73,7 @@ pub(crate) async fn put_settings_handler(
     if !validate_csrf(&session, &body.csrf_token).await {
         return (StatusCode::FORBIDDEN, "Forbidden").into_response();
     }
-    if state.use_iam_creds {
+    if state.config.use_iam_creds {
         return (
             StatusCode::BAD_REQUEST,
             "API key not applicable in Bedrock mode",
@@ -93,16 +93,16 @@ pub(crate) async fn put_settings_handler(
     };
     let content = build_api_key_settings_json(
         &body.api_key,
-        state.anthropic_base_url.as_deref(),
-        &state.anthropic_default_haiku_model,
-        &state.anthropic_default_sonnet_model,
-        &state.anthropic_default_opus_model,
+        state.config.anthropic_base_url.as_deref(),
+        &state.config.anthropic_default_haiku_model,
+        &state.config.anthropic_default_sonnet_model,
+        &state.config.anthropic_default_opus_model,
     );
     if let Err(e) = set_vm_settings(
         guest_ip,
-        &state.ssh_key_path,
-        &state.ssh_user,
-        &state.vm_host_key_path,
+        &state.config.ssh_key_path,
+        &state.config.ssh_user,
+        &state.config.vm_host_key_path,
         &content,
     )
     .await

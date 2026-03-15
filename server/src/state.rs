@@ -206,12 +206,6 @@ impl AppState {
     }
 }
 
-impl std::ops::Deref for AppState {
-    type Target = AppConfig;
-    fn deref(&self) -> &AppConfig {
-        &self.config
-    }
-}
 
 pub(crate) struct AppError(pub(crate) anyhow::Error);
 

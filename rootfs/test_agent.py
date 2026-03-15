@@ -1,0 +1,1045 @@
+"""Tests for agent.py — verifies every function produces SSE events in the
+format expected by the frontend (frontend/tests/helpers/setup.ts).
+
+Frontend SSE event shapes:
+  session_start    { task_id: string }
+  init             {}
+  text_delta       { text: string }
+  thinking_delta   { thinking: string }
+  tool_start       { id: string; name: string; input: object }
+  tool_result      { tool_use_id: string; content: string; is_error: boolean }
+  ask_user_question{ request_id: string; task_id: string; questions: [...] }
+  done             { session_id: string | null; task_id: string }
+  error_event      { message: string }
+"""
+import asyncio
+import importlib.util
+import json
+import pathlib
+import unittest
+import unittest.mock
+
+
+# ── Load agent module without starting the daemon loop ────────────────────
+
+
+def _load_agent():
+    """Import agent.py but prevent asyncio.run(main()) from executing."""
+    with unittest.mock.patch("asyncio.run"):
+        spec = importlib.util.spec_from_file_location(
+            "agent",
+            pathlib.Path(__file__).parent / "agent.py",
+        )
+        mod = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(mod)
+    return mod
+
+
+agent = _load_agent()
+
+
+# ── Mock writer ────────────────────────────────────────────────────────────
+
+
+class MockWriter:
+    """Captures bytes written via writer.write() for assertion."""
+
+    def __init__(self, closing: bool = False):
+        self._closing = closing
+        self._written: list[bytes] = []
+
+    def is_closing(self) -> bool:
+        return self._closing
+
+    def write(self, data: bytes) -> None:
+        self._written.append(data)
+
+    async def drain(self) -> None:
+        pass
+
+    def written_events(self) -> list[dict]:
+        """Parse all captured SSE payloads into {event, data} dicts."""
+        events = []
+        raw = b"".join(self._written).decode()
+        for block in raw.split("\n\n"):
+            block = block.strip()
+            if not block:
+                continue
+            event_name = None
+            data_str = None
+            for line in block.split("\n"):
+                if line.startswith("event: "):
+                    event_name = line[len("event: "):]
+                elif line.startswith("data: "):
+                    data_str = line[len("data: "):]
+            if event_name:
+                events.append({
+                    "event": event_name,
+                    "data": json.loads(data_str) if data_str else {},
+                })
+        return events
+
+
+# ── Pure utility tests ─────────────────────────────────────────────────────
+
+
+class TestGetField(unittest.TestCase):
+    """get_field retrieves values from both dicts and arbitrary objects."""
+
+    def test_reads_dict_key(self):
+        self.assertEqual(agent.get_field({"a": 1}, "a"), 1)
+
+    def test_reads_object_attribute(self):
+        class Obj:
+            a = 42
+        self.assertEqual(agent.get_field(Obj(), "a"), 42)
+
+    def test_dict_missing_key_returns_none_default(self):
+        self.assertIsNone(agent.get_field({}, "missing"))
+
+    def test_dict_missing_key_returns_supplied_default(self):
+        self.assertEqual(agent.get_field({}, "missing", "fallback"), "fallback")
+
+    def test_object_missing_attribute_returns_none(self):
+        self.assertIsNone(agent.get_field(object(), "nope"))
+
+    def test_dict_value_none_returned_correctly(self):
+        self.assertIsNone(agent.get_field({"k": None}, "k", "default"))
+
+
+class TestClassToEventType(unittest.TestCase):
+    """_class_to_event_type derives SSE event names from SDK class names."""
+
+    def test_assistant_message_maps_to_assistant(self):
+        class AssistantMessage:
+            pass
+        self.assertEqual(agent._class_to_event_type(AssistantMessage()), "assistant")
+
+    def test_result_message_maps_to_result(self):
+        class ResultMessage:
+            pass
+        self.assertEqual(agent._class_to_event_type(ResultMessage()), "result")
+
+    def test_system_message_maps_to_system(self):
+        class SystemMessage:
+            pass
+        self.assertEqual(agent._class_to_event_type(SystemMessage()), "system")
+
+    def test_non_message_class_returns_none(self):
+        self.assertIsNone(agent._class_to_event_type(object()))
+
+
+class TestBlockType(unittest.TestCase):
+    """_block_type derives content block type strings from block class names."""
+
+    def test_text_block_maps_to_text(self):
+        class TextBlock:
+            pass
+        self.assertEqual(agent._block_type(TextBlock()), "text")
+
+    def test_tool_use_block_maps_to_tool_use(self):
+        class ToolUseBlock:
+            pass
+        self.assertEqual(agent._block_type(ToolUseBlock()), "tool_use")
+
+    def test_thinking_block_maps_to_thinking(self):
+        class ThinkingBlock:
+            pass
+        self.assertEqual(agent._block_type(ThinkingBlock()), "thinking")
+
+    def test_unknown_block_returns_none(self):
+        self.assertIsNone(agent._block_type(object()))
+
+
+# ── SSE wire-format tests ──────────────────────────────────────────────────
+
+
+class TestWriteSse(unittest.IsolatedAsyncioTestCase):
+    """write_sse serialises events in the SSE wire format the frontend expects."""
+
+    async def test_writes_event_and_data_lines(self):
+        writer = MockWriter()
+        agent.write_sse(writer, "text_delta", {"text": "hello"})
+        events = writer.written_events()
+        self.assertEqual(len(events), 1)
+        self.assertEqual(events[0]["event"], "text_delta")
+        self.assertEqual(events[0]["data"], {"text": "hello"})
+
+    async def test_skips_write_when_writer_is_closing(self):
+        writer = MockWriter(closing=True)
+        agent.write_sse(writer, "text_delta", {"text": "hi"})
+        self.assertEqual(writer._written, [])
+
+    async def test_empty_data_dict_serialised_correctly(self):
+        writer = MockWriter()
+        agent.write_sse(writer, "init", {})
+        events = writer.written_events()
+        self.assertEqual(events[0]["event"], "init")
+        self.assertEqual(events[0]["data"], {})
+
+    async def test_tool_start_event_has_required_frontend_fields(self):
+        """tool_start data must include id, name, and input fields."""
+        writer = MockWriter()
+        agent.write_sse(writer, "tool_start", {"id": "t1", "name": "Bash", "input": {"command": "ls"}})
+        data = writer.written_events()[0]["data"]
+        self.assertIn("id", data)
+        self.assertIn("name", data)
+        self.assertIn("input", data)
+
+    async def test_tool_result_event_has_required_frontend_fields(self):
+        """tool_result data must include tool_use_id, content, and is_error fields."""
+        writer = MockWriter()
+        agent.write_sse(writer, "tool_result", {"tool_use_id": "t1", "content": "ok", "is_error": False})
+        data = writer.written_events()[0]["data"]
+        self.assertIn("tool_use_id", data)
+        self.assertIn("content", data)
+        self.assertIn("is_error", data)
+
+    async def test_session_start_event_has_task_id_field(self):
+        """session_start data must include task_id for the frontend to track the session."""
+        writer = MockWriter()
+        agent.write_sse(writer, "session_start", {"task_id": "abc-123"})
+        data = writer.written_events()[0]["data"]
+        self.assertEqual(data["task_id"], "abc-123")
+
+    async def test_done_event_has_session_id_and_task_id_fields(self):
+        """done data must include session_id and task_id for session resumption."""
+        writer = MockWriter()
+        agent.write_sse(writer, "done", {"session_id": "s1", "task_id": "t1"})
+        data = writer.written_events()[0]["data"]
+        self.assertIn("session_id", data)
+        self.assertIn("task_id", data)
+
+    async def test_multiple_events_are_all_captured(self):
+        writer = MockWriter()
+        agent.write_sse(writer, "init", {})
+        agent.write_sse(writer, "text_delta", {"text": "part1"})
+        agent.write_sse(writer, "text_delta", {"text": "part2"})
+        events = writer.written_events()
+        self.assertEqual(len(events), 3)
+        self.assertEqual([e["event"] for e in events], ["init", "text_delta", "text_delta"])
+
+
+class TestEmitSse(unittest.IsolatedAsyncioTestCase):
+    """emit_sse routes events through the context-var writer with session fallback."""
+
+    async def test_uses_context_var_writer(self):
+        writer = MockWriter()
+        token = agent._emit_writer.set(writer)
+        try:
+            agent.emit_sse("text_delta", {"text": "ctx"})
+        finally:
+            agent._emit_writer.reset(token)
+        events = writer.written_events()
+        self.assertEqual(len(events), 1)
+        self.assertEqual(events[0]["event"], "text_delta")
+        self.assertEqual(events[0]["data"]["text"], "ctx")
+
+    async def test_falls_back_to_session_writer_when_context_writer_is_closing(self):
+        closed_writer = MockWriter(closing=True)
+        fallback_writer = MockWriter()
+        task_id = "fallback-task"
+        task = asyncio.create_task(asyncio.sleep(0))
+        agent._sessions[task_id] = agent.Session(task=task, writer=fallback_writer)
+        token1 = agent._emit_writer.set(closed_writer)
+        token2 = agent._emit_session_id.set(task_id)
+        try:
+            agent.emit_sse("text_delta", {"text": "fallback"})
+        finally:
+            agent._emit_writer.reset(token1)
+            agent._emit_session_id.reset(token2)
+            agent._sessions.pop(task_id, None)
+        events = fallback_writer.written_events()
+        self.assertEqual(len(events), 1)
+        self.assertEqual(events[0]["event"], "text_delta")
+
+    async def test_falls_back_to_session_writer_when_context_writer_is_none(self):
+        fallback_writer = MockWriter()
+        task_id = "none-writer-task"
+        task = asyncio.create_task(asyncio.sleep(0))
+        agent._sessions[task_id] = agent.Session(task=task, writer=fallback_writer)
+        token1 = agent._emit_writer.set(None)
+        token2 = agent._emit_session_id.set(task_id)
+        try:
+            agent.emit_sse("init", {})
+        finally:
+            agent._emit_writer.reset(token1)
+            agent._emit_session_id.reset(token2)
+            agent._sessions.pop(task_id, None)
+        self.assertEqual(fallback_writer.written_events()[0]["event"], "init")
+
+    async def test_does_nothing_when_no_writer_available(self):
+        token1 = agent._emit_writer.set(None)
+        token2 = agent._emit_session_id.set(None)
+        try:
+            agent.emit_sse("text_delta", {"text": "ghost"})
+        finally:
+            agent._emit_writer.reset(token1)
+            agent._emit_session_id.reset(token2)
+        # Should not raise; nothing to assert beyond no exception
+
+
+# ── Connection handler tests ───────────────────────────────────────────────
+
+
+class TestHandleHello(unittest.IsolatedAsyncioTestCase):
+    """handle_hello rebinds a reconnecting client to its session."""
+
+    async def test_rebinds_new_writer_to_existing_session(self):
+        task = asyncio.create_task(asyncio.sleep(0))
+        old_writer = MockWriter()
+        new_writer = MockWriter()
+        task_id = "hello-task"
+        agent._sessions[task_id] = agent.Session(task=task, writer=old_writer)
+        try:
+            agent.handle_hello({"type": "hello", "task_id": task_id}, new_writer)
+            self.assertIs(agent._sessions[task_id].writer, new_writer)
+        finally:
+            agent._sessions.pop(task_id, None)
+
+    async def test_re_emits_pending_ask_user_question_on_reconnect(self):
+        """The frontend expects ask_user_question re-sent on reconnect so the
+        user does not miss an unanswered question prompt."""
+        task = asyncio.create_task(asyncio.sleep(0))
+        new_writer = MockWriter()
+        task_id = "hello-q-task"
+        question_data = {
+            "request_id": "req-1",
+            "task_id": task_id,
+            "questions": [{"question": "Pick?", "header": "Choice", "options": [{"label": "A"}]}],
+        }
+        agent._sessions[task_id] = agent.Session(
+            task=task,
+            writer=MockWriter(),
+            pending_question=asyncio.get_running_loop().create_future(),
+            pending_question_data=question_data,
+        )
+        try:
+            agent.handle_hello({"type": "hello", "task_id": task_id}, new_writer)
+            events = new_writer.written_events()
+            self.assertEqual(len(events), 1)
+            self.assertEqual(events[0]["event"], "ask_user_question")
+            data = events[0]["data"]
+            self.assertEqual(data["request_id"], "req-1")
+            self.assertIn("questions", data)
+        finally:
+            agent._sessions.pop(task_id, None)
+
+    async def test_no_re_emission_when_no_pending_question(self):
+        task = asyncio.create_task(asyncio.sleep(0))
+        writer = MockWriter()
+        task_id = "hello-nq-task"
+        agent._sessions[task_id] = agent.Session(task=task, writer=MockWriter())
+        try:
+            agent.handle_hello({"type": "hello", "task_id": task_id}, writer)
+            self.assertEqual(writer.written_events(), [])
+        finally:
+            agent._sessions.pop(task_id, None)
+
+    async def test_ignores_unknown_task_id(self):
+        writer = MockWriter()
+        agent.handle_hello({"type": "hello", "task_id": "nonexistent"}, writer)
+
+    async def test_missing_task_id_is_no_op(self):
+        writer = MockWriter()
+        agent.handle_hello({"type": "hello"}, writer)
+
+
+class TestHandleAnswerQuestion(unittest.IsolatedAsyncioTestCase):
+    """handle_answer_question delivers answers to the waiting session future."""
+
+    async def test_resolves_pending_future_with_answers(self):
+        task = asyncio.create_task(asyncio.sleep(0))
+        future = asyncio.get_running_loop().create_future()
+        task_id = "ans-task"
+        agent._sessions[task_id] = agent.Session(
+            task=task,
+            writer=MockWriter(),
+            pending_question=future,
+            pending_question_data={"request_id": "req-x"},
+        )
+        try:
+            agent.handle_answer_question(
+                {"type": "answer_question", "request_id": "req-x", "answers": {"Q": "A"}}
+            )
+            self.assertTrue(future.done())
+            self.assertEqual(future.result(), {"Q": "A"})
+        finally:
+            agent._sessions.pop(task_id, None)
+
+    async def test_empty_answers_dict_resolves_future(self):
+        task = asyncio.create_task(asyncio.sleep(0))
+        future = asyncio.get_running_loop().create_future()
+        task_id = "ans-empty-task"
+        agent._sessions[task_id] = agent.Session(
+            task=task,
+            writer=MockWriter(),
+            pending_question=future,
+            pending_question_data={"request_id": "req-y"},
+        )
+        try:
+            agent.handle_answer_question({"type": "answer_question", "request_id": "req-y"})
+            self.assertTrue(future.done())
+            self.assertEqual(future.result(), {})
+        finally:
+            agent._sessions.pop(task_id, None)
+
+    async def test_ignores_unknown_request_id(self):
+        agent.handle_answer_question({"type": "answer_question", "request_id": "nobody"})
+
+
+class TestHandleInterrupt(unittest.IsolatedAsyncioTestCase):
+    """handle_interrupt cancels the task for the identified session."""
+
+    async def test_cancels_task_when_writer_matches_session_writer(self):
+        async def long_running():
+            await asyncio.sleep(999)
+
+        task = asyncio.create_task(long_running())
+        writer = MockWriter()
+        task_id = "intr-task"
+        agent._sessions[task_id] = agent.Session(task=task, writer=writer)
+        try:
+            agent.handle_interrupt({"type": "interrupt", "task_id": task_id}, writer)
+            self.assertGreater(task.cancelling(), 0)
+        finally:
+            agent._sessions.pop(task_id, None)
+            task.cancel()
+
+    async def test_does_not_cancel_when_writer_does_not_match(self):
+        async def long_running():
+            await asyncio.sleep(999)
+
+        task = asyncio.create_task(long_running())
+        session_writer = MockWriter()
+        other_writer = MockWriter()
+        task_id = "intr-mismatch"
+        agent._sessions[task_id] = agent.Session(task=task, writer=session_writer)
+        try:
+            agent.handle_interrupt({"type": "interrupt", "task_id": task_id}, other_writer)
+            self.assertEqual(task.cancelling(), 0)
+        finally:
+            agent._sessions.pop(task_id, None)
+            task.cancel()
+
+    async def test_does_not_cancel_already_done_task(self):
+        task = asyncio.create_task(asyncio.sleep(0))
+        await task  # ensure it completes before the interrupt arrives
+        writer = MockWriter()
+        task_id = "intr-done-task"
+        agent._sessions[task_id] = agent.Session(task=task, writer=writer)
+        try:
+            agent.handle_interrupt({"type": "interrupt", "task_id": task_id}, writer)
+            self.assertTrue(task.done())
+            self.assertFalse(task.cancelled())
+        finally:
+            agent._sessions.pop(task_id, None)
+
+    async def test_ignores_unknown_task_id(self):
+        agent.handle_interrupt({"type": "interrupt", "task_id": "ghost"}, MockWriter())
+
+    async def test_missing_task_id_is_no_op(self):
+        agent.handle_interrupt({"type": "interrupt"}, MockWriter())
+
+
+class TestHandleQuery(unittest.IsolatedAsyncioTestCase):
+    """handle_query creates a session and spawns a task for the query."""
+
+    async def _handle_query_with_mock(self, writer, content="hi", session_id=None):
+        async def fake_run_query(*args, **kwargs):
+            pass
+
+        with unittest.mock.patch.object(agent, "run_query", side_effect=fake_run_query):
+            agent.handle_query({"type": "query", "content": content, "session_id": session_id}, writer)
+
+    async def test_creates_new_session_in_registry(self):
+        writer = MockWriter()
+        initial_count = len(agent._sessions)
+        await self._handle_query_with_mock(writer)
+        self.assertEqual(len(agent._sessions), initial_count + 1)
+        for tid, sess in list(agent._sessions.items()):
+            if sess.writer is writer:
+                agent._sessions.pop(tid)
+                break
+
+    async def test_session_stores_correct_writer(self):
+        writer = MockWriter()
+        await self._handle_query_with_mock(writer)
+        found = False
+        for tid, sess in list(agent._sessions.items()):
+            if sess.writer is writer:
+                self.assertIs(sess.writer, writer)
+                agent._sessions.pop(tid)
+                found = True
+                break
+        self.assertTrue(found, "no session found with the expected writer")
+
+    async def test_session_has_running_task(self):
+        writer = MockWriter()
+        await self._handle_query_with_mock(writer)
+        for tid, sess in list(agent._sessions.items()):
+            if sess.writer is writer:
+                self.assertIsNotNone(sess.task)
+                agent._sessions.pop(tid)
+                break
+
+
+# ── Stream event processing tests ─────────────────────────────────────────
+
+
+class TestProcessBlockStart(unittest.IsolatedAsyncioTestCase):
+    """process_block_start records per-block state and emits init for text blocks."""
+
+    async def test_text_block_emits_init_event_and_returns_true(self):
+        writer = MockWriter()
+        token = agent._emit_writer.set(writer)
+        try:
+            ev = {"type": "content_block_start", "index": 0, "content_block": {"type": "text"}}
+            result = agent.process_block_start(ev, {}, {}, {})
+        finally:
+            agent._emit_writer.reset(token)
+        self.assertTrue(result)
+        events = writer.written_events()
+        self.assertEqual(len(events), 1)
+        self.assertEqual(events[0]["event"], "init")
+
+    async def test_tool_use_block_records_tool_info_and_returns_false(self):
+        ev = {
+            "type": "content_block_start",
+            "index": 1,
+            "content_block": {"type": "tool_use", "id": "t1", "name": "Bash"},
+        }
+        block_types: dict = {}
+        tool_info: dict = {}
+        tool_input: dict = {}
+        result = agent.process_block_start(ev, block_types, tool_info, tool_input)
+        self.assertFalse(result)
+        self.assertEqual(block_types[1], "tool_use")
+        self.assertEqual(tool_info[1], {"id": "t1", "name": "Bash"})
+        self.assertEqual(tool_input[1], "")
+
+    async def test_tool_use_block_does_not_emit_any_sse(self):
+        writer = MockWriter()
+        token = agent._emit_writer.set(writer)
+        try:
+            ev = {
+                "type": "content_block_start",
+                "index": 0,
+                "content_block": {"type": "tool_use", "id": "t1", "name": "Read"},
+            }
+            agent.process_block_start(ev, {}, {}, {})
+        finally:
+            agent._emit_writer.reset(token)
+        self.assertEqual(writer.written_events(), [])
+
+    async def test_records_block_type_for_text_block(self):
+        ev = {"type": "content_block_start", "index": 2, "content_block": {"type": "text"}}
+        block_types: dict = {}
+        writer = MockWriter()
+        token = agent._emit_writer.set(writer)
+        try:
+            agent.process_block_start(ev, block_types, {}, {})
+        finally:
+            agent._emit_writer.reset(token)
+        self.assertEqual(block_types[2], "text")
+
+
+class TestProcessBlockDelta(unittest.IsolatedAsyncioTestCase):
+    """process_block_delta emits the correct SSE event per delta type."""
+
+    async def test_text_delta_emits_text_delta_event_with_text_field(self):
+        writer = MockWriter()
+        token = agent._emit_writer.set(writer)
+        try:
+            ev = {
+                "type": "content_block_delta",
+                "index": 0,
+                "delta": {"type": "text_delta", "text": "Hello"},
+            }
+            result = agent.process_block_delta(ev, {0: "text"}, {}, {})
+        finally:
+            agent._emit_writer.reset(token)
+        self.assertTrue(result)
+        events = writer.written_events()
+        self.assertEqual(len(events), 1)
+        self.assertEqual(events[0]["event"], "text_delta")
+        self.assertEqual(events[0]["data"]["text"], "Hello")
+
+    async def test_thinking_delta_emits_thinking_delta_event_with_thinking_field(self):
+        writer = MockWriter()
+        token = agent._emit_writer.set(writer)
+        try:
+            ev = {
+                "type": "content_block_delta",
+                "index": 0,
+                "delta": {"type": "thinking_delta", "thinking": "Hmm…"},
+            }
+            agent.process_block_delta(ev, {0: "thinking"}, {}, {})
+        finally:
+            agent._emit_writer.reset(token)
+        events = writer.written_events()
+        self.assertEqual(len(events), 1)
+        self.assertEqual(events[0]["event"], "thinking_delta")
+        self.assertEqual(events[0]["data"]["thinking"], "Hmm…")
+
+    async def test_input_json_delta_accumulates_without_emitting(self):
+        writer = MockWriter()
+        token = agent._emit_writer.set(writer)
+        tool_input: dict = {0: ""}
+        try:
+            for chunk in ['{"command"', ': "ls"}']:
+                ev = {
+                    "type": "content_block_delta",
+                    "index": 0,
+                    "delta": {"type": "input_json_delta", "partial_json": chunk},
+                }
+                agent.process_block_delta(ev, {0: "tool_use"}, {0: {"id": "t1", "name": "Bash"}}, tool_input)
+        finally:
+            agent._emit_writer.reset(token)
+        self.assertEqual(writer.written_events(), [])
+        self.assertEqual(tool_input[0], '{"command": "ls"}')
+
+    async def test_empty_text_delta_does_not_emit_and_returns_false(self):
+        writer = MockWriter()
+        token = agent._emit_writer.set(writer)
+        try:
+            ev = {
+                "type": "content_block_delta",
+                "index": 0,
+                "delta": {"type": "text_delta", "text": ""},
+            }
+            result = agent.process_block_delta(ev, {0: "text"}, {}, {})
+        finally:
+            agent._emit_writer.reset(token)
+        self.assertFalse(result)
+        self.assertEqual(writer.written_events(), [])
+
+    async def test_empty_thinking_delta_does_not_emit(self):
+        writer = MockWriter()
+        token = agent._emit_writer.set(writer)
+        try:
+            ev = {
+                "type": "content_block_delta",
+                "index": 0,
+                "delta": {"type": "thinking_delta", "thinking": ""},
+            }
+            agent.process_block_delta(ev, {0: "thinking"}, {}, {})
+        finally:
+            agent._emit_writer.reset(token)
+        self.assertEqual(writer.written_events(), [])
+
+
+class TestProcessBlockStop(unittest.IsolatedAsyncioTestCase):
+    """process_block_stop emits tool_start and cleans up tracking state."""
+
+    async def test_emits_tool_start_with_parsed_input_for_non_ask_user_question(self):
+        writer = MockWriter()
+        token = agent._emit_writer.set(writer)
+        block_types = {0: "tool_use"}
+        tool_info = {0: {"id": "t1", "name": "Bash"}}
+        tool_input = {0: '{"command": "ls"}'}
+        try:
+            agent.process_block_stop({"type": "content_block_stop", "index": 0}, block_types, tool_info, tool_input)
+        finally:
+            agent._emit_writer.reset(token)
+        events = writer.written_events()
+        self.assertEqual(len(events), 1)
+        self.assertEqual(events[0]["event"], "tool_start")
+        data = events[0]["data"]
+        self.assertEqual(data["id"], "t1")
+        self.assertEqual(data["name"], "Bash")
+        self.assertEqual(data["input"], {"command": "ls"})
+
+    async def test_skips_tool_start_for_ask_user_question(self):
+        """AskUserQuestion is handled by the hook — no tool_start emitted."""
+        writer = MockWriter()
+        token = agent._emit_writer.set(writer)
+        block_types = {0: "tool_use"}
+        tool_info = {0: {"id": "q1", "name": "AskUserQuestion"}}
+        tool_input = {0: '{"questions": []}'}
+        try:
+            agent.process_block_stop({"type": "content_block_stop", "index": 0}, block_types, tool_info, tool_input)
+        finally:
+            agent._emit_writer.reset(token)
+        self.assertEqual(writer.written_events(), [])
+
+    async def test_cleans_up_tracking_dicts_after_tool_stop(self):
+        writer = MockWriter()
+        token = agent._emit_writer.set(writer)
+        block_types = {0: "tool_use"}
+        tool_info = {0: {"id": "t2", "name": "Read"}}
+        tool_input = {0: "{}"}
+        try:
+            agent.process_block_stop({"type": "content_block_stop", "index": 0}, block_types, tool_info, tool_input)
+        finally:
+            agent._emit_writer.reset(token)
+        self.assertNotIn(0, block_types)
+        self.assertNotIn(0, tool_info)
+        self.assertNotIn(0, tool_input)
+
+    async def test_cleans_up_block_types_for_text_block(self):
+        writer = MockWriter()
+        token = agent._emit_writer.set(writer)
+        block_types = {0: "text"}
+        try:
+            agent.process_block_stop({"type": "content_block_stop", "index": 0}, block_types, {}, {})
+        finally:
+            agent._emit_writer.reset(token)
+        self.assertNotIn(0, block_types)
+
+    async def test_invalid_json_in_tool_input_falls_back_to_empty_dict(self):
+        writer = MockWriter()
+        token = agent._emit_writer.set(writer)
+        block_types = {0: "tool_use"}
+        tool_info = {0: {"id": "t3", "name": "Bash"}}
+        tool_input = {0: "not-valid-json"}
+        try:
+            agent.process_block_stop({"type": "content_block_stop", "index": 0}, block_types, tool_info, tool_input)
+        finally:
+            agent._emit_writer.reset(token)
+        events = writer.written_events()
+        self.assertEqual(events[0]["data"]["input"], {})
+
+
+class TestProcessStreamEvent(unittest.IsolatedAsyncioTestCase):
+    """process_stream_event dispatches to the correct sub-handler by event type."""
+
+    def _make_event(self, inner: dict):
+        ev = unittest.mock.MagicMock()
+        ev.event = inner
+        return ev
+
+    async def test_content_block_start_for_text_returns_true(self):
+        writer = MockWriter()
+        token = agent._emit_writer.set(writer)
+        try:
+            result = agent.process_stream_event(
+                self._make_event({"type": "content_block_start", "index": 0, "content_block": {"type": "text"}}),
+                {}, {}, {},
+            )
+        finally:
+            agent._emit_writer.reset(token)
+        self.assertTrue(result)
+
+    async def test_content_block_delta_for_text_delta_returns_true(self):
+        writer = MockWriter()
+        token = agent._emit_writer.set(writer)
+        try:
+            result = agent.process_stream_event(
+                self._make_event({"type": "content_block_delta", "index": 0, "delta": {"type": "text_delta", "text": "hi"}}),
+                {0: "text"}, {}, {0: ""},
+            )
+        finally:
+            agent._emit_writer.reset(token)
+        self.assertTrue(result)
+
+    async def test_content_block_stop_returns_false(self):
+        writer = MockWriter()
+        token = agent._emit_writer.set(writer)
+        try:
+            result = agent.process_stream_event(
+                self._make_event({"type": "content_block_stop", "index": 0}),
+                {}, {}, {},
+            )
+        finally:
+            agent._emit_writer.reset(token)
+        self.assertFalse(result)
+
+    async def test_message_start_returns_false(self):
+        result = agent.process_stream_event(self._make_event({"type": "message_start"}), {}, {}, {})
+        self.assertFalse(result)
+
+    async def test_message_delta_returns_false(self):
+        result = agent.process_stream_event(self._make_event({"type": "message_delta"}), {}, {}, {})
+        self.assertFalse(result)
+
+    async def test_message_stop_returns_false(self):
+        result = agent.process_stream_event(self._make_event({"type": "message_stop"}), {}, {}, {})
+        self.assertFalse(result)
+
+    async def test_ping_returns_false(self):
+        result = agent.process_stream_event(self._make_event({"type": "ping"}), {}, {}, {})
+        self.assertFalse(result)
+
+
+# ── Structured agent event processing tests ────────────────────────────────
+
+
+class TestProcessAssistantEvent(unittest.IsolatedAsyncioTestCase):
+    """process_assistant_event emits the full message when streaming did not."""
+
+    def _make_block(self, type_: str, **kwargs):
+        class Block:
+            pass
+        b = Block()
+        b.type = type_
+        for k, v in kwargs.items():
+            setattr(b, k, v)
+        return b
+
+    def _make_event(self, blocks):
+        ev = unittest.mock.MagicMock()
+        ev.content = blocks
+        ev.message = None
+        return ev
+
+    async def test_skips_all_emission_when_streaming_text_already_sent(self):
+        writer = MockWriter()
+        token = agent._emit_writer.set(writer)
+        try:
+            agent.process_assistant_event(
+                self._make_event([self._make_block("text", text="hello")]),
+                emitted_streaming_text=True,
+            )
+        finally:
+            agent._emit_writer.reset(token)
+        self.assertEqual(writer.written_events(), [])
+
+    async def test_emits_init_then_text_delta_for_text_block(self):
+        writer = MockWriter()
+        token = agent._emit_writer.set(writer)
+        try:
+            agent.process_assistant_event(
+                self._make_event([self._make_block("text", text="The answer is 42.")]),
+                emitted_streaming_text=False,
+            )
+        finally:
+            agent._emit_writer.reset(token)
+        events = writer.written_events()
+        names = [e["event"] for e in events]
+        self.assertIn("init", names)
+        self.assertIn("text_delta", names)
+        self.assertLess(names.index("init"), names.index("text_delta"))
+        text_event = next(e for e in events if e["event"] == "text_delta")
+        self.assertEqual(text_event["data"]["text"], "The answer is 42.")
+
+    async def test_emits_thinking_delta_for_thinking_block(self):
+        writer = MockWriter()
+        token = agent._emit_writer.set(writer)
+        try:
+            agent.process_assistant_event(
+                self._make_event([self._make_block("thinking", thinking="I reason…")]),
+                emitted_streaming_text=False,
+            )
+        finally:
+            agent._emit_writer.reset(token)
+        events = writer.written_events()
+        self.assertEqual(len(events), 1)
+        self.assertEqual(events[0]["event"], "thinking_delta")
+        self.assertEqual(events[0]["data"]["thinking"], "I reason…")
+
+    async def test_emits_tool_start_for_tool_use_block(self):
+        writer = MockWriter()
+        token = agent._emit_writer.set(writer)
+        try:
+            block = self._make_block("tool_use", id="t1", name="Bash", input={"command": "ls"})
+            agent.process_assistant_event(
+                self._make_event([block]),
+                emitted_streaming_text=False,
+            )
+        finally:
+            agent._emit_writer.reset(token)
+        events = writer.written_events()
+        self.assertEqual(len(events), 1)
+        self.assertEqual(events[0]["event"], "tool_start")
+        data = events[0]["data"]
+        self.assertEqual(data["id"], "t1")
+        self.assertEqual(data["name"], "Bash")
+        self.assertEqual(data["input"], {"command": "ls"})
+
+    async def test_skips_ask_user_question_tool_block(self):
+        writer = MockWriter()
+        token = agent._emit_writer.set(writer)
+        try:
+            block = self._make_block("tool_use", id="q1", name="AskUserQuestion", input={})
+            agent.process_assistant_event(
+                self._make_event([block]),
+                emitted_streaming_text=False,
+            )
+        finally:
+            agent._emit_writer.reset(token)
+        self.assertEqual(writer.written_events(), [])
+
+    async def test_falls_back_to_message_content_when_direct_content_empty(self):
+        writer = MockWriter()
+        token = agent._emit_writer.set(writer)
+        try:
+            block = self._make_block("text", text="From message.")
+            ev = unittest.mock.MagicMock()
+            ev.content = []
+
+            class Msg:
+                content = [block]
+
+            ev.message = Msg()
+            agent.process_assistant_event(ev, emitted_streaming_text=False)
+        finally:
+            agent._emit_writer.reset(token)
+        events = writer.written_events()
+        texts = [e["data"].get("text") for e in events if e["event"] == "text_delta"]
+        self.assertIn("From message.", texts)
+
+    async def test_empty_text_block_does_not_emit(self):
+        writer = MockWriter()
+        token = agent._emit_writer.set(writer)
+        try:
+            agent.process_assistant_event(
+                self._make_event([self._make_block("text", text="")]),
+                emitted_streaming_text=False,
+            )
+        finally:
+            agent._emit_writer.reset(token)
+        self.assertEqual(writer.written_events(), [])
+
+
+class TestProcessUserEvent(unittest.IsolatedAsyncioTestCase):
+    """process_user_event emits tool_result events matching the frontend schema."""
+
+    def _make_event_with_blocks(self, blocks):
+        class Msg:
+            content = blocks
+
+        class Event:
+            message = Msg()
+
+        return Event()
+
+    def _make_tool_result(self, tool_use_id, content, is_error=False):
+        class Block:
+            type = "tool_result"
+
+        b = Block()
+        b.tool_use_id = tool_use_id
+        b.content = content
+        b.is_error = is_error
+        return b
+
+    async def test_emits_tool_result_with_string_content(self):
+        writer = MockWriter()
+        token = agent._emit_writer.set(writer)
+        try:
+            block = self._make_tool_result("t1", "file1.txt\nfile2.txt")
+            agent.process_user_event(self._make_event_with_blocks([block]))
+        finally:
+            agent._emit_writer.reset(token)
+        events = writer.written_events()
+        self.assertEqual(len(events), 1)
+        self.assertEqual(events[0]["event"], "tool_result")
+        data = events[0]["data"]
+        self.assertEqual(data["tool_use_id"], "t1")
+        self.assertEqual(data["content"], "file1.txt\nfile2.txt")
+        self.assertFalse(data["is_error"])
+
+    async def test_emits_tool_result_joining_list_content(self):
+        class TextBlock:
+            type = "text"
+            text = "hello output"
+
+        writer = MockWriter()
+        token = agent._emit_writer.set(writer)
+        try:
+            block = self._make_tool_result("t2", [TextBlock()])
+            agent.process_user_event(self._make_event_with_blocks([block]))
+        finally:
+            agent._emit_writer.reset(token)
+        events = writer.written_events()
+        self.assertEqual(events[0]["data"]["content"], "hello output")
+
+    async def test_tool_result_is_error_true_propagated(self):
+        writer = MockWriter()
+        token = agent._emit_writer.set(writer)
+        try:
+            block = self._make_tool_result("err-1", "command not found", is_error=True)
+            agent.process_user_event(self._make_event_with_blocks([block]))
+        finally:
+            agent._emit_writer.reset(token)
+        self.assertTrue(writer.written_events()[0]["data"]["is_error"])
+
+    async def test_multiple_tool_result_blocks_each_emit_an_event(self):
+        writer = MockWriter()
+        token = agent._emit_writer.set(writer)
+        try:
+            blocks = [
+                self._make_tool_result("t3", "result A"),
+                self._make_tool_result("t4", "result B"),
+            ]
+            agent.process_user_event(self._make_event_with_blocks(blocks))
+        finally:
+            agent._emit_writer.reset(token)
+        events = writer.written_events()
+        self.assertEqual(len(events), 2)
+        self.assertEqual(events[0]["data"]["tool_use_id"], "t3")
+        self.assertEqual(events[1]["data"]["tool_use_id"], "t4")
+
+    async def test_skips_non_tool_result_blocks(self):
+        writer = MockWriter()
+        token = agent._emit_writer.set(writer)
+        try:
+            class TextBlock:
+                type = "text"
+                text = "not a result"
+
+            agent.process_user_event(self._make_event_with_blocks([TextBlock()]))
+        finally:
+            agent._emit_writer.reset(token)
+        self.assertEqual(writer.written_events(), [])
+
+    async def test_no_output_when_message_is_none(self):
+        writer = MockWriter()
+        token = agent._emit_writer.set(writer)
+        try:
+            class Event:
+                message = None
+
+            agent.process_user_event(Event())
+        finally:
+            agent._emit_writer.reset(token)
+        self.assertEqual(writer.written_events(), [])
+
+
+class TestProcessAgentEvent(unittest.IsolatedAsyncioTestCase):
+    """process_agent_event dispatches to process_assistant_event or process_user_event."""
+
+    async def test_routes_assistant_type_to_assistant_handler(self):
+        with unittest.mock.patch.object(agent, "process_assistant_event") as mock_fn:
+            class Event:
+                type = "assistant"
+                session_id = None
+
+            agent.process_agent_event(Event(), emitted_streaming_text=False)
+            mock_fn.assert_called_once()
+
+    async def test_routes_user_type_to_user_handler(self):
+        with unittest.mock.patch.object(agent, "process_user_event") as mock_fn:
+            class Event:
+                type = "user"
+                session_id = None
+
+            agent.process_agent_event(Event(), emitted_streaming_text=False)
+            mock_fn.assert_called_once()
+
+    async def test_uses_class_name_fallback_for_assistant_message_class(self):
+        with unittest.mock.patch.object(agent, "process_assistant_event") as mock_fn:
+            class AssistantMessage:
+                session_id = None
+
+            agent.process_agent_event(AssistantMessage(), emitted_streaming_text=False)
+            mock_fn.assert_called_once()
+
+    async def test_result_and_system_events_do_not_raise(self):
+        class ResultEvent:
+            type = "result"
+            session_id = None
+            subtype = "success"
+
+        class SystemEvent:
+            type = "system"
+            session_id = None
+            subtype = "init"
+
+        agent.process_agent_event(ResultEvent(), emitted_streaming_text=False)
+        agent.process_agent_event(SystemEvent(), emitted_streaming_text=False)
+
+
+if __name__ == "__main__":
+    unittest.main()

@@ -31,12 +31,12 @@ impl<S: Send + Sync> FromRequestParts<S> for User {
 
 fn build_cognito_state(state: &AppState) -> CognitoState {
     CognitoState {
-        client_id: state.cognito_client_id.clone(),
-        client_secret: state.cognito_client_secret.clone(),
-        domain: state.cognito_domain.clone(),
-        redirect_uri: state.cognito_redirect_uri.clone(),
-        region: state.cognito_region.clone(),
-        user_pool_id: state.cognito_user_pool_id.clone(),
+        client_id: state.config.cognito_client_id.clone(),
+        client_secret: state.config.cognito_client_secret.clone(),
+        domain: state.config.cognito_domain.clone(),
+        redirect_uri: state.config.cognito_redirect_uri.clone(),
+        region: state.config.cognito_region.clone(),
+        user_pool_id: state.config.cognito_user_pool_id.clone(),
     }
 }
 

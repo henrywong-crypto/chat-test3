@@ -219,7 +219,6 @@ export default function ChatComposer({ isLoading, onSend, onStop }: ChatComposer
               value={input}
               onInput={handleInput}
               onKeyDown={handleKeyDown}
-              onChange={(e) => setInput(e.target.value)}
               placeholder="Message Claude…"
               disabled={busy}
               rows={1}

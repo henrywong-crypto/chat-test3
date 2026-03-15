@@ -47,9 +47,9 @@ pub(crate) async fn upload_file_handler(
     };
     let mut ssh_handle = connect_ssh(
         guest_ip,
-        &state.ssh_key_path,
-        &state.ssh_user,
-        &state.vm_host_key_path,
+        &state.config.ssh_key_path,
+        &state.config.ssh_user,
+        &state.config.vm_host_key_path,
     )
     .await?;
     let sftp = open_sftp_session(&mut ssh_handle).await?;
@@ -57,7 +57,7 @@ pub(crate) async fn upload_file_handler(
         &mut multipart,
         &sftp,
         Path::new(&upload_metadata.remote_path),
-        Path::new(&state.upload_dir),
+        Path::new(&state.config.upload_dir),
     )
     .await?;
     Ok((StatusCode::OK, "").into_response())

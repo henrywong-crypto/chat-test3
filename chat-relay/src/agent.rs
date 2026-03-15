@@ -33,7 +33,9 @@ pub enum AgentMessage {
         request_id: String,
         answers: serde_json::Value,
     },
-    Interrupt,
+    Interrupt {
+        task_id: String,
+    },
 }
 
 pub fn start_agent_relay(
@@ -155,10 +157,11 @@ async fn run_relay(
                         ssh_channel.data(Bytes::from(line).as_ref()).await?;
                         info!("question answer sent to agent");
                     }
-                    Some(AgentMessage::Interrupt) => {
-                        info!("sending interrupt to agent");
-                        let line = "{\"type\":\"interrupt\"}\n";
-                        ssh_channel.data(Bytes::from_static(line.as_bytes()).as_ref()).await?;
+                    Some(AgentMessage::Interrupt { task_id }) => {
+                        info!("sending interrupt to agent  task_id={task_id}");
+                        let payload = build_interrupt_payload(&task_id)?;
+                        let line = format!("{payload}\n");
+                        ssh_channel.data(Bytes::from(line).as_ref()).await?;
                         info!("interrupt sent to agent");
                     }
                 }
@@ -221,6 +224,21 @@ async fn run_relay(
 }
 
 #[derive(Serialize)]
+struct InterruptPayload<'a> {
+    #[serde(rename = "type")]
+    type_: &'a str,
+    task_id: &'a str,
+}
+
+fn build_interrupt_payload(task_id: &str) -> Result<String> {
+    let interrupt_payload = InterruptPayload {
+        type_: "interrupt",
+        task_id,
+    };
+    Ok(serde_json::to_string(&interrupt_payload)?)
+}
+
+#[derive(Serialize)]
 struct QueryPayload<'a> {
     #[serde(rename = "type")]
     type_: &'a str,
@@ -264,7 +282,19 @@ mod tests {
     }
 
     #[test]
-    fn test_type_field_is_always_query() {
+    fn test_interrupt_type_field() {
+        let json = build_interrupt_payload("abc-123").unwrap();
+        assert_eq!(parse(&json)["type"], "interrupt");
+    }
+
+    #[test]
+    fn test_interrupt_task_id_field() {
+        let json = build_interrupt_payload("abc-123").unwrap();
+        assert_eq!(parse(&json)["task_id"], "abc-123");
+    }
+
+    #[test]
+    fn test_query_type_field() {
         let json = build_query_payload("hello", None).unwrap();
         assert_eq!(parse(&json)["type"], "query");
     }

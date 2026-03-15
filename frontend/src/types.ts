@@ -37,6 +37,7 @@ export interface QuestionOption {
 
 export interface PendingQuestion {
   requestId: string;
+  taskId: string;
   questions: Question[];
 }
 
@@ -73,8 +74,13 @@ export interface SseToolStart {
   input: Record<string, unknown>;
 }
 
+export interface SseSessionStart {
+  task_id: string;
+}
+
 export interface SseAskUserQuestion {
   request_id: string;
+  task_id: string;
   questions: Question[];
 }
 
@@ -86,6 +92,7 @@ export interface SseToolResult {
 
 export interface SseDone {
   session_id: string | null;
+  task_id: string;
 }
 
 export interface SseErrorEvent {
@@ -93,6 +100,7 @@ export interface SseErrorEvent {
 }
 
 export type SseEvent =
+  | { type: "session_start"; payload: SseSessionStart }
   | { type: "init" }
   | { type: "text_delta"; payload: SseTextDelta }
   | { type: "thinking_delta"; payload: SseThinkingDelta }

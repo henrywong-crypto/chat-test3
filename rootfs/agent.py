@@ -7,7 +7,9 @@ import contextvars
 import dataclasses
 import json
 import os
+import signal
 import sys
+import uuid
 
 SOCKET_PATH = "/tmp/agent.sock"
 QUESTION_TIMEOUT_SECS = 3600
@@ -19,21 +21,51 @@ def log(msg: str) -> None:
     sys.stderr.flush()
 
 
-def emit_sse(event_name: str, data: dict) -> None:
-    """Write a properly formatted SSE event to the query-scoped writer.
+@dataclasses.dataclass
+class Session:
+    task: asyncio.Task
+    writer: asyncio.StreamWriter
+    pending_question: asyncio.Future | None = None
+    pending_question_data: dict | None = None
 
-    Uses the task-captured writer (ContextVar) so that concurrent connections
-    don't interfere with each other.  If that writer has already closed (e.g.
-    the client disconnected and reconnected), falls back to _current_writer so
-    events are delivered to the new connection.
-    """
-    writer = _emit_writer.get()
-    if writer is None or writer.is_closing():
-        writer = _current_writer
-    if writer is None or writer.is_closing():
+
+# All live sessions keyed by task_id (a server-generated UUID).
+_sessions: dict[str, Session] = {}
+
+# Per-task context vars: set at task-creation time so emit_sse always routes to
+# the connection that submitted the query, even as _sessions[id].writer changes
+# on reconnect.
+_emit_writer: contextvars.ContextVar[asyncio.StreamWriter | None] = (
+    contextvars.ContextVar("emit_writer", default=None)
+)
+_emit_session_id: contextvars.ContextVar[str | None] = (
+    contextvars.ContextVar("emit_session_id", default=None)
+)
+
+
+def write_sse(writer: asyncio.StreamWriter, event_name: str, data: dict) -> None:
+    """Write an SSE event directly to a specific writer."""
+    if writer.is_closing():
         return
     payload = f"event: {event_name}\ndata: {json.dumps(data, cls=_Encoder)}\n\n"
     writer.write(payload.encode())
+    asyncio.get_running_loop().create_task(writer.drain())
+
+
+def emit_sse(event_name: str, data: dict) -> None:
+    """Write an SSE event to the task-captured writer.
+
+    Falls back to the session's current writer when the original writer has
+    closed (e.g. the client disconnected and reconnected mid-query).
+    """
+    writer = _emit_writer.get()
+    if writer is None or writer.is_closing():
+        task_id = _emit_session_id.get()
+        session = _sessions.get(task_id) if task_id else None
+        writer = session.writer if session else None
+    if writer is None or writer.is_closing():
+        return
+    write_sse(writer, event_name, data)
 
 
 def get_field(obj, field, default=None):
@@ -43,31 +75,73 @@ def get_field(obj, field, default=None):
     return getattr(obj, field, default)
 
 
-# Pending AskUserQuestion future (at most one active at a time).
-_pending_question: asyncio.Future | None = None
-# Data for the pending question — re-emitted to reconnecting clients.
-_pending_question_data: dict | None = None
-# Queue for incoming messages (queries, etc.) from connected clients.
-_stdin_queue: asyncio.Queue = asyncio.Queue()
-# The currently running query task, so it can be cancelled on interrupt.
-_current_query_task: asyncio.Task | None = None
-# The writer that submitted the currently running query — only that connection may interrupt it.
-_current_query_writer: asyncio.StreamWriter | None = None
-# Tracks the most recently active writer for reconnect detection.
-_current_writer: asyncio.StreamWriter | None = None
-# Per-task writer context: set before spawning each query task so emit_sse always
-# routes to the connection that submitted the query, even if _current_writer changes
-# while the query is running.
-_emit_writer: contextvars.ContextVar[asyncio.StreamWriter | None] = (
-    contextvars.ContextVar("emit_writer", default=None)
-)
+# ── Per-message-type handlers ─────────────────────────────────────────────────
+
+
+def handle_hello(msg: dict, writer: asyncio.StreamWriter) -> None:
+    """Bind a reconnected client connection to its existing session."""
+    task_id = msg.get("task_id")
+    if not task_id:
+        return
+    session = _sessions.get(task_id)
+    if not session:
+        log(f"hello for unknown session {task_id!r}")
+        return
+    log(f"client rebound to session {task_id!r}")
+    session.writer = writer
+    if session.pending_question_data:
+        log("re-emitting pending question to reconnected client")
+        write_sse(writer, "ask_user_question", session.pending_question_data)
+
+
+def handle_answer_question(msg: dict) -> None:
+    """Deliver an answer to whichever session is waiting on that request_id."""
+    request_id = msg.get("request_id")
+    for session in _sessions.values():
+        if (
+            session.pending_question
+            and not session.pending_question.done()
+            and session.pending_question_data
+            and session.pending_question_data.get("request_id") == request_id
+        ):
+            session.pending_question.set_result(msg.get("answers", {}))
+            return
+    log(f"answer_question for unknown request_id {request_id!r}")
+
+
+def handle_interrupt(msg: dict, writer: asyncio.StreamWriter) -> None:
+    """Cancel the query task identified by task_id."""
+    task_id = msg.get("task_id")
+    if not task_id:
+        return
+    session = _sessions.get(task_id)
+    if session and not session.task.done() and writer is session.writer:
+        log(f"interrupt received for session {task_id!r}, cancelling")
+        session.task.cancel()
+
+
+def handle_query(msg: dict, writer: asyncio.StreamWriter) -> None:
+    """Spawn a new run_query task and register it in _sessions."""
+    sdk_session_id = msg.get("session_id")  # non-None when resuming
+    task_id = str(uuid.uuid4())
+    token1 = _emit_writer.set(writer)
+    token2 = _emit_session_id.set(task_id)
+    task = asyncio.create_task(
+        run_query(msg.get("content", ""), sdk_session_id, task_id)
+    )
+    _emit_writer.reset(token1)
+    _emit_session_id.reset(token2)
+    _sessions[task_id] = Session(task=task, writer=writer)
+    log(f"query started  task_id={task_id!r}  resume={sdk_session_id!r}")
+
+
+# ── Connection handling ───────────────────────────────────────────────────────
 
 
 async def route_connection(
     reader: asyncio.StreamReader, writer: asyncio.StreamWriter
 ) -> None:
-    """Read lines from a connected client and route them; return on EOF without exiting."""
-    global _current_writer
+    """Read lines from a connected client and dispatch to the appropriate handler."""
     while True:
         raw = await reader.readline()
         if not raw:
@@ -80,72 +154,28 @@ async def route_connection(
         except json.JSONDecodeError:
             log(f"failed to parse line: {line[:120]}")
             continue
-        if msg.get("type") == "answer_question":
-            request_id = msg.get("request_id")
-            if (
-                _pending_question
-                and not _pending_question.done()
-                and _pending_question_data
-                and _pending_question_data.get("request_id") == request_id
-            ):
-                _pending_question.set_result(msg.get("answers", {}))
-        elif msg.get("type") == "interrupt":
-            if (
-                _current_query_task
-                and not _current_query_task.done()
-                and writer is _current_query_writer
-            ):
-                log("interrupt received, cancelling query task")
-                _current_query_task.cancel()
+        msg_type = msg.get("type")
+        if msg_type == "hello":
+            handle_hello(msg, writer)
+        elif msg_type == "answer_question":
+            handle_answer_question(msg)
+        elif msg_type == "interrupt":
+            handle_interrupt(msg, writer)
+        elif msg_type == "query":
+            handle_query(msg, writer)
         else:
-            _current_writer = writer
-            await _stdin_queue.put((msg, writer))
+            log(f"unknown message type: {msg_type!r}")
 
 
 async def handle_connection(
     reader: asyncio.StreamReader, writer: asyncio.StreamWriter
 ) -> None:
     """Handle a single client connection."""
-    global _current_writer
     log("client connected")
-    # Always take over as the active writer.  When the old connection is still
-    # alive (e.g. the browser reloaded before the relay detected the disconnect),
-    # this ensures the running task can fall back to the new writer once the old
-    # one closes.  When a second browser window opens, the ContextVar in the
-    # running task still points to its original writer, so it won't be affected
-    # until that writer closes.
-    _current_writer = writer
-    if _pending_question_data:
-        log("re-emitting pending question to reconnected client")
-        token = _emit_writer.set(writer)
-        emit_sse("ask_user_question", _pending_question_data)
-        _emit_writer.reset(token)
     await route_connection(reader, writer)
-    if _current_writer is writer:
-        _current_writer = None
     writer.close()
     await writer.wait_closed()
     log("client disconnected")
-
-
-async def process_query_queue() -> None:
-    """Consume _stdin_queue and run queries sequentially."""
-    global _current_query_task, _current_query_writer
-    while True:
-        msg, query_writer = await _stdin_queue.get()
-        if msg.get("type") == "query":
-            _current_query_writer = query_writer
-            token = _emit_writer.set(query_writer)
-            _current_query_task = asyncio.create_task(
-                run_query(msg.get("content", ""), msg.get("session_id"))
-            )
-            _emit_writer.reset(token)
-            try:
-                await _current_query_task
-            except asyncio.CancelledError:
-                pass
-            finally:
-                _current_query_writer = None
 
 
 async def main():
@@ -154,47 +184,58 @@ async def main():
     except FileNotFoundError:
         pass
     server = await asyncio.start_unix_server(handle_connection, path=SOCKET_PATH)
+    loop = asyncio.get_running_loop()
+
+    def remove_socket():
+        try:
+            os.unlink(SOCKET_PATH)
+        except FileNotFoundError:
+            pass
+
+    for sig in (signal.SIGINT, signal.SIGTERM):
+        loop.add_signal_handler(sig, remove_socket)
+
     log("agent daemon ready")
-    asyncio.create_task(process_query_queue())
     async with server:
         await server.serve_forever()
 
 
-async def run_query(content: str, session_id):
+# ── Query execution ───────────────────────────────────────────────────────────
+
+
+async def run_query(content: str, sdk_session_id: str | None, task_id: str):
     from claude_agent_sdk import ClaudeAgentOptions, PermissionResultAllow, query
     from claude_agent_sdk.types import HookMatcher, StreamEvent
 
-    log(f"query start  session_id={session_id!r}  content_len={len(content)}")
+    log(f"query start  task_id={task_id!r}  resume={sdk_session_id!r}  content_len={len(content)}")
+    emit_sse("session_start", {"task_id": task_id})
 
     async def handle_tool_permission(tool_name, input_, context):
         log(f"can_use_tool called  tool_name={tool_name!r}")
         return PermissionResultAllow()
 
     async def ask_user_question_hook(input_data, tool_use_id, context):
-        global _pending_question, _pending_question_data
+        session = _sessions.get(task_id)
+        if not session:
+            return
         tool_input = get_field(input_data, "tool_input") or {}
         questions = (
             tool_input.get("questions", []) if isinstance(tool_input, dict) else []
         )
-        _pending_question = asyncio.get_running_loop().create_future()
-        _pending_question_data = {
+        question_data = {
             "request_id": tool_use_id,
+            "task_id": task_id,
             "session_id": captured_session_id,
             "questions": questions,
         }
-        emit_sse(
-            "ask_user_question",
-            {
-                "request_id": tool_use_id,
-                "session_id": captured_session_id,
-                "questions": questions,
-            },
-        )
-        log(f"PreToolUse AskUserQuestion: waiting for answer")
-        answers = await _pending_question
-        _pending_question = None
-        _pending_question_data = None
-        log(f"PreToolUse AskUserQuestion: answered")
+        session.pending_question = asyncio.get_running_loop().create_future()
+        session.pending_question_data = question_data
+        emit_sse("ask_user_question", question_data)
+        log("PreToolUse AskUserQuestion: waiting for answer")
+        answers = await session.pending_question
+        session.pending_question = None
+        session.pending_question_data = None
+        log("PreToolUse AskUserQuestion: answered")
         return {
             "hookSpecificOutput": {
                 "hookEventName": "PreToolUse",
@@ -214,7 +255,7 @@ async def run_query(content: str, session_id):
                 )
             ],
         },
-        **({"resume": session_id} if session_id else {}),
+        **({"resume": sdk_session_id} if sdk_session_id else {}),
     )
 
     # can_use_tool requires AsyncIterable prompt (not a plain string).
@@ -226,7 +267,7 @@ async def run_query(content: str, session_id):
             "parent_tool_use_id": None,
         }
 
-    captured_session_id = session_id
+    captured_session_id = sdk_session_id
     # Per-block tracking for streaming deltas: index -> type / tool-info / accumulated-input
     block_types: dict[int, str] = {}
     tool_info: dict[int, dict] = {}
@@ -247,16 +288,17 @@ async def run_query(content: str, session_id):
             else:
                 process_agent_event(event, emitted_streaming_text)
     except asyncio.CancelledError:
-        log("query cancelled by interrupt")
+        log(f"query cancelled  task_id={task_id!r}")
     except Exception as exc:
         log(f"query error: {exc}")
         emit_sse("error_event", {"message": str(exc)})
     finally:
-        global _pending_question, _pending_question_data
-        _pending_question = None
-        _pending_question_data = None
-    log(f"query done  session_id={captured_session_id!r}")
-    emit_sse("done", {"session_id": captured_session_id})
+        log(f"query done  task_id={task_id!r}  session_id={captured_session_id!r}")
+        emit_sse("done", {"session_id": captured_session_id, "task_id": task_id})
+        session = _sessions.pop(task_id, None)
+        if session:
+            session.pending_question = None
+            session.pending_question_data = None
 
 
 # ── StreamEvent (raw API streaming) ───────────────────────────────────────────
@@ -377,11 +419,7 @@ def _block_type(block) -> str | None:
 
 
 def process_agent_event(event, emitted_streaming_text: bool) -> None:
-    event_type = (
-        get_field(event, "type")
-        or getattr(event, "type", None)
-        or _class_to_event_type(event)
-    )
+    event_type = get_field(event, "type") or _class_to_event_type(event)
     log(
         f"agent_event  type={event_type!r}  session_id={getattr(event, 'session_id', None)!r}"
     )
@@ -404,18 +442,7 @@ def process_assistant_event(event, emitted_streaming_text: bool) -> None:
     block_types = [getattr(b, "type", type(b).__name__) for b in content_blocks]
     log(f"assistant  blocks={block_types}")
     if emitted_streaming_text:
-        # Text already came via streaming deltas; only handle tool_use blocks.
-        for block in content_blocks:
-            if (getattr(block, "type", None) or _block_type(block)) == "tool_use":
-                if (getattr(block, "name", None) or "") != "AskUserQuestion":
-                    emit_sse(
-                        "tool_start",
-                        {
-                            "id": getattr(block, "id", None),
-                            "name": getattr(block, "name", None),
-                            "input": getattr(block, "input", {}) or {},
-                        },
-                    )
+        # All content (text deltas and tool_start) already delivered via streaming events.
         return
     # No streaming text: emit the full message content now.
     for block in content_blocks:

@@ -6,6 +6,8 @@ use crate::VmRegistry;
 const CONNECT_TIMEOUT: Duration = Duration::from_secs(60);
 
 pub async fn sweep_idle_vms(vms: &VmRegistry) {
+    // Hold the removed entries in _stale_vms until after the lock is released
+    // so that their Drop runs outside the registry lock.
     let _stale_vms = {
         let Ok(mut registry) = vms.lock() else {
             warn!("vm registry mutex poisoned");

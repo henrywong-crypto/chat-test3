@@ -329,6 +329,7 @@ document.getElementById('fm-file-input').addEventListener('change', function() {
 const chatState = {
   viewSessionId:          null,     // session the user sees; null = new-chat view
   runningSessionId:       null,     // key of the in-flight query; null = idle
+  taskId:                 null,     // task_id assigned by the agent for the running query
   es:                     null,     // live EventSource
   esPending:              null,     // content to POST once ES connects
   streaming:              false,
@@ -606,14 +607,16 @@ function connectChatSse() {
       chatState.sessionRenderContexts.delete(disconnectedSession ?? '__new__');
       chatState.es = null;
       chatState.runningSessionId = null;
-      chatState.streaming = false;
-      chatState.awaitingQuestion = false;
-      chatState.pendingQuestion = null;
-      chatState.streamHadText = false;
+      chatState.taskId = null;
       sealAssistantMessage();
       applyChatInputState();
     }
   };
+  chatState.es.addEventListener('session_start', e => {
+    const payload = JSON.parse(e.data);
+    console.log('[chat] event: session_start  task_id=' + payload.task_id);
+    chatState.taskId = payload.task_id;
+  });
   chatState.es.addEventListener('init', () => {
     console.log('[chat] event: init');
     if (!runningMatchesView()) return;
@@ -646,7 +649,7 @@ function connectChatSse() {
     const payload = JSON.parse(e.data);
     console.log('[chat] event: ask_user_question  request_id=' + payload.request_id);
     chatState.awaitingQuestion = true;
-    chatState.pendingQuestion = { sessionId: chatState.runningSessionId, requestId: payload.request_id, questions: payload.questions || [] };
+    chatState.pendingQuestion = { sessionId: chatState.runningSessionId, requestId: payload.request_id, taskId: payload.task_id, questions: payload.questions || [] };
     applyChatInputState();
     if (!runningMatchesView()) return;
     removeThinkingIndicator();
@@ -661,9 +664,10 @@ function connectChatSse() {
   });
   chatState.es.addEventListener('done', e => {
     const payload = JSON.parse(e.data);
-    console.log('[chat] event: done  session_id=' + payload.session_id);
+    console.log('[chat] event: done  session_id=' + payload.session_id + '  task_id=' + payload.task_id);
     const completedSessionId = chatState.runningSessionId;
     chatState.runningSessionId = null;
+    chatState.taskId = null;
     chatState.streamHadText = false;
     chatState.streaming = false;
     chatState.awaitingQuestion = false;
@@ -690,6 +694,7 @@ function connectChatSse() {
     console.log('[chat] event: error_event  message=' + (payload.message ?? String(payload)));
     const completedSessionId = chatState.runningSessionId;
     chatState.runningSessionId = null;
+    chatState.taskId = null;
     chatState.streamHadText = false;
     chatState.streaming = false;
     chatState.awaitingQuestion = false;
@@ -722,7 +727,7 @@ function stopQuery() {
   fetch('/sessions/' + vmId + '/chat-stop', {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ csrf_token: fmCsrfToken }),
+    body: JSON.stringify({ task_id: chatState.taskId ?? '', csrf_token: fmCsrfToken }),
   }).catch(err => console.error('[chat] stop error', err));
 }
 

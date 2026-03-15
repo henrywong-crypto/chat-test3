@@ -1,5 +1,5 @@
 import React, { useCallback, useEffect, useRef } from "react";
-import type { ChatMessage, ChatSession, TranscriptMessage } from "../types";
+import type { ChatMessage, ChatSession, ContentBlock, TranscriptMessage } from "../types";
 import { useSse } from "../contexts/SseContext";
 import { useChatState } from "../hooks/useChatState";
 import { useSseHandlers } from "../hooks/useSseHandlers";
@@ -102,6 +102,7 @@ interface ChatInterfaceProps {
 
 export default function ChatInterface({ sessions, setSessions, selectedSession, newChatKey, onRunningSessionChange }: ChatInterfaceProps) {
   const sseCtx = useSse();
+  const { loadHistory, loadTranscript } = sseCtx;
   const chatState = useChatState();
   const newChatKeyRef = useRef(newChatKey);
   newChatKeyRef.current = newChatKey;
@@ -117,6 +118,7 @@ export default function ChatInterface({ sessions, setSessions, selectedSession, 
     setIsStreaming,
     getSessionPendingQuestion,
     setSessionPendingQuestion,
+    getTaskId,
     getMessages,
     addMessage,
     setMessages,
@@ -125,27 +127,27 @@ export default function ChatInterface({ sessions, setSessions, selectedSession, 
 
   // Wire SSE events to chat state
   useSseHandlers(
-    { latestEvent: sseCtx.latestEvent, loadHistory: sseCtx.loadHistory, newChatKeyRef, sessionStartKeyRef },
+    { latestEvent: sseCtx.latestEvent, loadHistory, newChatKeyRef, sessionStartKeyRef },
     { ...chatState, setSessions },
   );
 
   // Load history on mount
   useEffect(() => {
-    sseCtx.loadHistory().then(setSessions).catch(console.error);
-  }, []); // eslint-disable-line react-hooks/exhaustive-deps
+    loadHistory().then(setSessions).catch(console.error);
+  }, [loadHistory, setSessions]);
 
   // Load transcript when user switches to an existing session
   const loadTranscriptForSession = useCallback(async (session: ChatSession) => {
     if (!session.project_dir) return;
     if (getMessages(session.session_id).length > 0) return;
     try {
-      const transcript = await sseCtx.loadTranscript(session.session_id, session.project_dir);
+      const transcript = await loadTranscript(session.session_id, session.project_dir);
       const msgs = buildMessagesFromTranscript(transcript);
       setMessages(session.session_id, msgs);
     } catch (err) {
       console.error("Failed to load transcript", err);
     }
-  }, [sseCtx, getMessages, setMessages]);
+  }, [loadTranscript, getMessages, setMessages]);
 
   // React to session selection from the sidebar (driven by App.tsx)
   useEffect(() => {
@@ -155,14 +157,14 @@ export default function ChatInterface({ sessions, setSessions, selectedSession, 
     }
     setViewSessionId(selectedSession.session_id);
     loadTranscriptForSession(selectedSession);
-  }, [selectedSession]); // eslint-disable-line react-hooks/exhaustive-deps
+  }, [selectedSession, setViewSessionId, loadTranscriptForSession]);
 
   // Reset to a blank new chat when the user explicitly clicks "New Chat"
   useEffect(() => {
     if (newChatKey === 0) return;
     setMessages(null, []);
     setViewSessionId(null);
-  }, [newChatKey]); // eslint-disable-line react-hooks/exhaustive-deps
+  }, [newChatKey, setMessages, setViewSessionId]);
 
   // Notify parent when the running session changes so Sidebar can show the active indicator
   const onRunningSessionChangeRef = useRef(onRunningSessionChange);
@@ -201,23 +203,25 @@ export default function ChatInterface({ sessions, setSessions, selectedSession, 
   }, [viewSessionId, generateId, addMessage, setRunningSessionId, setIsStreaming, sseCtx]);
 
   const handleStop = useCallback(() => {
-    sseCtx.sendStop().catch(console.error);
-  }, [sseCtx]);
+    sseCtx.sendStop(getTaskId(runningSessionId) ?? "").catch(console.error);
+  }, [sseCtx, getTaskId, runningSessionId]);
 
   const handleAnswerQuestion = useCallback(
     async (requestId: string, answers: Record<string, string>) => {
+      const taskId = getSessionPendingQuestion(viewSessionId)?.taskId ?? "";
       setSessionPendingQuestion(viewSessionId, null);
-      await sseCtx.answerQuestion(requestId, answers);
+      await sseCtx.answerQuestion(taskId, requestId, answers);
     },
-    [sseCtx, setSessionPendingQuestion, viewSessionId],
+    [sseCtx, setSessionPendingQuestion, getSessionPendingQuestion, viewSessionId],
   );
 
   const handleSkipQuestion = useCallback(
     async (requestId: string) => {
+      const taskId = getSessionPendingQuestion(viewSessionId)?.taskId ?? "";
       setSessionPendingQuestion(viewSessionId, null);
-      await sseCtx.answerQuestion(requestId, {});
+      await sseCtx.answerQuestion(taskId, requestId, {});
     },
-    [sseCtx, setSessionPendingQuestion, viewSessionId],
+    [sseCtx, setSessionPendingQuestion, getSessionPendingQuestion, viewSessionId],
   );
 
   const messages = getMessages(viewSessionId);

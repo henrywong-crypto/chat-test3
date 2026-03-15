@@ -64,9 +64,9 @@ async fn main() -> Result<()> {
             .continuously_delete_expired(tokio::time::Duration::from_secs(3600)),
     );
     let app_state = AppState::new(app_config, pg_pool);
-    let port = app_state.port;
-    cleanup_stale_vms(&app_state.net_helper_path, &app_state.jailer_chroot_base).await;
-    setup_host_networking(&app_state.net_helper_path).await;
+    let port = app_state.config.port;
+    cleanup_stale_vms(&app_state.config.net_helper_path, &app_state.config.jailer_chroot_base).await;
+    setup_host_networking(&app_state.config.net_helper_path).await;
     let mmds_refresh_task = spawn_mmds_refresh_task(app_state.clone());
     let idle_vm_sweep_task = spawn_idle_vm_sweep_task(app_state.clone());
     let router = build_router(app_state.clone(), session_store);
@@ -192,7 +192,7 @@ async fn serve_router(
     let _ = tokio::time::timeout(tokio::time::Duration::from_secs(5), serve_task).await;
     save_all_vm_rootfs(
         &app_state.vms,
-        &app_state.user_rootfs_dir,
+        &app_state.config.user_rootfs_dir,
         &app_state.rootfs_lock,
     )
     .await;
@@ -218,8 +218,8 @@ fn spawn_mmds_refresh_task(app_state: AppState) -> tokio::task::JoinHandle<()> {
             interval.tick().await;
             refresh_all_vm_mmds(
                 &app_state.vms,
-                app_state.use_iam_creds,
-                &app_state.iam_role_name,
+                app_state.config.use_iam_creds,
+                &app_state.config.iam_role_name,
             )
             .await;
         }

@@ -9,8 +9,7 @@ use axum::{
 use chat_relay::{AgentMessage, start_agent_relay};
 use futures::StreamExt;
 use serde::Deserialize;
-use std::convert::Infallible;
-use std::time::Duration;
+use std::{convert::Infallible, time::Duration};
 use store::upsert_user;
 use tokio::{sync::mpsc, time::timeout};
 use tower_sessions::Session;
@@ -36,8 +35,7 @@ pub(crate) async fn handle_chat_stream(
     let Some(guest_ip) = find_vm_guest_ip_for_user(&state.vms, &vm_id, db_user.id)? else {
         return Ok((StatusCode::NOT_FOUND, "VM not found").into_response());
     };
-    mark_vm_ws_connected(&state.vms, &vm_id)
-        .unwrap_or_else(|e| error!("failed to mark VM ws connected: {e}"));
+    mark_vm_ws_connected(&state.vms, &vm_id)?;
     let (agent_tx, agent_rx) = mpsc::channel::<AgentMessage>(4);
     state
         .chat_senders
@@ -46,9 +44,9 @@ pub(crate) async fn handle_chat_stream(
         .insert(vm_id.clone(), agent_tx);
     let event_stream = start_agent_relay(
         guest_ip,
-        &state.ssh_key_path,
-        &state.ssh_user,
-        &state.vm_host_key_path,
+        &state.config.ssh_key_path,
+        &state.config.ssh_user,
+        &state.config.vm_host_key_path,
         agent_rx,
     );
     info!("chat sse stream opened");
@@ -106,11 +104,14 @@ pub(crate) async fn handle_chat_query(
     (StatusCode::OK, "").into_response()
 }
 
-fn find_agent_sender(
-    state: &AppState,
-    vm_id: &str,
-) -> Option<mpsc::Sender<AgentMessage>> {
-    state.chat_senders.lock().ok()?.get(vm_id).cloned()
+fn find_agent_sender(state: &AppState, vm_id: &str) -> Option<mpsc::Sender<AgentMessage>> {
+    let mut senders = state.chat_senders.lock().ok()?;
+    let sender = senders.get(vm_id)?;
+    if sender.is_closed() {
+        senders.remove(vm_id);
+        return None;
+    }
+    Some(sender.clone())
 }
 
 #[derive(Deserialize)]
@@ -159,6 +160,7 @@ pub(crate) async fn handle_chat_question_answer(
 
 #[derive(Deserialize)]
 pub(crate) struct StopBody {
+    task_id: String,
     csrf_token: String,
 }
 
@@ -179,7 +181,7 @@ pub(crate) async fn handle_chat_stop(
         info!("no active chat stream to stop");
         return (StatusCode::NOT_FOUND, "No active chat stream").into_response();
     };
-    match timeout(Duration::from_secs(SEND_TIMEOUT_SECS), agent_tx.send(AgentMessage::Interrupt)).await {
+    match timeout(Duration::from_secs(SEND_TIMEOUT_SECS), agent_tx.send(AgentMessage::Interrupt { task_id: body.task_id })).await {
         Ok(Ok(())) => {}
         Ok(Err(_)) => {
             info!("agent sender closed");
