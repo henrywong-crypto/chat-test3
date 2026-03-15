@@ -46,6 +46,9 @@ export default function ChatComposer({ isLoading, isOtherRunning, onSend, onStop
   const textareaRef = useRef<HTMLTextAreaElement>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
 
+  const busy = isLoading || uploading;
+  const blocked = busy || (isOtherRunning ?? false);
+
   const filteredCommands = input.startsWith("/")
     ? SLASH_COMMANDS.filter((cmd) => cmd.name.startsWith(input.split(" ")[0].toLowerCase()))
     : [];
@@ -146,8 +149,6 @@ export default function ChatComposer({ isLoading, isOtherRunning, onSend, onStop
   }, []);
 
   const menuVisible = slashMenuOpen && filteredCommands.length > 0;
-  const busy = isLoading || uploading;
-  const blocked = busy || (isOtherRunning ?? false);
 
   return (
     <div className="flex-shrink-0 border-t border-border bg-card/60 px-3 pb-3 pt-2">

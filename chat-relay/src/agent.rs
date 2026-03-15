@@ -50,6 +50,13 @@ pub fn start_agent_relay(
     let ssh_key_path = ssh_key_path.to_owned();
     let ssh_user = ssh_user.to_owned();
     let vm_host_key_path = vm_host_key_path.to_owned();
+    // The relay runs as an independent background task rather than a lazy stream.
+    // This matters because the caller returns ReceiverStream as an SSE response body,
+    // which Axum polls only when the client is reading. If the relay were driven by
+    // polling, it would stall whenever the client paused. By spawning, the relay runs
+    // continuously: it reads inbound messages from POST handlers and forwards SSH output
+    // to the SSE body regardless of how fast the client consumes it. The task exits
+    // naturally when the SSH channel closes or when tx.send fails (SSE connection dropped).
     tokio::spawn(async move {
         run_agent_relay(guest_ip, ssh_key_path, ssh_user, vm_host_key_path, inbound, tx).await
     });

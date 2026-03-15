@@ -157,10 +157,10 @@ async fn add_security_headers(request: Request, next: Next) -> Response {
         HeaderValue::from_static(
             "default-src 'self'; \
              script-src 'self'; \
-             style-src 'self' 'unsafe-inline'; \
+             style-src 'self' 'unsafe-inline' https://fonts.googleapis.com; \
              connect-src 'self'; \
              img-src 'self' data:; \
-             font-src 'self' data:",
+             font-src 'self' data: https://fonts.gstatic.com",
         ),
     );
     response
