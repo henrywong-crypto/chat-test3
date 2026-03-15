@@ -163,7 +163,8 @@ async fn open_agent_channel(ssh_handle: &client::Handle<SshClient>) -> Result<Ch
                 info!("agent socket channel opened");
                 return Ok(channel);
             }
-            Err(_) if Instant::now() < deadline => {
+            Err(e) if Instant::now() < deadline => {
+                debug!("agent socket not ready, retrying: {e}");
                 sleep(Duration::from_millis(500)).await;
             }
             Err(e) => return Err(e).context("timed out waiting for agent socket"),
