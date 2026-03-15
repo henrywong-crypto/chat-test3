@@ -1,5 +1,5 @@
 # /// script
-# requires-python = ">=3.11"
+# requires-python = ">=3.12"
 # dependencies = ["claude-agent-sdk"]
 # ///
 import asyncio
@@ -25,8 +25,16 @@ def log(msg: str) -> None:
     sys.stderr.flush()
 
 
+def _default_home() -> str:
+    """Return the best available home directory when HOME is not set."""
+    for candidate in ("/home/ubuntu", "/root"):
+        if os.path.isdir(candidate):
+            return candidate
+    return "/root"
+
+
 def _init_allowed_roots() -> None:
-    home = os.path.realpath(os.environ.get("HOME", "/root"))
+    home = os.path.realpath(os.environ.get("HOME") or _default_home())
     tmp = os.path.realpath("/tmp")
     for root in [home, tmp]:
         if root not in _ALLOWED_WORK_DIR_ROOTS:
@@ -39,7 +47,7 @@ def resolve_work_dir(raw: str | None) -> str:
     Returns the real path when it falls within an allowed root directory and
     exists on disk, otherwise falls back to HOME.
     """
-    fallback = os.path.realpath(os.environ.get("HOME", "/root"))
+    fallback = os.path.realpath(os.environ.get("HOME") or _default_home())
     if not raw:
         return fallback
     real = os.path.realpath(raw)

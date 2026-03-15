@@ -111,11 +111,27 @@ class TestGetField(unittest.TestCase):
         self.assertIsNone(agent.get_field({"k": None}, "k", "default"))
 
 
+class TestDefaultHome(unittest.TestCase):
+    """_default_home returns the first existing candidate directory."""
+
+    def test_returns_home_ubuntu_when_it_exists(self):
+        with unittest.mock.patch("os.path.isdir", side_effect=lambda p: p == "/home/ubuntu"):
+            self.assertEqual(agent._default_home(), "/home/ubuntu")
+
+    def test_falls_back_to_root_when_ubuntu_missing(self):
+        with unittest.mock.patch("os.path.isdir", side_effect=lambda p: p == "/root"):
+            self.assertEqual(agent._default_home(), "/root")
+
+    def test_falls_back_to_root_string_when_neither_exists(self):
+        with unittest.mock.patch("os.path.isdir", return_value=False):
+            self.assertEqual(agent._default_home(), "/root")
+
+
 class TestResolveWorkDir(unittest.TestCase):
     """resolve_work_dir validates paths against allowed roots and falls back to HOME."""
 
     def setUp(self):
-        self._home = os.path.realpath(os.environ.get("HOME", "/root"))
+        self._home = os.path.realpath(os.environ.get("HOME") or agent._default_home())
         self._tmp = os.path.realpath("/tmp")
 
     def test_returns_home_fallback_when_raw_is_none(self):
