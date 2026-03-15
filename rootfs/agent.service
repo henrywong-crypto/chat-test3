@@ -4,6 +4,8 @@ After=network.target
 
 [Service]
 Type=simple
+User=ubuntu
+Group=ubuntu
 ExecStart=/usr/local/bin/uv run /opt/agent.py
 Restart=always
 RestartSec=2

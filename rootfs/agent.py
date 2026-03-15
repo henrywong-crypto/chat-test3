@@ -218,6 +218,7 @@ async def main():
     except FileNotFoundError:
         pass
     server = await asyncio.start_unix_server(handle_connection, path=SOCKET_PATH)
+    os.chmod(SOCKET_PATH, 0o666)  # allow sshd (running as the ssh user) to connect
     loop = asyncio.get_running_loop()
 
     def remove_socket():
