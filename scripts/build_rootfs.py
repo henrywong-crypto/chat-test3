@@ -453,6 +453,15 @@ def boot_vm(
             "host_dev_name": tap,
         },
     )
+    fc_api(
+        socket_path,
+        "PUT",
+        "/machine-config",
+        {
+            "vcpu_count": 1,
+            "mem_size_mib": 512,
+        },
+    )
     fc_api(socket_path, "PUT", "/actions", {"action_type": "InstanceStart"})
     return fc_proc
 
