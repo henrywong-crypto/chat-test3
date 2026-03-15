@@ -111,6 +111,46 @@ class TestGetField(unittest.TestCase):
         self.assertIsNone(agent.get_field({"k": None}, "k", "default"))
 
 
+class TestResolveWorkDir(unittest.TestCase):
+    """resolve_work_dir validates paths against allowed roots and falls back to HOME."""
+
+    def setUp(self):
+        self._home = os.path.realpath(os.environ.get("HOME", "/root"))
+        self._tmp = os.path.realpath("/tmp")
+
+    def test_returns_home_fallback_when_raw_is_none(self):
+        self.assertEqual(agent.resolve_work_dir(None), self._home)
+
+    def test_returns_home_fallback_when_raw_is_empty_string(self):
+        self.assertEqual(agent.resolve_work_dir(""), self._home)
+
+    def test_accepts_tmp_directory(self):
+        self.assertEqual(agent.resolve_work_dir("/tmp"), self._tmp)
+
+    def test_accepts_home_directory(self):
+        self.assertEqual(agent.resolve_work_dir(self._home), self._home)
+
+    def test_accepts_existing_subdir_of_home(self):
+        subdir = os.path.join(self._home, "projects", "resolve_work_dir_test_subdir")
+        os.makedirs(subdir, exist_ok=True)
+        try:
+            self.assertEqual(agent.resolve_work_dir(subdir), subdir)
+        finally:
+            os.rmdir(subdir)
+
+    def test_rejects_path_outside_allowed_roots(self):
+        self.assertEqual(agent.resolve_work_dir("/etc"), self._home)
+
+    def test_rejects_nonexistent_path(self):
+        nonexistent = os.path.join(self._tmp, "resolve_work_dir_no_such_dir_xyz")
+        self.assertEqual(agent.resolve_work_dir(nonexistent), self._home)
+
+    def test_rejects_path_traversal_attempt(self):
+        # Canonicalization prevents escaping an allowed root via ..
+        traversal = os.path.join(self._tmp, "..", "etc", "passwd")
+        self.assertEqual(agent.resolve_work_dir(traversal), self._home)
+
+
 class TestClassToEventType(unittest.TestCase):
     """_class_to_event_type derives SSE event names from SDK class names."""
 
@@ -244,7 +284,7 @@ class TestEmitSse(unittest.IsolatedAsyncioTestCase):
         fallback_writer = MockWriter()
         task_id = "fallback-task"
         task = asyncio.create_task(asyncio.sleep(0))
-        agent._sessions[task_id] = agent.Session(task=task, writer=fallback_writer)
+        agent._sessions[task_id] = agent.Session(task=task, writer=fallback_writer, conversation_id="")
         token1 = agent._emit_writer.set(closed_writer)
         token2 = agent._emit_session_id.set(task_id)
         try:
@@ -261,7 +301,7 @@ class TestEmitSse(unittest.IsolatedAsyncioTestCase):
         fallback_writer = MockWriter()
         task_id = "none-writer-task"
         task = asyncio.create_task(asyncio.sleep(0))
-        agent._sessions[task_id] = agent.Session(task=task, writer=fallback_writer)
+        agent._sessions[task_id] = agent.Session(task=task, writer=fallback_writer, conversation_id="")
         token1 = agent._emit_writer.set(None)
         token2 = agent._emit_session_id.set(task_id)
         try:
@@ -294,7 +334,7 @@ class TestHandleHello(unittest.IsolatedAsyncioTestCase):
         old_writer = MockWriter()
         new_writer = MockWriter()
         task_id = "hello-task"
-        agent._sessions[task_id] = agent.Session(task=task, writer=old_writer)
+        agent._sessions[task_id] = agent.Session(task=task, writer=old_writer, conversation_id="")
         try:
             agent.handle_hello({"type": "hello", "task_id": task_id}, new_writer)
             self.assertIs(agent._sessions[task_id].writer, new_writer)
@@ -315,6 +355,7 @@ class TestHandleHello(unittest.IsolatedAsyncioTestCase):
         agent._sessions[task_id] = agent.Session(
             task=task,
             writer=MockWriter(),
+            conversation_id="",
             pending_question=asyncio.get_running_loop().create_future(),
             pending_question_data=question_data,
         )
@@ -333,7 +374,7 @@ class TestHandleHello(unittest.IsolatedAsyncioTestCase):
         task = asyncio.create_task(asyncio.sleep(0))
         writer = MockWriter()
         task_id = "hello-nq-task"
-        agent._sessions[task_id] = agent.Session(task=task, writer=MockWriter())
+        agent._sessions[task_id] = agent.Session(task=task, writer=MockWriter(), conversation_id="")
         try:
             agent.handle_hello({"type": "hello", "task_id": task_id}, writer)
             self.assertEqual(writer.written_events(), [])
@@ -364,6 +405,7 @@ class TestHandleAnswerQuestion(unittest.IsolatedAsyncioTestCase):
         agent._sessions[task_id] = agent.Session(
             task=task,
             writer=MockWriter(),
+            conversation_id="",
             pending_question=future,
             pending_question_data={"request_id": "req-x"},
         )
@@ -383,6 +425,7 @@ class TestHandleAnswerQuestion(unittest.IsolatedAsyncioTestCase):
         agent._sessions[task_id] = agent.Session(
             task=task,
             writer=MockWriter(),
+            conversation_id="",
             pending_question=future,
             pending_question_data={"request_id": "req-y"},
         )
@@ -407,7 +450,7 @@ class TestHandleInterrupt(unittest.IsolatedAsyncioTestCase):
         task = asyncio.create_task(long_running())
         writer = MockWriter()
         task_id = "intr-task"
-        agent._sessions[task_id] = agent.Session(task=task, writer=writer)
+        agent._sessions[task_id] = agent.Session(task=task, writer=writer, conversation_id="")
         try:
             agent.handle_interrupt({"type": "interrupt", "task_id": task_id}, writer)
             self.assertGreater(task.cancelling(), 0)
@@ -423,7 +466,7 @@ class TestHandleInterrupt(unittest.IsolatedAsyncioTestCase):
         session_writer = MockWriter()
         other_writer = MockWriter()
         task_id = "intr-mismatch"
-        agent._sessions[task_id] = agent.Session(task=task, writer=session_writer)
+        agent._sessions[task_id] = agent.Session(task=task, writer=session_writer, conversation_id="")
         try:
             agent.handle_interrupt({"type": "interrupt", "task_id": task_id}, other_writer)
             self.assertEqual(task.cancelling(), 0)
@@ -436,7 +479,7 @@ class TestHandleInterrupt(unittest.IsolatedAsyncioTestCase):
         await task  # ensure it completes before the interrupt arrives
         writer = MockWriter()
         task_id = "intr-done-task"
-        agent._sessions[task_id] = agent.Session(task=task, writer=writer)
+        agent._sessions[task_id] = agent.Session(task=task, writer=writer, conversation_id="")
         try:
             agent.handle_interrupt({"type": "interrupt", "task_id": task_id}, writer)
             self.assertTrue(task.done())
@@ -521,9 +564,9 @@ class TestHandleQuery(unittest.IsolatedAsyncioTestCase):
                 writer,
             )
             await asyncio.sleep(0)  # allow the created task to execute
-        # run_query(content, sdk_session_id, task_id, work_dir)
+        # run_query(content, sdk_session_id, task_id, conversation_id, work_dir)
         # resolve_work_dir returns os.path.realpath("/tmp") which may differ on macOS
-        self.assertEqual(captured_args[3], os.path.realpath("/tmp"))
+        self.assertEqual(captured_args[4], os.path.realpath("/tmp"))
         agent._sessions.pop("wd-task", None)
 
     async def test_handle_query_rejects_work_dir_outside_allowed_roots(self):
@@ -541,7 +584,7 @@ class TestHandleQuery(unittest.IsolatedAsyncioTestCase):
             await asyncio.sleep(0)
         # /etc is outside allowed roots — should fall back to HOME (realpath'd)
         fallback = os.path.realpath(os.environ.get("HOME", "/root"))
-        self.assertEqual(captured_args[3], fallback)
+        self.assertEqual(captured_args[4], fallback)
         agent._sessions.pop("wd-reject", None)
 
     async def test_handle_query_accepts_subdir_of_allowed_root(self):
@@ -560,55 +603,8 @@ class TestHandleQuery(unittest.IsolatedAsyncioTestCase):
                 writer,
             )
             await asyncio.sleep(0)
-        self.assertEqual(captured_args[3], subdir)
+        self.assertEqual(captured_args[4], subdir)
         agent._sessions.pop("wd-sub", None)
-
-    async def test_handle_hello_rebinds_writer_for_running_task(self):
-        task = asyncio.create_task(asyncio.sleep(0))
-        old_writer = MockWriter()
-        new_writer = MockWriter()
-        task_id = "rebind-task"
-        agent._sessions[task_id] = agent.Session(task=task, writer=old_writer)
-        try:
-            agent.handle_hello({"type": "hello", "task_id": task_id}, new_writer)
-            self.assertIs(agent._sessions[task_id].writer, new_writer)
-            # No extra SSE events emitted when there is no pending question
-            self.assertEqual(new_writer.written_events(), [])
-        finally:
-            agent._sessions.pop(task_id, None)
-
-    async def test_handle_hello_reemits_pending_question(self):
-        task = asyncio.create_task(asyncio.sleep(0))
-        new_writer = MockWriter()
-        task_id = "reemit-task"
-        question_data = {
-            "request_id": "req-2",
-            "task_id": task_id,
-            "questions": [{"question": "Yes?", "options": [{"label": "Yes"}]}],
-        }
-        agent._sessions[task_id] = agent.Session(
-            task=task,
-            writer=MockWriter(),
-            pending_question=asyncio.get_running_loop().create_future(),
-            pending_question_data=question_data,
-        )
-        try:
-            agent.handle_hello({"type": "hello", "task_id": task_id}, new_writer)
-            events = new_writer.written_events()
-            self.assertEqual(len(events), 1)
-            self.assertEqual(events[0]["event"], "ask_user_question")
-            self.assertEqual(events[0]["data"]["request_id"], "req-2")
-        finally:
-            agent._sessions.pop(task_id, None)
-
-    async def test_handle_hello_emits_done_for_unknown_task(self):
-        writer = MockWriter()
-        agent.handle_hello({"type": "hello", "task_id": "does-not-exist"}, writer)
-        events = writer.written_events()
-        self.assertEqual(len(events), 1)
-        self.assertEqual(events[0]["event"], "done")
-        self.assertIsNone(events[0]["data"]["session_id"])
-        self.assertEqual(events[0]["data"]["task_id"], "does-not-exist")
 
 
 # ── Stream event processing tests ─────────────────────────────────────────
@@ -1353,11 +1349,11 @@ class TestRunQuery(unittest.IsolatedAsyncioTestCase):
     async def _run(self, task_id, writer, *, events=None, raise_exc=None, sdk_session_id=None):
         """Run run_query under a mock SDK and return all emitted SSE events."""
         old_mods = _install_sdk_mock(events=events, raise_exc=raise_exc)
-        agent._sessions[task_id] = agent.Session(task=asyncio.current_task(), writer=writer)
+        agent._sessions[task_id] = agent.Session(task=asyncio.current_task(), writer=writer, conversation_id="")
         token1 = agent._emit_writer.set(writer)
         token2 = agent._emit_session_id.set(task_id)
         try:
-            await agent.run_query("test content", sdk_session_id, task_id, "/root")
+            await agent.run_query("test content", sdk_session_id, task_id, "", "/root")
         finally:
             _restore_sdk_mock(old_mods)
             agent._emit_writer.reset(token1)
@@ -1434,11 +1430,11 @@ class TestRunQuery(unittest.IsolatedAsyncioTestCase):
         writer = MockWriter()
         task_id = "rq-cleanup"
         old_mods = _install_sdk_mock()
-        agent._sessions[task_id] = agent.Session(task=asyncio.current_task(), writer=writer)
+        agent._sessions[task_id] = agent.Session(task=asyncio.current_task(), writer=writer, conversation_id="")
         token1 = agent._emit_writer.set(writer)
         token2 = agent._emit_session_id.set(task_id)
         try:
-            await agent.run_query("test", None, task_id, "/root")
+            await agent.run_query("test", None, task_id, "", "/root")
         finally:
             _restore_sdk_mock(old_mods)
             agent._emit_writer.reset(token1)
@@ -1521,11 +1517,11 @@ class TestAskUserQuestionHook(unittest.IsolatedAsyncioTestCase):
         sys.modules["claude_agent_sdk"] = mod
         sys.modules["claude_agent_sdk.types"] = types_mod
 
-        agent._sessions[task_id] = agent.Session(task=asyncio.current_task(), writer=writer)
+        agent._sessions[task_id] = agent.Session(task=asyncio.current_task(), writer=writer, conversation_id="")
         token1 = agent._emit_writer.set(writer)
         token2 = agent._emit_session_id.set(task_id)
         try:
-            await agent.run_query("test", sdk_session_id, task_id, "/root")
+            await agent.run_query("test", sdk_session_id, task_id, "", "/root")
         finally:
             _restore_sdk_mock(old_mods)
             agent._emit_writer.reset(token1)

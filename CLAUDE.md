@@ -102,7 +102,7 @@ let guest_ip = find_vm_guest_ip_for_user(&state.vms, &vm_id, db_user.id)?
 
 ## Channel Sends
 
-Always wrap `mpsc::Sender::send` with `tokio::time::timeout`. A send with no timeout will block forever if the receiver is alive but not consuming — which can happen on an unstable network where the TCP connection appears open but the client is stalled. Use a three-arm match to distinguish the two failure modes:
+Always wrap `mpsc::Sender::send` with `tokio::time::timeout`. A send with no timeout will block forever if the receiver is alive but not consuming — which can happen on an unstable network where the TCP connection appears open but the client is stalled. Use a three-arm `match` because the two failure modes require different actions: a dropped receiver is a normal shutdown (`info`), a send timeout means the consumer is stuck (`error`). Chained `.context()?` collapses both into one error path and loses that distinction:
 
 ```rust
 // Good — distinguishes receiver-dropped from consumer-stuck
@@ -143,6 +143,111 @@ fn find_herd_relay_sender(state: &AppState, herd_id: &str) -> Option<mpsc::Sende
     state.herd_senders.lock().ok()?.get(herd_id).cloned()
 }
 ```
+
+## Async Operation Timeouts
+
+For one-shot async operations that return `Result`, wrap with `tokio::time::timeout` and chain two `.context()` calls: one for the timeout expiry, one for the operation failure. `timeout` wraps the inner `Result`, producing `Result<Result<T, E>, Elapsed>` — each `?` unwraps one layer.
+
+```rust
+// Good — two context calls, one per error layer
+let barn_channel = timeout(
+    Duration::from_secs(BARN_OP_TIMEOUT_SECS),
+    barn_handle.open_feed_session(),
+)
+.await
+.context("feed session open timed out")?
+.context("feed session open failed")?;
+
+// Good — with_context when the message needs runtime values
+timeout(
+    Duration::from_secs(BARN_OP_TIMEOUT_SECS),
+    barn_handle.relay_to_pasture(pasture_id),
+)
+.await
+.context("pasture relay timed out")?
+.with_context(|| format!("failed to relay to pasture {pasture_id}"))?;
+
+// Bad — single context loses the distinction between timeout and operation failure
+let barn_channel = timeout(
+    Duration::from_secs(BARN_OP_TIMEOUT_SECS),
+    barn_handle.open_feed_session(),
+)
+.await
+.context("feed session failed")?;  // was it a timeout or the open itself?
+
+// Bad — no timeout; hangs forever if the barn handle stalls
+let barn_channel = barn_handle.open_feed_session().await.context("feed session open failed")?;
+```
+
+For operations that must retry until success (e.g. waiting for a service to become reachable), extract the retry loop into its own function that loops forever, then wrap the call site in `timeout`. The loop itself has no timeout — the outer `timeout` at the call site bounds the total retry window.
+
+```rust
+// Good — loop retries forever; caller bounds total time with timeout
+async fn connect_barn_monitor(
+    barn_addr: SocketAddr,
+    barn_client: BarnMonitorClient,
+) -> Result<BarnMonitorHandle> {
+    let barn_handle = timeout(
+        Duration::from_secs(BARN_CONNECT_TIMEOUT_SECS),
+        connect_barn_monitor_handle(barn_addr, barn_client),
+    )
+    .await
+    .context("barn monitor connect timed out")?;
+    Ok(barn_handle)
+}
+
+async fn connect_barn_monitor_handle(
+    barn_addr: SocketAddr,
+    barn_client: BarnMonitorClient,
+) -> BarnMonitorHandle {
+    loop {
+        if let Ok(barn_handle) = connect(barn_addr, barn_client.clone()).await {
+            return barn_handle;
+        }
+        tokio::time::sleep(Duration::from_millis(500)).await;
+    }
+}
+
+// Bad — timeout inside the loop; each attempt gets a full timeout budget
+async fn connect_barn_monitor_handle(barn_addr: SocketAddr) -> Result<BarnMonitorHandle> {
+    loop {
+        if let Ok(barn_handle) = timeout(
+            Duration::from_secs(BARN_CONNECT_TIMEOUT_SECS),
+            connect(barn_addr, BarnMonitorClient::new()),
+        )
+        .await { return Ok(barn_handle); }
+        tokio::time::sleep(Duration::from_millis(500)).await;
+    }
+}
+```
+
+Use `match timeout(...)` only when the two failure arms require different handling — for example, logging at different levels or taking different actions. When both failures should simply propagate as errors, use chained `.context()?` instead.
+
+```rust
+// Good — match because timeout and operation failure need different actions
+match timeout(Duration::from_secs(BARN_OP_TIMEOUT_SECS), tx.send(feed_delivery)).await {
+    Ok(Ok(())) => {}
+    Ok(Err(_)) => {
+        info!("feed relay receiver dropped, ending round");  // normal shutdown
+        return;
+    }
+    Err(_) => {
+        error!("feed relay send timed out, consumer likely stuck");  // abnormal stall
+        return;
+    }
+}
+
+// Good — chained context because both failures just propagate
+let barn_channel = timeout(
+    Duration::from_secs(BARN_OP_TIMEOUT_SECS),
+    barn_handle.open_feed_session(),
+)
+.await
+.context("feed session open timed out")?
+.context("feed session open failed")?;
+```
+
+Define the timeout duration as a named const at the top of the file (e.g. `const BARN_OP_TIMEOUT_SECS: u64 = 30`).
 
 ## Code Conventions
 

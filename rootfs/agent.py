@@ -149,7 +149,7 @@ def handle_interrupt(msg: dict, writer: asyncio.StreamWriter) -> None:
     if not task_id:
         return
     session = _sessions.get(task_id)
-    if session and not session.task.done():
+    if session and not session.task.done() and session.writer is writer:
         log(f"interrupt received for session {task_id!r}, cancelling")
         session.task.cancel()
 
