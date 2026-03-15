@@ -2,8 +2,6 @@
 members = [
     "chat-settings",
     "server",
-    "sftp-client",
-    "ssh-client",
     "vm-lifecycle",
 ]
 resolver = "2"
