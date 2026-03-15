@@ -1,3 +1,7 @@
+# /// script
+# requires-python = ">=3.12"
+# dependencies = ["pytest"]
+# ///
 """Tests for agent.py — verifies every function produces SSE events in the
 format expected by the frontend (frontend/tests/helpers/setup.ts).
 
