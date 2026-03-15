@@ -8,7 +8,10 @@ use std::{
     net::Ipv4Addr,
     path::{Path, PathBuf},
     str::from_utf8,
-    sync::{Arc, Mutex},
+    sync::{
+        Arc, Mutex,
+        atomic::{AtomicBool, Ordering},
+    },
 };
 use tokio::{
     sync::mpsc,
@@ -20,6 +23,7 @@ use tracing::{debug, error, info};
 const HEARTBEAT_SECS: u64 = 60;
 const SEND_TIMEOUT_SECS: u64 = 30;
 const AGENT_SOCKET_WAIT_SECS: u64 = 60;
+const RELAY_READY_EVENT: &[u8] = b"event: relay_ready\ndata: {}\n\n";
 
 pub enum AgentMessage {
     Query {
@@ -50,6 +54,7 @@ pub enum AgentMessage {
 pub struct VmRelayHandle {
     inbound_tx: mpsc::Sender<AgentMessage>,
     sse_output: Arc<Mutex<Option<mpsc::Sender<Bytes>>>>,
+    relay_connected: Arc<AtomicBool>,
 }
 
 impl VmRelayHandle {
@@ -58,8 +63,16 @@ impl VmRelayHandle {
     }
 
     pub fn register_sse_subscriber(&self) -> impl Stream<Item = Bytes> + use<> {
-        let (tx, rx) = mpsc::channel::<Bytes>(1);
-        *self.sse_output.lock().unwrap() = Some(tx);
+        // Use capacity 2: one slot for relay_ready (if already connected) and one for the
+        // first real event, preventing a brief block at connection time.
+        let (tx, rx) = mpsc::channel::<Bytes>(2);
+        {
+            let mut output = self.sse_output.lock().unwrap();
+            if self.relay_connected.load(Ordering::Acquire) {
+                let _ = tx.try_send(Bytes::from_static(RELAY_READY_EVENT));
+            }
+            *output = Some(tx);
+        }
         ReceiverStream::new(rx)
     }
 
@@ -76,14 +89,16 @@ pub fn start_vm_relay(
 ) -> VmRelayHandle {
     let (inbound_tx, inbound_rx) = mpsc::channel::<AgentMessage>(4);
     let sse_output: Arc<Mutex<Option<mpsc::Sender<Bytes>>>> = Arc::new(Mutex::new(None));
+    let relay_connected: Arc<AtomicBool> = Arc::new(AtomicBool::new(false));
     let ssh_key_path = ssh_key_path.to_owned();
     let ssh_user = ssh_user.to_owned();
     let vm_host_key_path = vm_host_key_path.to_owned();
     let relay_sse_output = sse_output.clone();
+    let relay_relay_connected = relay_connected.clone();
     tokio::spawn(async move {
-        run_agent_relay(guest_ip, ssh_key_path, ssh_user, vm_host_key_path, inbound_rx, relay_sse_output).await
+        run_agent_relay(guest_ip, ssh_key_path, ssh_user, vm_host_key_path, inbound_rx, relay_sse_output, relay_relay_connected).await
     });
-    VmRelayHandle { inbound_tx, sse_output }
+    VmRelayHandle { inbound_tx, sse_output, relay_connected }
 }
 
 fn take_live_sse_sender(sse_output: &Mutex<Option<mpsc::Sender<Bytes>>>) -> Option<mpsc::Sender<Bytes>> {
@@ -103,6 +118,7 @@ async fn run_agent_relay(
     vm_host_key_path: PathBuf,
     inbound: mpsc::Receiver<AgentMessage>,
     sse_output: Arc<Mutex<Option<mpsc::Sender<Bytes>>>>,
+    relay_connected: Arc<AtomicBool>,
 ) {
     let heartbeat_sse_output = sse_output.clone();
     let heartbeat_task = tokio::spawn(async move {
@@ -129,30 +145,68 @@ async fn run_agent_relay(
             }
         }
     });
-    let relay_result = connect_agent_relay(
+    let connect_result = connect_ssh_and_open_channel(
         guest_ip,
-        ssh_key_path,
-        ssh_user,
-        vm_host_key_path,
-        inbound,
-        sse_output.clone(),
+        &ssh_key_path,
+        &ssh_user,
+        &vm_host_key_path,
     )
     .await;
     heartbeat_task.abort();
-    if let Err(e) = relay_result {
-        let error_payload = serde_json::json!({ "message": e.to_string() });
-        let error_event = format!(
-            "event: error_event\ndata: {}\n\n",
-            serde_json::to_string(&error_payload).unwrap_or_default()
-        );
-        if let Some(tx) = take_live_sse_sender(&sse_output) {
-            let _ = timeout(
-                Duration::from_secs(SEND_TIMEOUT_SECS),
-                tx.send(Bytes::from(error_event)),
-            )
-            .await;
+    match connect_result {
+        Err(e) => {
+            send_sse_error(&sse_output, e).await;
+        }
+        Ok((ssh_handle, ssh_channel)) => {
+            relay_connected.store(true, Ordering::Release);
+            if let Some(tx) = take_live_sse_sender(&sse_output) {
+                match timeout(
+                    Duration::from_secs(SEND_TIMEOUT_SECS),
+                    tx.send(Bytes::from_static(RELAY_READY_EVENT)),
+                )
+                .await
+                {
+                    Ok(Ok(())) => {}
+                    Ok(Err(_)) => {
+                        info!("sse receiver dropped before relay_ready");
+                    }
+                    Err(_) => {
+                        error!("relay_ready send timed out");
+                    }
+                }
+            }
+            if let Err(e) = run_relay(ssh_handle, ssh_channel, inbound, sse_output.clone()).await {
+                send_sse_error(&sse_output, e).await;
+            }
         }
     }
+}
+
+async fn send_sse_error(sse_output: &Mutex<Option<mpsc::Sender<Bytes>>>, e: anyhow::Error) {
+    let error_payload = serde_json::json!({ "message": e.to_string() });
+    let error_event = format!(
+        "event: error_event\ndata: {}\n\n",
+        serde_json::to_string(&error_payload).unwrap_or_default()
+    );
+    if let Some(tx) = take_live_sse_sender(sse_output) {
+        let _ = timeout(
+            Duration::from_secs(SEND_TIMEOUT_SECS),
+            tx.send(Bytes::from(error_event)),
+        )
+        .await;
+    }
+}
+
+async fn connect_ssh_and_open_channel(
+    guest_ip: Ipv4Addr,
+    ssh_key_path: &Path,
+    ssh_user: &str,
+    vm_host_key_path: &Path,
+) -> Result<(client::Handle<SshClient>, Channel<client::Msg>)> {
+    let ssh_handle = connect_ssh(guest_ip, ssh_key_path, ssh_user, vm_host_key_path).await?;
+    info!("agent ssh connected");
+    let ssh_channel = open_agent_channel(&ssh_handle).await?;
+    Ok((ssh_handle, ssh_channel))
 }
 
 async fn open_agent_channel(ssh_handle: &client::Handle<SshClient>) -> Result<Channel<client::Msg>> {
@@ -170,20 +224,6 @@ async fn open_agent_channel(ssh_handle: &client::Handle<SshClient>) -> Result<Ch
             Err(e) => return Err(e).context("timed out waiting for agent socket"),
         }
     }
-}
-
-async fn connect_agent_relay(
-    guest_ip: Ipv4Addr,
-    ssh_key_path: PathBuf,
-    ssh_user: String,
-    vm_host_key_path: PathBuf,
-    inbound: mpsc::Receiver<AgentMessage>,
-    sse_output: Arc<Mutex<Option<mpsc::Sender<Bytes>>>>,
-) -> Result<()> {
-    let ssh_handle = connect_ssh(guest_ip, &ssh_key_path, &ssh_user, &vm_host_key_path).await?;
-    info!("agent ssh connected");
-    let ssh_channel = open_agent_channel(&ssh_handle).await?;
-    run_relay(ssh_handle, ssh_channel, inbound, sse_output).await
 }
 
 async fn run_relay(

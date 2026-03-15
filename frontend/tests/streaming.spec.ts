@@ -6,6 +6,7 @@
  * UF-10  Ask user question       — panel shown; selecting an option and submitting works
  * UF-11  Stop sends task_id      — stop request body includes task_id from session_start
  * UF-12  Answer sends task_id    — answer request body includes task_id from ask_user_question
+ * UF-59  multiSelect question    — "Select all that apply" shown; multiple selections joined with ", "
  */
 import { test, expect } from "@playwright/test";
 import { setupApp, sendMessage, sse } from "./helpers/setup";
@@ -166,5 +167,47 @@ test.describe("streaming", () => {
     };
     expect(answerBody.task_id).toBe("client-sess-test");
     expect(answerBody.request_id).toBe("req-2");
+  });
+
+  test("UF-59 multiSelect question shows hint and joins multiple selections with comma", async ({
+    page,
+  }) => {
+    const ctrl = await setupApp(page, { sessions: [] });
+
+    await sendMessage(page, "Help me pick");
+    ctrl.sendSseEvents(
+      sse.question("req-59", [
+        {
+          question: "Which features do you want?",
+          header: "Features",
+          multiSelect: true,
+          options: [
+            { label: "Dark mode", description: "Switch to dark theme" },
+            { label: "Notifications", description: "Enable alerts" },
+            { label: "Analytics", description: "Usage tracking" },
+          ],
+        },
+      ]),
+    );
+
+    await expect(page.getByText("Claude needs your input")).toBeVisible();
+    await expect(page.getByText("Which features do you want?")).toBeVisible();
+    // multiSelect hint text
+    await expect(page.getByText("Select all that apply")).toBeVisible();
+
+    // Click two options — both should be selectable (multiSelect toggles, not replaces)
+    await page.getByRole("button", { name: "Dark mode" }).click();
+    await page.getByRole("button", { name: "Notifications" }).click();
+
+    const [answerReq] = await Promise.all([
+      page.waitForRequest((r) => r.url().includes("chat-question-answer") && r.method() === "POST"),
+      page.getByRole("button", { name: "Submit" }).click(),
+    ]);
+
+    const answerBody = JSON.parse(answerReq.postData() ?? "{}") as {
+      answers: Record<string, string>;
+    };
+    // Both selected options are joined with ", " by buildAnswers()
+    expect(answerBody.answers["Which features do you want?"]).toBe("Dark mode, Notifications");
   });
 });

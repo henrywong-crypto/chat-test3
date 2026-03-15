@@ -3,6 +3,8 @@
  * RC-02  Question panel restored after reconnect
  * RC-03  Done event after reconnect clears running state
  * RC-04  Messages restored from localStorage on reconnect
+ * RC-05  Corrupt running-task localStorage ignored — no chat-hello sent, app loads normally
+ * RC-06  Corrupt messages localStorage ignored — reconnect fires but no messages restored
  *
  * These tests use page.addInitScript to pre-set localStorage before the app
  * loads, simulating a previous session that was interrupted. The first SSE
@@ -111,5 +113,61 @@ test.describe("reconnect", () => {
 
     // Prior messages should be visible (restored from localStorage before SSE events arrive)
     await expect(page.getByText("Prior response")).toBeVisible();
+  });
+
+  test("RC-05 corrupt running-task localStorage is cleared silently, no chat-hello sent", async ({
+    page,
+  }) => {
+    await page.addInitScript((vmId) => {
+      localStorage.setItem(`chat_running_task_${vmId}`, "not valid json {{{");
+    }, VM_ID);
+
+    let helloCalled = false;
+    await page.route(`**/sessions/${VM_ID}/chat-hello`, async (route) => {
+      helloCalled = true;
+      await route.fulfill({ status: 200, body: "" });
+    });
+
+    const ctrl = await setupApp(page, { sessions: [] });
+
+    // Trigger onopen — the corrupt JSON should be caught, localStorage cleared, no hello sent
+    ctrl.sendSseEvents([]);
+
+    // Wait for onopen to run and clear the corrupt entry
+    await page.waitForFunction(
+      (vmId) => localStorage.getItem(`chat_running_task_${vmId}`) === null,
+      VM_ID,
+    );
+
+    expect(helloCalled).toBe(false);
+    // Composer still accessible — app has not crashed
+    await expect(page.locator('textarea[placeholder="Message Claude…"]')).toBeVisible();
+  });
+
+  test("RC-06 corrupt messages localStorage is ignored, reconnect fires without restoring messages", async ({
+    page,
+  }) => {
+    await page.addInitScript(
+      (args) => {
+        const { vmId, taskId } = args;
+        localStorage.setItem(
+          `chat_running_task_${vmId}`,
+          JSON.stringify({ task_id: taskId, running_session_id: null }),
+        );
+        // Store invalid JSON for the messages key
+        localStorage.setItem(`chat_messages_task_${taskId}`, "[[broken json");
+      },
+      { vmId: VM_ID, taskId: "task-rc06" },
+    );
+
+    const ctrl = await setupApp(page, { sessions: [] });
+
+    // done event clears the running state; if messages parse had crashed the app this would hang
+    ctrl.sendSseEvents([{ event: "done", data: { session_id: null, task_id: "task-rc06" } }]);
+
+    // No prior messages restored (parse failed silently)
+    await expect(page.getByText("Prior response")).not.toBeVisible();
+    // App still functional
+    await expect(page.locator('textarea[placeholder="Message Claude…"]')).toBeVisible();
   });
 });

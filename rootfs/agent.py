@@ -40,7 +40,7 @@ def resolve_work_dir(raw: str | None) -> str:
         if real == root or real.startswith(root + os.sep):
             if os.path.isdir(real):
                 return real
-    log(f"work_dir {raw!r} outside allowed roots, using fallback")
+    log("work_dir outside allowed roots, using fallback")
     return fallback
 
 
@@ -186,7 +186,7 @@ async def route_connection(
         try:
             msg = json.loads(line)
         except json.JSONDecodeError:
-            log(f"failed to parse line: {line[:120]}")
+            log("failed to parse line: invalid JSON")
             continue
         msg_type = msg.get("type")
         if msg_type == "hello":

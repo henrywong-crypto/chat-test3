@@ -1,5 +1,4 @@
 import React, { createContext, useCallback, useContext, useEffect, useRef, useState } from "react";
-import { flushSync } from "react-dom";
 import type { ChatSession, FileEntry, SseEvent, TranscriptMessage } from "../types";
 
 interface SseContextValue {
@@ -8,8 +7,10 @@ interface SseContextValue {
   uploadDir: string;
   uploadAction: string;
   hasUserRootfs: boolean;
-  latestEvent: SseEvent | null;
+  eventQueueRef: React.MutableRefObject<SseEvent[]>;
+  eventSeq: number;
   isConnected: boolean;
+  isVmReady: boolean;
   sendQuery: (content: string, sessionId: string | null, workDir?: string) => Promise<string>;
   sendStop: (taskId: string) => Promise<void>;
   answerQuestion: (taskId: string, requestId: string, answers: Record<string, string>) => Promise<void>;
@@ -55,8 +56,21 @@ export function SseProvider({ children }: { children: React.ReactNode }) {
     }
   }, []);
 
-  const [latestEvent, setLatestEvent] = useState<SseEvent | null>(null);
+  // Events are queued in a ref so none are lost when React batches renders.
+  // eventSeq is a plain counter that increments each time an event is enqueued,
+  // signalling useSseHandlers to drain the queue. React 18 auto-batches the
+  // setState calls from the EventSource listeners, so multiple rapid events
+  // are processed together without flushSync.
+  const eventQueueRef = useRef<SseEvent[]>([]);
+  const [eventSeq, setEventSeq] = useState(0);
+
+  const pushEvent = useCallback((event: SseEvent) => {
+    eventQueueRef.current.push(event);
+    setEventSeq((s) => s + 1);
+  }, []);
+
   const [isConnected, setIsConnected] = useState(false);
+  const [isVmReady, setIsVmReady] = useState(false);
   const esRef = useRef<EventSource | null>(null);
 
   useEffect(() => {
@@ -76,16 +90,14 @@ export function SseProvider({ children }: { children: React.ReactNode }) {
               headers: { "Content-Type": "application/json" },
               body: JSON.stringify({ task_id: parsed.task_id, csrf_token: csrfTokenRef.current }),
             }).catch(console.error);
-            flushSync(() =>
-              setLatestEvent({
-                type: "reconnecting",
-                payload: {
-                  task_id: parsed.task_id!,
-                  running_session_id: parsed.running_session_id ?? null,
-                  project_dir: parsed.project_dir ?? null,
-                },
-              })
-            );
+            pushEvent({
+              type: "reconnecting",
+              payload: {
+                task_id: parsed.task_id!,
+                running_session_id: parsed.running_session_id ?? null,
+                project_dir: parsed.project_dir ?? null,
+              },
+            });
           } else {
             localStorage.removeItem(storageKey);
           }
@@ -96,6 +108,7 @@ export function SseProvider({ children }: { children: React.ReactNode }) {
     };
 
     es.onerror = () => {
+      setIsVmReady(false);
       if (es.readyState === EventSource.CLOSED) {
         setIsConnected(false);
         esRef.current = null;
@@ -106,48 +119,53 @@ export function SseProvider({ children }: { children: React.ReactNode }) {
       es.addEventListener(eventType, handler as EventListener);
     };
 
+    addListener("relay_ready", () => {
+      setIsVmReady(true);
+    });
+
     addListener("session_start", (e) => {
-      flushSync(() => setLatestEvent({ type: "session_start", payload: JSON.parse(e.data) }));
+      pushEvent({ type: "session_start", payload: JSON.parse(e.data) });
     });
 
     addListener("init", () => {
-      flushSync(() => setLatestEvent({ type: "init" }));
+      pushEvent({ type: "init" });
     });
 
     addListener("text_delta", (e) => {
-      flushSync(() => setLatestEvent({ type: "text_delta", payload: JSON.parse(e.data) }));
+      pushEvent({ type: "text_delta", payload: JSON.parse(e.data) });
     });
 
     addListener("thinking_delta", (e) => {
-      flushSync(() => setLatestEvent({ type: "thinking_delta", payload: JSON.parse(e.data) }));
+      pushEvent({ type: "thinking_delta", payload: JSON.parse(e.data) });
     });
 
     addListener("tool_start", (e) => {
-      flushSync(() => setLatestEvent({ type: "tool_start", payload: JSON.parse(e.data) }));
+      pushEvent({ type: "tool_start", payload: JSON.parse(e.data) });
     });
 
     addListener("ask_user_question", (e) => {
-      flushSync(() => setLatestEvent({ type: "ask_user_question", payload: JSON.parse(e.data) }));
+      pushEvent({ type: "ask_user_question", payload: JSON.parse(e.data) });
     });
 
     addListener("tool_result", (e) => {
-      flushSync(() => setLatestEvent({ type: "tool_result", payload: JSON.parse(e.data) }));
+      pushEvent({ type: "tool_result", payload: JSON.parse(e.data) });
     });
 
     addListener("done", (e) => {
       localStorage.removeItem(`chat_running_task_${vmId}`);
-      flushSync(() => setLatestEvent({ type: "done", payload: JSON.parse(e.data) }));
+      pushEvent({ type: "done", payload: JSON.parse(e.data) });
     });
 
     addListener("error_event", (e) => {
       localStorage.removeItem(`chat_running_task_${vmId}`);
-      flushSync(() => setLatestEvent({ type: "error_event", payload: JSON.parse(e.data) }));
+      pushEvent({ type: "error_event", payload: JSON.parse(e.data) });
     });
 
     return () => {
       es.close();
+      setIsVmReady(false);
     };
-  }, [vmId]);
+  }, [vmId, pushEvent]);
 
   const post = useCallback(async (path: string, body: Record<string, unknown>) => {
     const res = await fetch(path, {
@@ -227,8 +245,10 @@ export function SseProvider({ children }: { children: React.ReactNode }) {
       uploadDir,
       uploadAction,
       hasUserRootfs,
-      latestEvent,
+      eventQueueRef,
+      eventSeq,
       isConnected,
+      isVmReady,
       sendQuery,
       sendStop,
       answerQuestion,

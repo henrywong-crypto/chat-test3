@@ -1,10 +1,11 @@
-import { useEffect, useRef } from "react";
+import { useEffect, useRef, type MutableRefObject } from "react";
 import type { ChatMessage, ChatSession, SseEvent, TranscriptMessage } from "../types";
 import type { ChatStateResult } from "./useChatState";
 import { buildMessagesFromTranscript } from "../utils/transcript";
 
 interface SseHandlerDeps {
-  latestEvent: SseEvent | null;
+  eventQueueRef: MutableRefObject<SseEvent[]>;
+  eventSeq: number;
   loadHistory: () => Promise<import("../types").ChatSession[]>;
   loadTranscript: (sessionId: string, projectDir: string, signal?: AbortSignal) => Promise<TranscriptMessage[]>;
   newChatKeyRef: { current: number };
@@ -17,7 +18,7 @@ export function useSseHandlers(
   sseState: SseHandlerDeps,
   chatState: ChatStateResult & { setSessions: (s: import("../types").ChatSession[]) => void },
 ) {
-  const { latestEvent, loadHistory, loadTranscript, newChatKeyRef, sessionStartKeyRef, sessions, vmId } = sseState;
+  const { eventQueueRef, eventSeq, loadHistory, loadTranscript, newChatKeyRef, sessionStartKeyRef, sessions, vmId } = sseState;
   const {
     viewSessionId,
     runningSessionId,
@@ -60,225 +61,236 @@ export function useSseHandlers(
   const assistantMsgId = useRef<string | null>(null);
 
   useEffect(() => {
-    if (!latestEvent) return;
-    const event = latestEvent as SseEvent;
-    const session = runningRef.current;
+    // Drain all queued events in one effect run. React 18 auto-batches the
+    // setState(seq+1) calls from SSE listeners so multiple rapid events are
+    // processed together here without flushSync.
+    const events = eventQueueRef.current.splice(0);
+    for (const event of events) {
+      handleEvent(event);
+    }
 
-    // Seal the active thinking message. If it accumulated no content (no
-    // thinking_delta arrived), remove it entirely so the animated dots don't
-    // linger after the response starts arriving.
-    const sealThinking = () => {
-      if (!thinkingMsgId.current) return;
-      const msgId = thinkingMsgId.current;
-      thinkingMsgId.current = null;
-      const msgs = getMessages(session);
-      const thinkMsg = msgs.find((m) => m.id === msgId);
-      if (thinkMsg && !thinkMsg.content) {
-        removeMessage(session, msgId);
-      }
-    };
+    function handleEvent(event: SseEvent) {
+      const session = runningRef.current;
 
-    switch (event.type) {
-      case "session_start": {
-        const { task_id } = event.payload;
-        currentTaskIdRef.current = task_id;
-        setTaskId(session, task_id);
-        const project_dir = sessions.find((s) => s.session_id === session)?.project_dir ?? null;
-        localStorage.setItem(
-          `chat_running_task_${vmId}`,
-          JSON.stringify({ task_id, running_session_id: session, project_dir }),
-        );
-        break;
-      }
-
-      case "init": {
-        // Push a thinking indicator as an assistant message
-        const id = generateId();
-        thinkingMsgId.current = id;
-        assistantMsgId.current = null;
-        addMessage(session, {
-          id,
-          type: "assistant",
-          content: "",
-          timestamp: Date.now(),
-          isThinking: true,
-        });
-        if (currentTaskIdRef.current) {
-          localStorage.setItem(`chat_messages_task_${currentTaskIdRef.current}`, JSON.stringify(getMessages(session)));
+      // Seal the active thinking message. If it accumulated no content (no
+      // thinking_delta arrived), remove it entirely so the animated dots don't
+      // linger after the response starts arriving.
+      const sealThinking = () => {
+        if (!thinkingMsgId.current) return;
+        const msgId = thinkingMsgId.current;
+        thinkingMsgId.current = null;
+        const msgs = getMessages(session);
+        const thinkMsg = msgs.find((m) => m.id === msgId);
+        if (thinkMsg && !thinkMsg.content) {
+          removeMessage(session, msgId);
         }
-        break;
-      }
+      };
 
-      case "thinking_delta": {
-        const { thinking } = event.payload;
-        if (thinkingMsgId.current) {
-          updateMessageById(session, thinkingMsgId.current, (m) => ({
-            ...m,
-            content: m.content + thinking,
-          }));
-          if (currentTaskIdRef.current) {
-            localStorage.setItem(`chat_messages_task_${currentTaskIdRef.current}`, JSON.stringify(getMessages(session)));
-          }
+      switch (event.type) {
+        case "relay_ready":
+          break;
+
+        case "session_start": {
+          const { task_id } = event.payload;
+          currentTaskIdRef.current = task_id;
+          setTaskId(session, task_id);
+          const project_dir = sessions.find((s) => s.session_id === session)?.project_dir ?? null;
+          localStorage.setItem(
+            `chat_running_task_${vmId}`,
+            JSON.stringify({ task_id, running_session_id: session, project_dir }),
+          );
+          break;
         }
-        break;
-      }
 
-      case "text_delta": {
-        const { text } = event.payload;
-        sealThinking();
-        if (!assistantMsgId.current) {
+        case "init": {
+          // Push a thinking indicator as an assistant message
           const id = generateId();
-          assistantMsgId.current = id;
+          thinkingMsgId.current = id;
+          assistantMsgId.current = null;
           addMessage(session, {
             id,
             type: "assistant",
-            content: text,
+            content: "",
             timestamp: Date.now(),
+            isThinking: true,
           });
-        } else {
-          updateMessageById(session, assistantMsgId.current, (m) => ({
-            ...m,
-            content: m.content + text,
-          }));
-        }
-        if (currentTaskIdRef.current) {
-          localStorage.setItem(`chat_messages_task_${currentTaskIdRef.current}`, JSON.stringify(getMessages(session)));
-        }
-        break;
-      }
-
-      case "tool_start": {
-        const { id: toolId, name, input } = event.payload;
-        sealThinking();
-        assistantMsgId.current = null;
-        if (name === "AskUserQuestion") break;
-        const msgId = generateId();
-        toolIdToMsgId.current.set(toolId, msgId);
-        addMessage(session, {
-          id: msgId,
-          type: "tool",
-          content: "",
-          timestamp: Date.now(),
-          isToolUse: true,
-          toolId,
-          toolName: name,
-          toolInput: input,
-        });
-        if (currentTaskIdRef.current) {
-          localStorage.setItem(`chat_messages_task_${currentTaskIdRef.current}`, JSON.stringify(getMessages(session)));
-        }
-        break;
-      }
-
-      case "tool_result": {
-        const { tool_use_id, content, is_error } = event.payload;
-        const msgId = toolIdToMsgId.current.get(tool_use_id);
-        if (msgId) {
-          updateMessageById(session, msgId, (m) => ({
-            ...m,
-            toolResult: { content, isError: is_error },
-          }));
           if (currentTaskIdRef.current) {
             localStorage.setItem(`chat_messages_task_${currentTaskIdRef.current}`, JSON.stringify(getMessages(session)));
           }
+          break;
         }
-        break;
-      }
 
-      case "ask_user_question": {
-        const { request_id, task_id, questions } = event.payload;
-        sealThinking();
-        assistantMsgId.current = null;
-        setSessionPendingQuestion(session, { requestId: request_id, taskId: task_id, questions });
-        break;
-      }
+        case "thinking_delta": {
+          const { thinking } = event.payload;
+          if (thinkingMsgId.current) {
+            updateMessageById(session, thinkingMsgId.current, (m) => ({
+              ...m,
+              content: m.content + thinking,
+            }));
+            if (currentTaskIdRef.current) {
+              localStorage.setItem(`chat_messages_task_${currentTaskIdRef.current}`, JSON.stringify(getMessages(session)));
+            }
+          }
+          break;
+        }
 
-      case "done": {
-        const { session_id, task_id } = event.payload;
-        const completedSession = runningRef.current;
-        localStorage.removeItem(`chat_messages_task_${task_id}`);
-        currentTaskIdRef.current = null;
-        setRunningSessionId(null);
-        setIsStreaming(false);
-        setNullOrphaned(false);
-        setSessionPendingQuestion(completedSession, null);
-        sealThinking();
-        assistantMsgId.current = null;
-        toolIdToMsgId.current.clear();
+        case "text_delta": {
+          const { text } = event.payload;
+          sealThinking();
+          if (!assistantMsgId.current) {
+            const id = generateId();
+            assistantMsgId.current = id;
+            addMessage(session, {
+              id,
+              type: "assistant",
+              content: text,
+              timestamp: Date.now(),
+            });
+          } else {
+            updateMessageById(session, assistantMsgId.current, (m) => ({
+              ...m,
+              content: m.content + text,
+            }));
+          }
+          if (currentTaskIdRef.current) {
+            localStorage.setItem(`chat_messages_task_${currentTaskIdRef.current}`, JSON.stringify(getMessages(session)));
+          }
+          break;
+        }
 
-        if (session_id && completedSession === viewRef.current) {
-          const newChatKeyUnchanged = completedSession !== null || sessionStartKeyRef.current === newChatKeyRef.current;
-          if (newChatKeyUnchanged) {
-            const msgs = getMessages(completedSession);
-            setMessages(session_id, msgs);
-            if (completedSession === null) {
+        case "tool_start": {
+          const { id: toolId, name, input } = event.payload;
+          sealThinking();
+          assistantMsgId.current = null;
+          if (name === "AskUserQuestion") break;
+          const msgId = generateId();
+          toolIdToMsgId.current.set(toolId, msgId);
+          addMessage(session, {
+            id: msgId,
+            type: "tool",
+            content: "",
+            timestamp: Date.now(),
+            isToolUse: true,
+            toolId,
+            toolName: name,
+            toolInput: input,
+          });
+          if (currentTaskIdRef.current) {
+            localStorage.setItem(`chat_messages_task_${currentTaskIdRef.current}`, JSON.stringify(getMessages(session)));
+          }
+          break;
+        }
+
+        case "tool_result": {
+          const { tool_use_id, content, is_error } = event.payload;
+          const msgId = toolIdToMsgId.current.get(tool_use_id);
+          if (msgId) {
+            updateMessageById(session, msgId, (m) => ({
+              ...m,
+              toolResult: { content, isError: is_error },
+            }));
+            if (currentTaskIdRef.current) {
+              localStorage.setItem(`chat_messages_task_${currentTaskIdRef.current}`, JSON.stringify(getMessages(session)));
+            }
+          }
+          break;
+        }
+
+        case "ask_user_question": {
+          const { request_id, task_id, questions } = event.payload;
+          sealThinking();
+          assistantMsgId.current = null;
+          setSessionPendingQuestion(session, { requestId: request_id, taskId: task_id, questions });
+          break;
+        }
+
+        case "done": {
+          const { session_id, task_id } = event.payload;
+          const completedSession = runningRef.current;
+          localStorage.removeItem(`chat_messages_task_${task_id}`);
+          currentTaskIdRef.current = null;
+          setRunningSessionId(null);
+          setIsStreaming(false);
+          setNullOrphaned(false);
+          setSessionPendingQuestion(completedSession, null);
+          sealThinking();
+          assistantMsgId.current = null;
+          toolIdToMsgId.current.clear();
+
+          if (session_id && completedSession === viewRef.current) {
+            const newChatKeyUnchanged = completedSession !== null || sessionStartKeyRef.current === newChatKeyRef.current;
+            if (newChatKeyUnchanged) {
+              const msgs = getMessages(completedSession);
+              setMessages(session_id, msgs);
+              if (completedSession === null) {
+                setMessages(null, []);
+              }
+              setViewSessionId(session_id);
+            } else if (completedSession === null) {
+              // New Chat was clicked after this session started — discard stale messages
               setMessages(null, []);
             }
-            setViewSessionId(session_id);
-          } else if (completedSession === null) {
-            // New Chat was clicked after this session started — discard stale messages
-            setMessages(null, []);
           }
+
+          loadHistory().then(setSessions).catch(console.error);
+          break;
         }
 
-        loadHistory().then(setSessions).catch(console.error);
-        break;
-      }
-
-      case "error_event": {
-        const { message } = event.payload;
-        const wasOrphaned = nullOrphanedRef.current;
-        if (currentTaskIdRef.current) {
-          localStorage.removeItem(`chat_messages_task_${currentTaskIdRef.current}`);
-          currentTaskIdRef.current = null;
-        }
-        setRunningSessionId(null);
-        setIsStreaming(false);
-        setNullOrphaned(false);
-        setSessionPendingQuestion(session, null);
-        thinkingMsgId.current = null;
-        assistantMsgId.current = null;
-        toolIdToMsgId.current.clear();
-        if (wasOrphaned) {
-          setMessages(session, []);
-        } else {
-          addMessage(session, {
-            id: generateId(),
-            type: "error",
-            content: message,
-            timestamp: Date.now(),
-          });
-        }
-        break;
-      }
-
-      case "reconnecting": {
-        const { task_id, running_session_id, project_dir } = event.payload;
-        currentTaskIdRef.current = task_id;
-        setTaskId(running_session_id, task_id);
-        setRunningSessionId(running_session_id);
-        setIsStreaming(true);
-        setViewSessionId(running_session_id);
-        let inProgressMessages: ChatMessage[] = [];
-        const savedMessages = localStorage.getItem(`chat_messages_task_${task_id}`);
-        if (savedMessages) {
-          try {
-            inProgressMessages = JSON.parse(savedMessages) as ChatMessage[];
-            setMessages(running_session_id, inProgressMessages);
-          } catch {
-            // ignore parse errors
+        case "error_event": {
+          const { message } = event.payload;
+          const wasOrphaned = nullOrphanedRef.current;
+          if (currentTaskIdRef.current) {
+            localStorage.removeItem(`chat_messages_task_${currentTaskIdRef.current}`);
+            currentTaskIdRef.current = null;
           }
+          setRunningSessionId(null);
+          setIsStreaming(false);
+          setNullOrphaned(false);
+          setSessionPendingQuestion(session, null);
+          thinkingMsgId.current = null;
+          assistantMsgId.current = null;
+          toolIdToMsgId.current.clear();
+          if (wasOrphaned) {
+            setMessages(session, []);
+          } else {
+            addMessage(session, {
+              id: generateId(),
+              type: "error",
+              content: message,
+              timestamp: Date.now(),
+            });
+          }
+          break;
         }
-        if (running_session_id && project_dir) {
-          loadTranscript(running_session_id, project_dir).then((transcript) => {
-            const historical = buildMessagesFromTranscript(transcript);
-            if (historical.length > 0) {
-              setMessages(running_session_id, [...historical, ...inProgressMessages]);
+
+        case "reconnecting": {
+          const { task_id, running_session_id, project_dir } = event.payload;
+          currentTaskIdRef.current = task_id;
+          setTaskId(running_session_id, task_id);
+          setRunningSessionId(running_session_id);
+          setIsStreaming(true);
+          setViewSessionId(running_session_id);
+          let inProgressMessages: ChatMessage[] = [];
+          const savedMessages = localStorage.getItem(`chat_messages_task_${task_id}`);
+          if (savedMessages) {
+            try {
+              inProgressMessages = JSON.parse(savedMessages) as ChatMessage[];
+              setMessages(running_session_id, inProgressMessages);
+            } catch {
+              // ignore parse errors
             }
-          }).catch(console.error);
+          }
+          if (running_session_id && project_dir) {
+            loadTranscript(running_session_id, project_dir).then((transcript) => {
+              const historical = buildMessagesFromTranscript(transcript);
+              if (historical.length > 0) {
+                setMessages(running_session_id, [...historical, ...inProgressMessages]);
+              }
+            }).catch(console.error);
+          }
+          break;
         }
-        break;
       }
     }
-  }, [latestEvent]); // eslint-disable-line react-hooks/exhaustive-deps
+  }, [eventSeq]); // eslint-disable-line react-hooks/exhaustive-deps
 }

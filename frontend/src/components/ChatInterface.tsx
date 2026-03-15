@@ -49,7 +49,7 @@ export default function ChatInterface({ sessions, setSessions, selectedSession, 
 
   // Wire SSE events to chat state
   useSseHandlers(
-    { latestEvent: sseCtx.latestEvent, loadHistory, loadTranscript, newChatKeyRef, sessionStartKeyRef, sessions, vmId: sseCtx.vmId },
+    { eventQueueRef: sseCtx.eventQueueRef, eventSeq: sseCtx.eventSeq, loadHistory, loadTranscript, newChatKeyRef, sessionStartKeyRef, sessions, vmId: sseCtx.vmId },
     { ...chatState, setSessions },
   );
 
@@ -180,6 +180,7 @@ export default function ChatInterface({ sessions, setSessions, selectedSession, 
         <ChatComposer
           isLoading={isCurrentRunning}
           isOtherRunning={isOtherRunning}
+          isVmReady={sseCtx.isVmReady}
           onSend={handleSend}
           onStop={handleStop}
           focusKey={composerFocusKey}

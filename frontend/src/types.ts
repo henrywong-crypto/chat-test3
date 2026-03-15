@@ -106,6 +106,7 @@ export interface SseReconnecting {
 }
 
 export type SseEvent =
+  | { type: "relay_ready" }
   | { type: "session_start"; payload: SseSessionStart }
   | { type: "init" }
   | { type: "text_delta"; payload: SseTextDelta }

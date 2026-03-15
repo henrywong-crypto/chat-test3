@@ -206,6 +206,10 @@ export interface SetupOpts {
   settingsSaveError?: boolean;
   /** When true, data-has-user-rootfs is set to "true" so the reset button is rendered. */
   hasUserRootfs?: boolean;
+  /** When set, POST /chat returns 503 with this text instead of the normal 200 response. */
+  chatError?: string;
+  /** When set, POST /chat-question-answer returns 500 with this text instead of the normal 200 response. */
+  answerError?: string;
 }
 
 export async function setupApp(
@@ -332,6 +336,10 @@ export async function setupApp(
 
   // ── Question answer endpoint ──────────────────────────────────────────────
   await page.route(`**/sessions/${VM_ID}/chat-question-answer`, async (route) => {
+    if (opts.answerError) {
+      await route.fulfill({ status: 500, body: opts.answerError });
+      return;
+    }
     const raw = route.request().postData();
     lastAnswer = raw
       ? (JSON.parse(raw) as { task_id: string; request_id: string; answers: Record<string, string> })
@@ -360,6 +368,10 @@ export async function setupApp(
 
   // ── Chat message endpoint ─────────────────────────────────────────────────
   await page.route(`**/sessions/${VM_ID}/chat`, async (route) => {
+    if (opts.chatError) {
+      await route.fulfill({ status: 503, body: opts.chatError });
+      return;
+    }
     const body = route.request().postDataJSON() as ChatBody;
     chatBodies.push(body);
     const headers: Record<string, string> = { "Content-Type": "application/json" };
