@@ -43,7 +43,6 @@ function AppContent() {
   const [selectedSession, setSelectedSession] = useState<ChatSession | null>(null);
   const [showSettings, setShowSettings] = useState(false);
   const [runningSessionId, setRunningSessionId] = useState<string | null>(null);
-  const [newChatKey, setNewChatKey] = useState(0);
   const [darkMode, setDarkMode] = useState<boolean>(() => {
     const saved = localStorage.getItem("ui-theme");
     return saved ? saved === "dark" : true;
@@ -100,8 +99,12 @@ function AppContent() {
           runningSessionId={runningSessionId}
           onSelectSession={setSelectedSession}
           onNewChat={() => {
-            setSelectedSession(null);
-            setNewChatKey((k) => k + 1);
+            setSelectedSession({
+              session_id: crypto.randomUUID(),
+              created_at: new Date().toISOString(),
+              title: "New chat\u2026",
+              is_pending: true,
+            });
           }}
           onRefresh={handleRefresh}
           onDeleteSession={handleDeleteSession}
@@ -114,7 +117,6 @@ function AppContent() {
             sessions={sessions}
             setSessions={setSessions}
             selectedSession={selectedSession}
-            newChatKey={newChatKey}
             onRunningSessionChange={setRunningSessionId}
           />
         )}

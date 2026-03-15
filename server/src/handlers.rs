@@ -15,6 +15,7 @@ use ssh_client::connect_ssh;
 use std::{
     io::{Error as IoError, ErrorKind},
     net::Ipv4Addr,
+    ops,
     path::{Path, PathBuf},
     time::{Duration, Instant, SystemTime, UNIX_EPOCH},
 };
@@ -142,10 +143,13 @@ impl FromRequestParts<AppState> for UserVm {
     }
 }
 
-pub(crate) struct UserVmById {
-    pub(crate) vm_id: String,
-    pub(crate) user_id: Uuid,
-    pub(crate) guest_ip: Ipv4Addr,
+pub(crate) struct UserVmById(pub(crate) UserVm);
+
+impl ops::Deref for UserVmById {
+    type Target = UserVm;
+    fn deref(&self) -> &UserVm {
+        &self.0
+    }
 }
 
 impl FromRequestParts<AppState> for UserVmById {
@@ -169,7 +173,7 @@ impl FromRequestParts<AppState> for UserVmById {
         })? else {
             return Err((StatusCode::NOT_FOUND, "Session not found or expired").into_response());
         };
-        Ok(UserVmById { vm_id, user_id: db_user.id, guest_ip })
+        Ok(UserVmById(UserVm { user_id: db_user.id, vm_id, guest_ip }))
     }
 }
 

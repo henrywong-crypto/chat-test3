@@ -3,6 +3,7 @@ export interface ChatSession {
   created_at: string;
   title: string;
   project_dir?: string;
+  is_pending?: boolean;
 }
 
 export interface TranscriptMessage {

@@ -1,5 +1,5 @@
 import React, { useCallback, useEffect, useRef, useState } from "react";
-import type { ChatMessage, ChatSession } from "../types";
+import type { ChatSession } from "../types";
 import { useSse } from "../contexts/SseContext";
 import { useChatState } from "../hooks/useChatState";
 import { useSseHandlers } from "../hooks/useSseHandlers";
@@ -13,22 +13,13 @@ interface ChatInterfaceProps {
   sessions: ChatSession[];
   setSessions: (s: ChatSession[]) => void;
   selectedSession: ChatSession | null;
-  newChatKey: number;
   onRunningSessionChange?: (sessionId: string | null) => void;
 }
 
-export default function ChatInterface({ sessions, setSessions, selectedSession, newChatKey, onRunningSessionChange }: ChatInterfaceProps) {
+export default function ChatInterface({ sessions, setSessions, selectedSession, onRunningSessionChange }: ChatInterfaceProps) {
   const sseCtx = useSse();
   const { loadHistory, loadTranscript } = sseCtx;
   const chatState = useChatState();
-  const newChatKeyRef = useRef(newChatKey);
-  newChatKeyRef.current = newChatKey;
-  // Snapshot of newChatKey at the time the current pending-session request was sent
-  const sessionStartKeyRef = useRef(newChatKey);
-
-  // Each new (pre-session) chat gets a unique "pending:UUID" key instead of sharing null,
-  // so concurrent new chats don't clobber each other's messages.
-  const pendingSessionIdRef = useRef(`pending:${Math.random().toString(36).slice(2, 10)}`);
 
   // Bumped whenever the composer should receive focus (new chat or session switch)
   const [composerFocusKey, setComposerFocusKey] = useState(0);
@@ -40,8 +31,6 @@ export default function ChatInterface({ sessions, setSessions, selectedSession, 
     setRunningSessionId,
     isStreaming,
     setIsStreaming,
-    nullOrphaned,
-    setNullOrphaned,
     getSessionPendingQuestion,
     setSessionPendingQuestion,
     getTaskId,
@@ -53,15 +42,14 @@ export default function ChatInterface({ sessions, setSessions, selectedSession, 
 
   // Wire SSE events to chat state
   useSseHandlers(
-    { eventQueueRef: sseCtx.eventQueueRef, eventSeq: sseCtx.eventSeq, loadHistory, loadTranscript, newChatKeyRef, sessionStartKeyRef, sessions, vmId: sseCtx.vmId },
+    { eventQueueRef: sseCtx.eventQueueRef, eventSeq: sseCtx.eventSeq, loadHistory, loadTranscript, sessions, vmId: sseCtx.vmId },
     { ...chatState, setSessions },
   );
 
-  // Load history on mount and set initial viewSessionId to the pending slot
+  // Load history on mount
   useEffect(() => {
-    setViewSessionId(pendingSessionIdRef.current);
     loadHistory().then(setSessions).catch(console.error);
-  }, [loadHistory, setSessions, setViewSessionId]); // eslint-disable-line react-hooks/exhaustive-deps
+  }, [loadHistory, setSessions]); // eslint-disable-line react-hooks/exhaustive-deps
 
   // Load transcript when user switches to an existing session
   const loadTranscriptForSession = useCallback(async (session: ChatSession) => {
@@ -79,34 +67,16 @@ export default function ChatInterface({ sessions, setSessions, selectedSession, 
   // React to session selection from the sidebar (driven by App.tsx)
   useEffect(() => {
     if (!selectedSession) {
-      setViewSessionId(pendingSessionIdRef.current);
+      setViewSessionId(null);
+      setComposerFocusKey((k) => k + 1);
       return;
     }
     setViewSessionId(selectedSession.session_id);
-    loadTranscriptForSession(selectedSession);
+    if (!selectedSession.is_pending) {
+      loadTranscriptForSession(selectedSession);
+    }
     setComposerFocusKey((k) => k + 1);
   }, [selectedSession, setViewSessionId, loadTranscriptForSession]);
-
-  // Refs for reading latest values inside effects without adding to deps
-  const runningSessionIdRef = useRef(runningSessionId);
-  runningSessionIdRef.current = runningSessionId;
-  const isStreamingRef = useRef(isStreaming);
-  isStreamingRef.current = isStreaming;
-
-  // Reset to a blank new chat when the user explicitly clicks "New Chat"
-  useEffect(() => {
-    if (newChatKey === 0) return;
-    if (runningSessionIdRef.current?.startsWith("pending:") && isStreamingRef.current) {
-      setNullOrphaned(true);
-    }
-    // Clear the current pending slot and rotate to a fresh key so this chat's
-    // messages don't collide with the previous (or any future) new chat.
-    setMessages(pendingSessionIdRef.current, []);
-    const freshPendingId = `pending:${Math.random().toString(36).slice(2, 10)}`;
-    pendingSessionIdRef.current = freshPendingId;
-    setViewSessionId(freshPendingId);
-    setComposerFocusKey((k) => k + 1);
-  }, [newChatKey, setMessages, setViewSessionId, setNullOrphaned]);
 
   // Notify parent when the running session changes so Sidebar can show the active indicator
   const onRunningSessionChangeRef = useRef(onRunningSessionChange);
@@ -115,28 +85,35 @@ export default function ChatInterface({ sessions, setSessions, selectedSession, 
     onRunningSessionChangeRef.current?.(runningSessionId);
   }, [runningSessionId]);
 
+  const selectedSessionRef = useRef(selectedSession);
+  selectedSessionRef.current = selectedSession;
+
   const handleSend = useCallback(async (text: string) => {
-    const sessionId = viewSessionId;
-    const isPending = sessionId?.startsWith("pending:") ?? true;
-    if (isPending) {
-      sessionStartKeyRef.current = newChatKey;
-    }
-    const userMsgId = generateId();
-    addMessage(sessionId, {
-      id: userMsgId,
+    const conversationId = viewSessionId;
+    if (!conversationId) return;
+    const isNewConversation = selectedSessionRef.current?.is_pending ?? false;
+    const serverSessionId = isNewConversation ? null : conversationId;
+
+    addMessage(conversationId, {
+      id: generateId(),
       type: "user",
       content: text,
       timestamp: Date.now(),
     });
-    setRunningSessionId(sessionId);
+    setRunningSessionId(conversationId);
     setIsStreaming(true);
 
-    // Pending sessions are new chats — the server expects null for session_id
-    const serverSessionId = isPending ? null : sessionId;
+    if (isNewConversation && selectedSessionRef.current) {
+      setSessions((prev: ChatSession[]) => [selectedSessionRef.current!, ...prev]);
+    }
+
     try {
       await sseCtx.sendQuery(text, serverSessionId);
     } catch (err) {
-      addMessage(sessionId, {
+      if (isNewConversation) {
+        setSessions((prev: ChatSession[]) => prev.filter((s) => s.session_id !== conversationId));
+      }
+      addMessage(conversationId, {
         id: generateId(),
         type: "error",
         content: String(err),
@@ -145,7 +122,7 @@ export default function ChatInterface({ sessions, setSessions, selectedSession, 
       setRunningSessionId(null);
       setIsStreaming(false);
     }
-  }, [viewSessionId, newChatKey, generateId, addMessage, setRunningSessionId, setIsStreaming, sseCtx]);
+  }, [viewSessionId, generateId, addMessage, setRunningSessionId, setIsStreaming, setSessions, sseCtx]);
 
   const handleStop = useCallback(() => {
     sseCtx.sendStop(getTaskId(runningSessionId) ?? "").catch(console.error);
@@ -171,8 +148,8 @@ export default function ChatInterface({ sessions, setSessions, selectedSession, 
 
   const messages = getMessages(viewSessionId);
   const pendingQuestion = getSessionPendingQuestion(viewSessionId);
-  const isCurrentRunning = isStreaming && runningSessionId === viewSessionId && !nullOrphaned;
-  const isOtherRunning = isStreaming && runningSessionId !== viewSessionId && !nullOrphaned;
+  const isCurrentRunning = isStreaming && runningSessionId === viewSessionId;
+  const isOtherRunning = isStreaming && runningSessionId !== viewSessionId;
 
   return (
     <div className="flex min-h-0 flex-1 flex-col">

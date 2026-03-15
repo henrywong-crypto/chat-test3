@@ -854,6 +854,15 @@ dependencies = [
 ]
 
 [[package]]
+name = "chat-agent"
+version = "0.1.0"
+dependencies = [
+ "anyhow",
+ "serde",
+ "serde_json",
+]
+
+[[package]]
 name = "chat-history"
 version = "0.1.0"
 dependencies = [
@@ -874,6 +883,7 @@ version = "0.1.0"
 dependencies = [
  "anyhow",
  "bytes",
+ "chat-agent",
  "futures",
  "russh",
  "serde",

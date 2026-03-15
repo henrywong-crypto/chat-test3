@@ -8,8 +8,6 @@ interface SseHandlerDeps {
   eventSeq: number;
   loadHistory: () => Promise<import("../types").ChatSession[]>;
   loadTranscript: (sessionId: string, projectDir: string, signal?: AbortSignal) => Promise<TranscriptMessage[]>;
-  newChatKeyRef: { current: number };
-  sessionStartKeyRef: { current: number };
   sessions: ChatSession[];
   vmId: string;
 }
@@ -18,13 +16,12 @@ export function useSseHandlers(
   sseState: SseHandlerDeps,
   chatState: ChatStateResult & { setSessions: (s: import("../types").ChatSession[]) => void },
 ) {
-  const { eventQueueRef, eventSeq, loadHistory, loadTranscript, newChatKeyRef, sessionStartKeyRef, sessions, vmId } = sseState;
+  const { eventQueueRef, eventSeq, loadHistory, loadTranscript, sessions, vmId } = sseState;
   const {
     viewSessionId,
     runningSessionId,
     setRunningSessionId,
     setIsStreaming,
-    setNullOrphaned,
     setSessionPendingQuestion,
     setTaskId,
     setSessions,
@@ -44,9 +41,6 @@ export function useSseHandlers(
 
   const viewRef = useRef(viewSessionId);
   viewRef.current = viewSessionId;
-
-  const nullOrphanedRef = useRef(chatState.nullOrphaned);
-  nullOrphanedRef.current = chatState.nullOrphaned;
 
   // Track the current task_id for message persistence
   const currentTaskIdRef = useRef<string | null>(null);
@@ -207,30 +201,23 @@ export function useSseHandlers(
         case "done": {
           const { session_id, task_id } = event.payload;
           const completedSession = runningRef.current;
-          const wasPending = completedSession?.startsWith("pending:") ?? false;
           localStorage.removeItem(`chat_messages_task_${task_id}`);
           currentTaskIdRef.current = null;
           setRunningSessionId(null);
           setIsStreaming(false);
-          setNullOrphaned(false);
           setSessionPendingQuestion(completedSession, null);
           sealThinking();
           assistantMsgId.current = null;
           toolIdToMsgId.current.clear();
 
-          if (session_id && completedSession === viewRef.current) {
-            const newChatKeyUnchanged = !wasPending || sessionStartKeyRef.current === newChatKeyRef.current;
-            if (newChatKeyUnchanged) {
+          if (session_id) {
+            if (completedSession !== session_id) {
               const msgs = getMessages(completedSession);
               setMessages(session_id, msgs);
-              if (wasPending) {
-                // Clear the temporary pending slot now that it has a real session ID
-                setMessages(completedSession, []);
-              }
-              setViewSessionId(session_id);
-            } else if (wasPending) {
-              // New Chat was clicked after this session started — discard stale messages
               setMessages(completedSession, []);
+            }
+            if (completedSession === viewRef.current) {
+              setViewSessionId(session_id);
             }
           }
 
@@ -240,28 +227,22 @@ export function useSseHandlers(
 
         case "error_event": {
           const { message } = event.payload;
-          const wasOrphaned = nullOrphanedRef.current;
           if (currentTaskIdRef.current) {
             localStorage.removeItem(`chat_messages_task_${currentTaskIdRef.current}`);
             currentTaskIdRef.current = null;
           }
           setRunningSessionId(null);
           setIsStreaming(false);
-          setNullOrphaned(false);
           setSessionPendingQuestion(session, null);
           thinkingMsgId.current = null;
           assistantMsgId.current = null;
           toolIdToMsgId.current.clear();
-          if (wasOrphaned) {
-            setMessages(session, []);
-          } else {
-            addMessage(session, {
-              id: generateId(),
-              type: "error",
-              content: message,
-              timestamp: Date.now(),
-            });
-          }
+          addMessage(session, {
+            id: generateId(),
+            type: "error",
+            content: message,
+            timestamp: Date.now(),
+          });
           break;
         }
 
@@ -272,6 +253,12 @@ export function useSseHandlers(
           setRunningSessionId(running_session_id);
           setIsStreaming(true);
           setViewSessionId(running_session_id);
+          if (running_session_id && !sessions.find((s) => s.session_id === running_session_id)) {
+            setSessions([
+              { session_id: running_session_id, created_at: new Date().toISOString(), title: "New chat\u2026", is_pending: true },
+              ...sessions,
+            ]);
+          }
           let inProgressMessages: ChatMessage[] = [];
           const savedMessages = localStorage.getItem(`chat_messages_task_${task_id}`);
           if (savedMessages) {

@@ -80,7 +80,7 @@ function SessionRow({
   onDelete: () => void;
 }) {
   const [hovered, setHovered] = React.useState(false);
-  const title = session.title || `Session ${session.session_id.slice(0, 8)}`;
+  const title = session.is_pending ? "New chat\u2026" : session.title || `Session ${session.session_id.slice(0, 8)}`;
 
   return (
     <div
@@ -99,8 +99,10 @@ function SessionRow({
           <span className="relative inline-flex h-1.5 w-1.5 rounded-full bg-primary" />
         </span>
       )}
-      <span className="flex-1 truncate leading-snug">{title}</span>
-      {hovered && (
+      <span className={`flex-1 truncate leading-snug ${session.is_pending ? "italic opacity-60" : ""}`}>
+        {title}
+      </span>
+      {hovered && !session.is_pending && (
         <button
           onClick={(e) => { e.stopPropagation(); onDelete(); }}
           className="flex h-5 w-5 flex-shrink-0 items-center justify-center rounded text-muted-foreground hover:text-destructive"

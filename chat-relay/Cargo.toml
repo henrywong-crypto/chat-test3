@@ -4,6 +4,7 @@ version = "0.1.0"
 edition = "2024"
 
 [dependencies]
+chat-agent = { path = "../chat-agent" }
 ssh-client = { path = "../ssh-client" }
 anyhow = "1.0.102"
 tokio-stream = "0.1"

@@ -6,107 +6,114 @@ function generateId(): string {
 }
 
 export interface ChatStateResult {
-  messagesBySession: React.MutableRefObject<Map<string | null, ChatMessage[]>>;
+  messagesBySession: React.MutableRefObject<Map<string, ChatMessage[]>>;
   viewSessionId: string | null;
   setViewSessionId: (id: string | null) => void;
   runningSessionId: string | null;
   setRunningSessionId: (id: string | null) => void;
   isStreaming: boolean;
   setIsStreaming: (v: boolean) => void;
-  nullOrphaned: boolean;
-  setNullOrphaned: (v: boolean) => void;
-  getSessionPendingQuestion: (sessionId: string | null) => PendingQuestion | null;
-  setSessionPendingQuestion: (sessionId: string | null, q: PendingQuestion | null) => void;
-  getTaskId: (sessionId: string | null) => string | undefined;
-  setTaskId: (sessionId: string | null, clientId: string) => void;
+  getSessionPendingQuestion: (conversationId: string | null) => PendingQuestion | null;
+  setSessionPendingQuestion: (conversationId: string | null, q: PendingQuestion | null) => void;
+  getTaskId: (conversationId: string | null) => string | undefined;
+  setTaskId: (conversationId: string | null, clientId: string) => void;
   sessions: ChatSession[];
   setSessions: (s: ChatSession[]) => void;
-  getMessages: (sessionId: string | null) => ChatMessage[];
-  setMessages: (sessionId: string | null, msgs: ChatMessage[]) => void;
-  addMessage: (sessionId: string | null, msg: ChatMessage) => void;
-  removeMessage: (sessionId: string | null, id: string) => void;
-  updateLastMessage: (sessionId: string | null, updater: (msg: ChatMessage) => ChatMessage) => void;
-  updateMessageById: (sessionId: string | null, id: string, updater: (msg: ChatMessage) => ChatMessage) => void;
+  getMessages: (conversationId: string | null) => ChatMessage[];
+  setMessages: (conversationId: string | null, msgs: ChatMessage[]) => void;
+  addMessage: (conversationId: string | null, msg: ChatMessage) => void;
+  removeMessage: (conversationId: string | null, id: string) => void;
+  updateLastMessage: (conversationId: string | null, updater: (msg: ChatMessage) => ChatMessage) => void;
+  updateMessageById: (conversationId: string | null, id: string, updater: (msg: ChatMessage) => ChatMessage) => void;
   generateId: () => string;
   renderTick: number;
   bumpRender: () => void;
 }
 
 export function useChatState(): ChatStateResult {
-  const messagesBySession = useRef<Map<string | null, ChatMessage[]>>(new Map());
-  const pendingQuestionsBySession = useRef<Map<string | null, PendingQuestion>>(new Map());
-  const taskIdBySession = useRef<Map<string | null, string>>(new Map());
+  const messagesBySession = useRef<Map<string, ChatMessage[]>>(new Map());
+  const pendingQuestionsBySession = useRef<Map<string, PendingQuestion>>(new Map());
+  const taskIdBySession = useRef<Map<string, string>>(new Map());
   const [viewSessionId, setViewSessionId] = useState<string | null>(null);
   const [runningSessionId, setRunningSessionId] = useState<string | null>(null);
   const [isStreaming, setIsStreaming] = useState(false);
-  const [nullOrphaned, setNullOrphaned] = useState(false);
   const [sessions, setSessions] = useState<ChatSession[]>([]);
   const [renderTick, setRenderTick] = useState(0);
 
   const bumpRender = useCallback(() => setRenderTick((t) => t + 1), []);
 
-  const getTaskId = useCallback((sessionId: string | null): string | undefined => {
-    return taskIdBySession.current.get(sessionId);
+  const getTaskId = useCallback((conversationId: string | null): string | undefined => {
+    if (conversationId === null) return undefined;
+    return taskIdBySession.current.get(conversationId);
   }, []);
 
-  const setTaskId = useCallback((sessionId: string | null, clientId: string) => {
-    taskIdBySession.current.set(sessionId, clientId);
+  const setTaskId = useCallback((conversationId: string | null, clientId: string) => {
+    if (conversationId === null) return;
+    taskIdBySession.current.set(conversationId, clientId);
   }, []);
 
-  const getSessionPendingQuestion = useCallback((sessionId: string | null): PendingQuestion | null => {
-    return pendingQuestionsBySession.current.get(sessionId) ?? null;
+  const getSessionPendingQuestion = useCallback((conversationId: string | null): PendingQuestion | null => {
+    if (conversationId === null) return null;
+    return pendingQuestionsBySession.current.get(conversationId) ?? null;
   }, []);
 
-  const setSessionPendingQuestion = useCallback((sessionId: string | null, q: PendingQuestion | null) => {
+  const setSessionPendingQuestion = useCallback((conversationId: string | null, q: PendingQuestion | null) => {
+    if (conversationId === null) return;
     if (q === null) {
-      pendingQuestionsBySession.current.delete(sessionId);
+      pendingQuestionsBySession.current.delete(conversationId);
     } else {
-      pendingQuestionsBySession.current.set(sessionId, q);
+      pendingQuestionsBySession.current.set(conversationId, q);
     }
     setRenderTick((t) => t + 1);
   }, []);
 
-  const getMessages = useCallback((sessionId: string | null): ChatMessage[] => {
-    return messagesBySession.current.get(sessionId) ?? [];
+  const getMessages = useCallback((conversationId: string | null): ChatMessage[] => {
+    if (conversationId === null) return [];
+    return messagesBySession.current.get(conversationId) ?? [];
   }, []);
 
-  const setMessages = useCallback((sessionId: string | null, msgs: ChatMessage[]) => {
-    messagesBySession.current.set(sessionId, msgs);
+  const setMessages = useCallback((conversationId: string | null, msgs: ChatMessage[]) => {
+    if (conversationId === null) return;
+    messagesBySession.current.set(conversationId, msgs);
     setRenderTick((t) => t + 1);
   }, []);
 
-  const addMessage = useCallback((sessionId: string | null, msg: ChatMessage) => {
-    const prev = messagesBySession.current.get(sessionId) ?? [];
-    messagesBySession.current.set(sessionId, [...prev, msg]);
+  const addMessage = useCallback((conversationId: string | null, msg: ChatMessage) => {
+    if (conversationId === null) return;
+    const prev = messagesBySession.current.get(conversationId) ?? [];
+    messagesBySession.current.set(conversationId, [...prev, msg]);
     setRenderTick((t) => t + 1);
   }, []);
 
-  const removeMessage = useCallback((sessionId: string | null, id: string) => {
-    const prev = messagesBySession.current.get(sessionId) ?? [];
-    messagesBySession.current.set(sessionId, prev.filter((m) => m.id !== id));
+  const removeMessage = useCallback((conversationId: string | null, id: string) => {
+    if (conversationId === null) return;
+    const prev = messagesBySession.current.get(conversationId) ?? [];
+    messagesBySession.current.set(conversationId, prev.filter((m) => m.id !== id));
     setRenderTick((t) => t + 1);
   }, []);
 
   const updateLastMessage = useCallback((
-    sessionId: string | null,
+    conversationId: string | null,
     updater: (msg: ChatMessage) => ChatMessage,
   ) => {
-    const msgs = messagesBySession.current.get(sessionId) ?? [];
+    if (conversationId === null) return;
+    const msgs = messagesBySession.current.get(conversationId) ?? [];
     if (msgs.length === 0) return;
     const updated = [...msgs];
     updated[updated.length - 1] = updater(updated[updated.length - 1]);
-    messagesBySession.current.set(sessionId, updated);
+    messagesBySession.current.set(conversationId, updated);
     setRenderTick((t) => t + 1);
   }, []);
 
   const updateMessageById = useCallback((
-    sessionId: string | null,
+    conversationId: string | null,
     id: string,
     updater: (msg: ChatMessage) => ChatMessage,
   ) => {
-    const msgs = messagesBySession.current.get(sessionId) ?? [];
+    if (conversationId === null) return;
+    const msgs = messagesBySession.current.get(conversationId) ?? [];
     const updated = msgs.map((m) => (m.id === id ? updater(m) : m));
-    messagesBySession.current.set(sessionId, updated);
+    messagesBySession.current.set(conversationId, updated);
     setRenderTick((t) => t + 1);
   }, []);
 
@@ -118,8 +125,6 @@ export function useChatState(): ChatStateResult {
     setRunningSessionId,
     isStreaming,
     setIsStreaming,
-    nullOrphaned,
-    setNullOrphaned,
     getSessionPendingQuestion,
     setSessionPendingQuestion,
     getTaskId,
