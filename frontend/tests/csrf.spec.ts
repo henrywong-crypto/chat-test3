@@ -1,0 +1,63 @@
+/**
+ * UF-53  Initial token sent      — first POST /chat carries the token from data-csrf-token
+ * UF-54  Token rotated on send   — when server returns x-csrf-token, the next POST uses it
+ * UF-55  Token rotated on delete — when server returns x-csrf-token, the next DELETE uses it
+ */
+import { test, expect } from "@playwright/test";
+import { setupApp, sendMessage, makeSession, sse, CSRF_TOKEN, VM_ID } from "./helpers/setup";
+
+test.describe("csrf", () => {
+  test("UF-53 first POST /chat carries the initial CSRF token from the page", async ({ page }) => {
+    const ctrl = await setupApp(page, { sessions: [] });
+
+    const responseReceived = page.waitForResponse(`**/sessions/${VM_ID}/chat`);
+    await sendMessage(page, "Hello");
+    await responseReceived;
+
+    expect(ctrl.allChatBodies()[0].csrf_token).toBe(CSRF_TOKEN);
+  });
+
+  test("UF-54 next POST /chat uses the rotated token returned by the server", async ({ page }) => {
+    const ctrl = await setupApp(page, { sessions: [] });
+
+    // First send — server responds with a rotated token in the header
+    ctrl.setChatResponseToken("rotated-1");
+    const firstResponse = page.waitForResponse(`**/sessions/${VM_ID}/chat`);
+    await sendMessage(page, "first message");
+    await firstResponse;
+
+    // Complete the stream so the composer is re-enabled for the second send
+    ctrl.sendSseEvents(sse.text("ok", "sess-1"));
+    await expect(page.getByRole("status")).not.toBeVisible();
+
+    // Second send — must carry the rotated token, not the original
+    const secondResponse = page.waitForResponse(`**/sessions/${VM_ID}/chat`);
+    await sendMessage(page, "second message");
+    await secondResponse;
+
+    const bodies = ctrl.allChatBodies();
+    expect(bodies[0].csrf_token).toBe(CSRF_TOKEN);
+    expect(bodies[1].csrf_token).toBe("rotated-1");
+  });
+
+  test("UF-55 DELETE /chat-transcript uses the rotated token after a send", async ({ page }) => {
+    const session = makeSession({ session_id: "sess-del", title: "to delete" });
+    const ctrl = await setupApp(page, { sessions: [session] });
+
+    // Trigger a rotation via a chat send
+    ctrl.setChatResponseToken("rotated-1");
+    const chatResponse = page.waitForResponse(`**/sessions/${VM_ID}/chat`);
+    await sendMessage(page, "hi");
+    await chatResponse;
+
+    // Delete the session — should use the rotated token
+    const deleteResponse = page.waitForResponse(
+      (res) => res.url().includes(`/sessions/${VM_ID}/chat-transcript`) && res.request().method() === "DELETE",
+    );
+    await page.locator(".group").filter({ hasText: "to delete" }).hover();
+    await page.locator(".group").filter({ hasText: "to delete" }).locator("button").click();
+    await deleteResponse;
+
+    expect(ctrl.lastDeleteCsrfToken()).toBe("rotated-1");
+  });
+});

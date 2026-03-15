@@ -3,9 +3,10 @@
  * UF-31  SSE error event    — error message shown in chat, streaming cleared
  * UF-32  Copy button hover  — hovering an assistant message reveals copy button
  * UF-33  Copy format picker — format dropdown shows markdown / text options
+ * UF-56  New Chat auto-focus — clicking "New Chat" puts focus on the composer textarea
  */
 import { test, expect } from "@playwright/test";
-import { setupApp, sendMessage, sse } from "./helpers/setup";
+import { setupApp, sendMessage, sse, makeSession } from "./helpers/setup";
 
 test.describe("composer", () => {
   test("UF-30 Shift+Enter inserts a newline without submitting", async ({ page }) => {
@@ -73,5 +74,20 @@ test.describe("composer", () => {
     await expect(page.getByTitle("Copy", { exact: true })).toBeVisible();
     // Format label on the button switches to TXT
     await expect(page.locator("button[title='Copy'] span").filter({ hasText: "TXT" })).toBeVisible();
+  });
+
+  test("UF-56 clicking New Chat focuses the composer textarea", async ({ page }) => {
+    const session = makeSession({ session_id: "sess-abc", title: "Old chat" });
+    await setupApp(page, { sessions: [session] });
+
+    // Navigate away to an existing session
+    await page.getByText("Old chat").click();
+
+    // Click "New Chat" in the sidebar
+    await page.getByRole("button", { name: "New Chat" }).click();
+
+    // The textarea should have focus immediately
+    const composer = page.getByPlaceholder("Message Claude…");
+    await expect(composer).toBeFocused();
   });
 });

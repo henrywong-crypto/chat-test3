@@ -149,6 +149,12 @@ function buildAppHtml(hasUserRootfs: boolean): string {
 
 // ── App controller ────────────────────────────────────────────────────────
 
+export interface ChatBody {
+  content: string;
+  session_id: string | null;
+  csrf_token: string;
+}
+
 export interface AppController {
   /** Push SSE events through the currently open stream. */
   sendSseEvents(events: SseEvent[]): void;
@@ -157,9 +163,9 @@ export interface AppController {
   /** Replace the file entries returned for a given directory path. */
   setFiles(dirPath: string, entries: FileEntry[]): void;
   /** Body of the most recent POST /chat, or null. */
-  lastChatBody(): { content: string; session_id: string | null } | null;
+  lastChatBody(): ChatBody | null;
   /** Bodies of every POST /chat in order. */
-  allChatBodies(): Array<{ content: string; session_id: string | null }>;
+  allChatBodies(): ChatBody[];
   /** Whether a stop request was received. */
   stopRequested(): boolean;
   /** Body of the most recent POST /chat-stop, or null. */
@@ -172,6 +178,13 @@ export interface AppController {
   uploadReceived(): boolean;
   /** Raw form body of the most recent POST /rootfs/delete, or null. */
   lastResetFormData(): string | null;
+  /**
+   * Set the token the mock will echo back in the x-csrf-token response header
+   * for the next POST /chat. Pass null to stop sending the header.
+   */
+  setChatResponseToken(token: string | null): void;
+  /** CSRF token sent in the most recent DELETE /chat-transcript, or null. */
+  lastDeleteCsrfToken(): string | null;
 }
 
 export interface SetupOpts {
@@ -201,13 +214,15 @@ export async function setupApp(
     ...opts.settings,
   };
 
-  const chatBodies: Array<{ content: string; session_id: string | null }> = [];
+  const chatBodies: ChatBody[] = [];
   let stopReceived = false;
   let lastStopBody: { task_id: string } | null = null;
   let lastAnswer: { task_id: string; request_id: string; answers: Record<string, string> } | null = null;
   let lastSettingsSaveBody: { api_key: string } | null = null;
   let uploadWasReceived = false;
   let lastResetBody: string | null = null;
+  let chatResponseToken: string | null = null;
+  let lastDeleteCsrfTokenValue: string | null = null;
 
   // resolveSse is set each time the EventSource connects/reconnects.
   // sendSseEvents calls it to deliver events and close the stream.
@@ -239,7 +254,8 @@ export async function setupApp(
   // ── Transcript (GET) and delete (DELETE) ─────────────────────────────────
   await page.route(`**/sessions/${VM_ID}/chat-transcript**`, async (route) => {
     if (route.request().method() === "DELETE") {
-      const body = route.request().postDataJSON() as { session_id: string };
+      const body = route.request().postDataJSON() as { session_id: string; csrf_token: string };
+      lastDeleteCsrfTokenValue = body.csrf_token ?? null;
       sessions = sessions.filter((s) => s.session_id !== body.session_id);
       await route.fulfill({ status: 200, body: "" });
     } else {
@@ -335,12 +351,13 @@ export async function setupApp(
 
   // ── Chat message endpoint ─────────────────────────────────────────────────
   await page.route(`**/sessions/${VM_ID}/chat`, async (route) => {
-    const body = route.request().postDataJSON() as {
-      content: string;
-      session_id: string | null;
-    };
+    const body = route.request().postDataJSON() as ChatBody;
     chatBodies.push(body);
-    await route.fulfill({ status: 200, body: "" });
+    const headers: Record<string, string> = {};
+    if (chatResponseToken !== null) {
+      headers["x-csrf-token"] = chatResponseToken;
+    }
+    await route.fulfill({ status: 200, body: "", headers });
   });
 
   // ── Load the app ──────────────────────────────────────────────────────────
@@ -366,6 +383,8 @@ export async function setupApp(
     lastSettingsSave: () => lastSettingsSaveBody,
     uploadReceived: () => uploadWasReceived,
     lastResetFormData: () => lastResetBody,
+    setChatResponseToken: (token) => { chatResponseToken = token; },
+    lastDeleteCsrfToken: () => lastDeleteCsrfTokenValue,
   };
 }
 

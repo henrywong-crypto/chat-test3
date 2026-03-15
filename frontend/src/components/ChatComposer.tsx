@@ -1,4 +1,4 @@
-import React, { useCallback, useRef, useState } from "react";
+import React, { useCallback, useEffect, useRef, useState } from "react";
 import { Paperclip, Send, Square, X } from "lucide-react";
 import { useSse } from "../contexts/SseContext";
 
@@ -7,6 +7,7 @@ interface ChatComposerProps {
   isOtherRunning?: boolean;
   onSend: (text: string) => void;
   onStop: () => void;
+  focusKey?: number;
 }
 
 interface SlashCommand {
@@ -34,7 +35,7 @@ const SLASH_COMMANDS: SlashCommand[] = [
   { name: "/vim",         description: "Enter vim mode" },
 ];
 
-export default function ChatComposer({ isLoading, isOtherRunning, onSend, onStop }: ChatComposerProps) {
+export default function ChatComposer({ isLoading, isOtherRunning, onSend, onStop, focusKey }: ChatComposerProps) {
   const { uploadAction, csrfToken, uploadDir } = useSse();
 
   const [input, setInput] = useState("");
@@ -45,6 +46,11 @@ export default function ChatComposer({ isLoading, isOtherRunning, onSend, onStop
 
   const textareaRef = useRef<HTMLTextAreaElement>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
+
+  // Focus the composer on mount and whenever focusKey changes (e.g. "New Chat" clicked)
+  useEffect(() => {
+    textareaRef.current?.focus();
+  }, [focusKey]);
 
   const busy = isLoading || uploading;
   const blocked = busy || (isOtherRunning ?? false);

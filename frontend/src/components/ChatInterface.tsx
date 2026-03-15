@@ -260,6 +260,7 @@ export default function ChatInterface({ sessions, setSessions, selectedSession, 
           isOtherRunning={isOtherRunning}
           onSend={handleSend}
           onStop={handleStop}
+          focusKey={newChatKey}
         />
       )}
     </div>
