@@ -1,7 +1,7 @@
 use anyhow::{Context, Result, anyhow};
 use axum::{
     Json,
-    extract::{Form, FromRequestParts, Multipart, Query, State},
+    extract::{Form, FromRequestParts, Multipart, Path as AxumPath, Query, State},
     http::{StatusCode, header::HeaderValue, request::Parts},
     response::{Html, IntoResponse, Redirect, Response},
 };
@@ -25,8 +25,8 @@ use tower_sessions::Session;
 use tracing::{error, info};
 use uuid::Uuid;
 use vm_lifecycle::{
-    VmEntry, VmRegistry, build_user_rootfs_path, build_vm_config, ensure_user_rootfs,
-    fetch_host_iam_credentials, find_user_rootfs,
+    VmEntry, VmRegistry, build_user_rootfs_path, build_vm_config, build_vm_config_without_iam,
+    ensure_user_rootfs, fetch_host_iam_credentials, find_user_rootfs,
 };
 
 use crate::{
@@ -47,8 +47,7 @@ async fn get_csrf_token(session: &Session) -> Result<String> {
     let token = session
         .get::<String>("csrf_token")
         .await
-        .ok()
-        .flatten()
+        .context("failed to read csrf_token from session")?
         .unwrap_or_else(|| Uuid::new_v4().to_string().replace('-', ""));
     session
         .insert("csrf_token", &token)
@@ -57,14 +56,24 @@ async fn get_csrf_token(session: &Session) -> Result<String> {
     Ok(token)
 }
 
-pub(crate) async fn validate_csrf(session: &Session, submitted: &str) -> Option<String> {
-    let stored = session.get::<String>("csrf_token").await.ok().flatten()?;
+pub(crate) async fn validate_csrf(session: &Session, submitted: &str) -> Result<Option<String>> {
+    let stored = match session
+        .get::<String>("csrf_token")
+        .await
+        .context("failed to read CSRF token from session")?
+    {
+        Some(s) => s,
+        None => return Ok(None),
+    };
     if stored != submitted {
-        return None;
+        return Ok(None);
     }
     let new_token = Uuid::new_v4().to_string().replace('-', "");
-    session.insert("csrf_token", &new_token).await.ok()?;
-    Some(new_token)
+    session
+        .insert("csrf_token", &new_token)
+        .await
+        .context("failed to store CSRF token")?;
+    Ok(Some(new_token))
 }
 
 pub(crate) fn attach_csrf_token(mut response: Response, csrf_token: &str) -> Response {
@@ -87,10 +96,14 @@ pub(crate) async fn get_csrf_token_handler(
     Ok(Json(CsrfTokenResponse { csrf_token }).into_response())
 }
 
-fn register_vm(vms: &VmRegistry, vm_id: String, vm_entry: VmEntry) -> Result<(), AppError> {
-    vms.lock()
-        .map_err(|_| anyhow!("vm registry lock poisoned"))?
-        .insert(vm_id, vm_entry);
+fn register_vm(vms: &VmRegistry, vm_id: String, vm_entry: VmEntry, max_count: usize) -> Result<(), AppError> {
+    let mut registry = vms
+        .lock()
+        .map_err(|_| anyhow!("vm registry lock poisoned"))?;
+    if registry.len() >= max_count {
+        return Err(anyhow!("vm limit reached").into());
+    }
+    registry.insert(vm_id, vm_entry);
     Ok(())
 }
 
@@ -140,19 +153,20 @@ impl FromRequestParts<AppState> for UserVm {
 }
 
 fn remove_user_vm(vms: &VmRegistry, user_id: Uuid) -> Result<()> {
-    let mut registry = vms
-        .lock()
-        .map_err(|_| anyhow!("vm registry lock poisoned"))?;
-    let vm_ids: Vec<String> = registry
-        .iter()
-        .filter(|(_, e)| e.user_id == user_id)
-        .map(|(id, _)| id.clone())
-        .collect();
-    let removed: Vec<VmEntry> = vm_ids
-        .into_iter()
-        .filter_map(|id| registry.remove(&id))
-        .collect();
-    drop(removed);
+    let _removed = {
+        let mut registry = vms
+            .lock()
+            .map_err(|_| anyhow!("vm registry lock poisoned"))?;
+        let vm_ids: Vec<String> = registry
+            .iter()
+            .filter(|(_, e)| e.user_id == user_id)
+            .map(|(id, _)| id.clone())
+            .collect();
+        vm_ids
+            .into_iter()
+            .filter_map(|id| registry.remove(&id))
+            .collect::<Vec<_>>()
+    };
     Ok(())
 }
 
@@ -172,9 +186,6 @@ pub(crate) fn count_registered_vms(vms: &VmRegistry) -> Result<usize, AppError> 
 }
 
 pub(crate) async fn provision_new_vm(state: &AppState, user_id: Uuid) -> Result<String, AppError> {
-    let iam_creds = fetch_host_iam_credentials(&state.config.iam_role_name)
-        .await
-        .context("failed to fetch IAM credentials for VM")?;
     info!("building vm config");
     let user_rootfs = ensure_user_rootfs(
         &state.config.user_rootfs_dir,
@@ -183,8 +194,14 @@ pub(crate) async fn provision_new_vm(state: &AppState, user_id: Uuid) -> Result<
         &state.rootfs_lock,
     )
     .await?;
-    info!("using rootfs");
-    let vm_config = build_vm_config(&state.config.vm_build_config(), &iam_creds, &user_rootfs)?;
+    let vm_config = if state.config.use_iam_creds {
+        let iam_creds = fetch_host_iam_credentials(&state.config.iam_role_name)
+            .await
+            .context("failed to fetch IAM credentials for VM")?;
+        build_vm_config(&state.config.to_vm_build_config(), &iam_creds, &user_rootfs)?
+    } else {
+        build_vm_config_without_iam(&state.config.to_vm_build_config(), &user_rootfs)
+    };
     let vm = create_vm(&vm_config).await?;
     info!("vm started");
     let vm_id = vm.id.clone();
@@ -193,10 +210,11 @@ pub(crate) async fn provision_new_vm(state: &AppState, user_id: Uuid) -> Result<
         vm_id.clone(),
         VmEntry {
             user_id,
-            has_iam_creds: true,
+            has_iam_creds: state.config.use_iam_creds,
             last_activity: Instant::now(),
             vm,
         },
+        state.config.vm_max_count,
     )?;
     Ok(vm_id)
 }
@@ -224,7 +242,7 @@ pub(crate) async fn delete_user_rootfs_handler(
     State(state): State<AppState>,
     Form(form): Form<CsrfForm>,
 ) -> Result<Response, AppError> {
-    if validate_csrf(&session, &form.csrf_token).await.is_none() {
+    if validate_csrf(&session, &form.csrf_token).await?.is_none() {
         return Ok((StatusCode::FORBIDDEN, "Forbidden").into_response());
     }
     let Some(db_user) = get_user_by_email(&state.db, &user.email).await? else {
@@ -235,7 +253,11 @@ pub(crate) async fn delete_user_rootfs_handler(
     let _guard = timeout(Duration::from_secs(LOCK_TIMEOUT_SECS), state.rootfs_lock.lock())
         .await
         .context("timed out waiting for rootfs lock")?;
-    let _ = tokio::fs::remove_file(&rootfs_path).await;
+    if let Err(e) = tokio::fs::remove_file(&rootfs_path).await {
+        if e.kind() != ErrorKind::NotFound {
+            return Err(anyhow!(e).context("failed to delete user rootfs").into());
+        }
+    }
     drop(_guard);
     remove_user_vm(&state.vms, db_user.id)?;
     Ok(Redirect::to("/").into_response())
@@ -243,9 +265,13 @@ pub(crate) async fn delete_user_rootfs_handler(
 
 pub(crate) async fn get_terminal_page(
     user_vm: UserVm,
+    AxumPath(vm_id): AxumPath<String>,
     session: Session,
     State(state): State<AppState>,
 ) -> Result<Response, AppError> {
+    if user_vm.vm_id != vm_id {
+        return Ok((StatusCode::NOT_FOUND, "Session not found").into_response());
+    }
     build_terminal_response(&session, &state, user_vm.user_id, &user_vm.vm_id).await
 }
 
@@ -258,7 +284,7 @@ pub(crate) async fn list_chat_sessions_handler(
         &state.config.ssh_key_path,
         &state.config.ssh_user,
         &state.config.vm_host_key_path,
-        Path::new(&state.config.ssh_user_home),
+        &state.config.ssh_user_home,
     )
     .await
     .map(|sessions| Json(sessions).into_response())
@@ -308,7 +334,7 @@ pub(crate) async fn delete_chat_session_handler(
     State(state): State<AppState>,
     Json(form): Json<DeleteChatSessionForm>,
 ) -> Result<Response, AppError> {
-    let Some(csrf_token) = validate_csrf(&session, &form.csrf_token).await else {
+    let Some(csrf_token) = validate_csrf(&session, &form.csrf_token).await? else {
         return Ok((StatusCode::FORBIDDEN, "Forbidden").into_response());
     };
     delete_chat_session(
@@ -334,7 +360,7 @@ pub(crate) async fn handle_chat_upload(
     mut multipart: Multipart,
 ) -> Result<Response, AppError> {
     let chat_upload_metadata = extract_chat_upload_metadata(&mut multipart).await?;
-    let Some(csrf_token) = validate_csrf(&session, &chat_upload_metadata.csrf_token).await else {
+    let Some(csrf_token) = validate_csrf(&session, &chat_upload_metadata.csrf_token).await? else {
         return Ok((StatusCode::FORBIDDEN, "Forbidden").into_response());
     };
     info!("uploading chat attachment via sftp");

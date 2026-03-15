@@ -41,6 +41,7 @@ function AppContent() {
   const [activeTab, setActiveTab] = useState<ViewTab>("chat");
   const [selectedConversation, setSelectedConversation] = useState<Conversation | null>(null);
   const [runningConversationId, setRunningConversationId] = useState<string | null>(null);
+  const [newChatKey, setNewChatKey] = useState(0);
   const [showSettings, setShowSettings] = useState(false);
   const [darkMode, setDarkMode] = useState<boolean>(() => {
     const saved = localStorage.getItem("ui-theme");
@@ -60,6 +61,7 @@ function AppContent() {
 
   const handleNewChat = useCallback(() => {
     setSelectedConversation(null);
+    setNewChatKey((k) => k + 1);
   }, []);
 
   const handleDeleteConversation = useCallback(async (conversation: Conversation) => {
@@ -104,6 +106,7 @@ function AppContent() {
         {activeTab === "chat" && (
           <ChatInterface
             selectedConversation={selectedConversation}
+            newChatKey={newChatKey}
             onRunningConversationChange={setRunningConversationId}
             onConversationCreated={setSelectedConversation}
           />

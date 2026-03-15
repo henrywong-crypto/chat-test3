@@ -1,3 +1,19 @@
+use std::path::Path;
+
+fn html_attr_escape(s: &str) -> String {
+    let mut out = String::with_capacity(s.len());
+    for c in s.chars() {
+        match c {
+            '&' => out.push_str("&amp;"),
+            '"' => out.push_str("&quot;"),
+            '<' => out.push_str("&lt;"),
+            '>' => out.push_str("&gt;"),
+            c => out.push(c),
+        }
+    }
+    out
+}
+
 pub(crate) fn render_login_page() -> String {
     r#"<!DOCTYPE html>
 <html lang="en">
@@ -18,13 +34,16 @@ pub(crate) fn render_login_page() -> String {
 pub(crate) fn render_terminal_page(
     vm_id: &str,
     csrf_token: &str,
-    upload_dir: &str,
+    upload_dir: &Path,
     has_user_rootfs: bool,
 ) -> String {
     let upload_action = "/chat-upload".to_owned();
     let app_js_src = format!("/static/app.js?v={}", env!("APP_JS_VERSION"));
     let styles_css_href = format!("/static/styles.css?v={}", env!("STYLES_CSS_VERSION"));
     let has_user_rootfs_str = has_user_rootfs.to_string();
+    let vm_id = html_attr_escape(vm_id);
+    let csrf_token = html_attr_escape(csrf_token);
+    let upload_dir = html_attr_escape(&upload_dir.to_string_lossy());
     format!(
         r#"<!DOCTYPE html>
 <html lang="en">

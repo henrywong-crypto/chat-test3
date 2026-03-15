@@ -6,6 +6,7 @@ use axum::{
 use handlers::{AppState as CognitoState, CallbackQuery, callback, login};
 use store::upsert_user;
 use tower_sessions::Session;
+use tracing::warn;
 use uuid::Uuid;
 
 use crate::{state::AppState, templates::render_login_page};
@@ -70,7 +71,9 @@ pub(crate) async fn get_callback_handler(
             return (StatusCode::INTERNAL_SERVER_ERROR, e.to_string()).into_response();
         }
         let new_csrf_token = Uuid::new_v4().to_string().replace('-', "");
-        let _ = session.insert("csrf_token", &new_csrf_token).await;
+        if let Err(e) = session.insert("csrf_token", &new_csrf_token).await {
+            warn!("failed to store CSRF token after login: {e}");
+        }
     }
     response
 }

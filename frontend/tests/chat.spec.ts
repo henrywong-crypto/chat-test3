@@ -4,6 +4,8 @@
  * UF-03  Receive response    — assistant message shown, status bar gone, conversation in sidebar
  * UF-04  New Chat button     — clears to blank state
  * UF-05  New Chat + streaming — stays blank after done fires (not navigated away)
+ * UF-59  New chat title      — sidebar shows first user message as title immediately
+ * UF-60  Second new chat     — can create a second new chat after the first
  */
 import { test, expect } from "@playwright/test";
 import { setupApp, sendMessage, makeSession, makeConversation, sse } from "./helpers/setup";
@@ -22,7 +24,7 @@ test.describe("chat", () => {
     await sendMessage(page, "Hello Claude");
 
     // User's message bubble is immediately visible
-    await expect(page.getByText("Hello Claude")).toBeVisible();
+    await expect(page.getByRole("main").getByText("Hello Claude")).toBeVisible();
 
     // ClaudeStatus bar appears while streaming (has role=status)
     await expect(page.getByRole("status")).toBeVisible();
@@ -79,5 +81,35 @@ test.describe("chat", () => {
 
     // 4. The chat should remain blank — not navigated to the completed conversation
     await expect(page.getByText("Start a new conversation")).toBeVisible();
+  });
+
+  test("UF-59 sidebar shows first user message as title immediately after sending", async ({ page }) => {
+    await setupApp(page, {});
+
+    await sendMessage(page, "Tell me about cattle ranching");
+
+    // Title appears in the sidebar immediately — before any SSE events arrive
+    await expect(page.locator("span.truncate").filter({ hasText: "Tell me about cattle ranching" })).toBeVisible();
+  });
+
+  test("UF-60 can create a second new chat after the first", async ({ page }) => {
+    const ctrl = await setupApp(page, {});
+
+    // Create first chat and complete its stream
+    await sendMessage(page, "First message");
+    ctrl.setSessions([makeSession({ session_id: "sess-1", title: "First message" })]);
+    ctrl.sendSseEvents(sse.text("Response 1", "sess-1"));
+    await expect(page.getByRole("status")).not.toBeVisible();
+
+    // Click New Chat and send a second message
+    await page.getByRole("button", { name: "New Chat" }).click();
+    await expect(page.getByText("Start a new conversation")).toBeVisible();
+
+    await sendMessage(page, "Second message");
+
+    // Second conversation is created as a separate entry in the sidebar
+    await expect(page.locator("span.truncate").filter({ hasText: "Second message" })).toBeVisible();
+    // The first conversation is still in the sidebar
+    await expect(page.locator("span.truncate").filter({ hasText: "First message" })).toBeVisible();
   });
 });

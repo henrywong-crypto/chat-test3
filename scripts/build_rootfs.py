@@ -39,7 +39,6 @@ INSTALL_DIR = Path("/var/lib/fc")
 ROOTFS_DIR = Path(__file__).parent.parent / "rootfs"
 AGENT_PY = ROOTFS_DIR / "agent.py"
 AGENT_SERVICE = ROOTFS_DIR / "agent.service"
-SETTINGS_PY = ROOTFS_DIR / "settings.py"
 
 CLAUDE_SETTINGS = """\
 {
@@ -285,7 +284,6 @@ def install_agent(rootfs: Path) -> None:
     opt = rootfs / "opt"
     opt.mkdir(exist_ok=True)
     shutil.copy(str(AGENT_PY), str(opt / "agent.py"))
-    shutil.copy(str(SETTINGS_PY), str(opt / "settings.py"))
     run(["chown", "-R", "1000:1000", str(opt)])
 
     # Install and enable the agent systemd service so agent.py starts on boot.

@@ -45,7 +45,7 @@ pub(crate) async fn download_file_handler(
         .context("canonicalize timed out")?
         .context("failed to resolve remote path")?,
     );
-    let upload_dir = PathBuf::from(&state.config.upload_dir);
+    let upload_dir = state.config.upload_dir.clone();
     validate_within_dir(&real_path, &upload_dir)?;
     let real_path_str = real_path
         .to_str()

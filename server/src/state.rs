@@ -33,7 +33,7 @@ pub(crate) struct AppConfig {
     #[serde(default = "default_ssh_user")]
     pub(crate) ssh_user: String,
     #[serde(default = "default_ssh_user_home")]
-    pub(crate) ssh_user_home: String,
+    pub(crate) ssh_user_home: PathBuf,
     #[serde(default = "default_vm_host_key_path")]
     pub(crate) vm_host_key_path: PathBuf,
     #[serde(default)]
@@ -51,7 +51,7 @@ pub(crate) struct AppConfig {
     #[serde(default = "default_user_rootfs_dir")]
     pub(crate) user_rootfs_dir: PathBuf,
     #[serde(default = "default_upload_dir")]
-    pub(crate) upload_dir: String,
+    pub(crate) upload_dir: PathBuf,
     #[serde(default = "default_database_url")]
     pub(crate) database_url: String,
     #[serde(default = "default_port")]
@@ -103,8 +103,8 @@ fn default_ssh_key_path() -> PathBuf {
 fn default_ssh_user() -> String {
     "root".to_string()
 }
-fn default_ssh_user_home() -> String {
-    "/root".to_string()
+fn default_ssh_user_home() -> PathBuf {
+    PathBuf::from("/root")
 }
 fn default_vm_host_key_path() -> PathBuf {
     PathBuf::from("/var/lib/fc/vm_host_ed25519_key.pub")
@@ -115,8 +115,8 @@ fn default_cognito_redirect_uri() -> String {
 fn default_user_rootfs_dir() -> PathBuf {
     PathBuf::from("/home/ubuntu/fc-users")
 }
-fn default_upload_dir() -> String {
-    "/home/ubuntu".to_string()
+fn default_upload_dir() -> PathBuf {
+    PathBuf::from("/home/ubuntu")
 }
 fn default_database_url() -> String {
     "postgres://localhost/webcode".to_string()
@@ -169,15 +169,15 @@ pub(crate) fn load_config() -> Result<AppConfig> {
         .try_deserialize()?;
     // Derive ssh_user_home from ssh_user when the caller hasn't explicitly
     // configured it and ssh_user isn't root (e.g. ssh_user="ubuntu" → "/home/ubuntu").
-    if app_config.ssh_user_home == "/root" && app_config.ssh_user != "root" {
-        app_config.ssh_user_home = format!("/home/{}", app_config.ssh_user);
+    if app_config.ssh_user_home == PathBuf::from("/root") && app_config.ssh_user != "root" {
+        app_config.ssh_user_home = PathBuf::from("/home").join(&app_config.ssh_user);
     }
     tracing::info!("config loaded");
     Ok(app_config)
 }
 
 impl AppConfig {
-    pub(crate) fn vm_build_config(&self) -> VmBuildConfig {
+    pub(crate) fn to_vm_build_config(&self) -> VmBuildConfig {
         VmBuildConfig {
             kernel_path: self.kernel_path.clone(),
             net_helper_path: self.net_helper_path.clone(),

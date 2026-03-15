@@ -32,7 +32,7 @@ pub(crate) async fn upload_file_handler(
     mut multipart: Multipart,
 ) -> Result<Response, AppError> {
     let upload_metadata = extract_upload_metadata(&mut multipart).await?;
-    let Some(csrf_token) = validate_csrf(&session, &upload_metadata.csrf_token).await else {
+    let Some(csrf_token) = validate_csrf(&session, &upload_metadata.csrf_token).await? else {
         return Ok((StatusCode::FORBIDDEN, "Forbidden").into_response());
     };
     let mut ssh_handle = connect_ssh(
@@ -47,7 +47,7 @@ pub(crate) async fn upload_file_handler(
         &mut multipart,
         &sftp,
         Path::new(&upload_metadata.remote_path),
-        Path::new(&state.config.upload_dir),
+        &state.config.upload_dir,
     )
     .await?;
     Ok(attach_csrf_token((StatusCode::OK, "").into_response(), &csrf_token))

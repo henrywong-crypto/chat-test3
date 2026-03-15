@@ -2,10 +2,12 @@ use anyhow::{Context, Result};
 use axum::{
     Error as AxumError,
     extract::{
+        Path,
         State,
         ws::{Message, WebSocket, WebSocketUpgrade},
     },
-    response::Response,
+    http::StatusCode,
+    response::{IntoResponse, Response},
 };
 use bytes::Bytes;
 use futures::{SinkExt, StreamExt, stream::SplitSink};
@@ -27,9 +29,13 @@ const SEND_TIMEOUT_SECS: u64 = 30;
 
 pub(crate) async fn handle_ws_upgrade(
     user_vm: UserVm,
+    Path(vm_id): Path<String>,
     ws: WebSocketUpgrade,
     State(state): State<AppState>,
 ) -> Result<Response, AppError> {
+    if user_vm.vm_id != vm_id {
+        return Ok((StatusCode::NOT_FOUND, "Session not found").into_response());
+    }
     Ok(ws.on_upgrade(move |socket| async move {
         run_terminal_session(socket, state, user_vm.vm_id.clone(), user_vm.user_id, user_vm.guest_ip).await
     }))

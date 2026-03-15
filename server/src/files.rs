@@ -10,7 +10,7 @@ use serde::{Deserialize, Serialize};
 use sftp_client::open_sftp_session;
 use ssh_client::connect_ssh;
 use std::{
-    path::{Path as StdPath, PathBuf},
+    path::{Path, PathBuf},
     time::Duration,
 };
 use tokio::time::timeout;
@@ -61,7 +61,7 @@ pub(crate) async fn list_files_handler(
         .context("canonicalize timed out")?
         .context("failed to resolve remote path")?,
     );
-    validate_within_dir(&real_path, &PathBuf::from(&state.config.upload_dir))?;
+    validate_within_dir(&real_path, &state.config.upload_dir)?;
     let real_path_str = real_path
         .to_str()
         .context("resolved path is not valid UTF-8")?
@@ -79,7 +79,7 @@ pub(crate) async fn list_files_handler(
 
 async fn collect_file_entries(
     sftp: &SftpSession,
-    dir_path: &StdPath,
+    dir_path: &Path,
     raw_entries: Vec<DirEntry>,
 ) -> Result<Vec<FileEntry>> {
     let mut dirs: Vec<FileEntry> = Vec::new();

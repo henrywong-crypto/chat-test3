@@ -20,6 +20,7 @@ use axum::{
     routing::{get, post},
 };
 use firecracker_manager::{cleanup_stale_vms, setup_host_networking};
+use std::net::{IpAddr, Ipv4Addr, SocketAddr};
 use time::Duration;
 use tokio::{net::TcpListener, signal, sync::oneshot, task::AbortHandle};
 use tower_sessions::{ExpiredDeletion, Expiry, SessionManagerLayer, cookie::SameSite};
@@ -167,7 +168,8 @@ async fn serve_router(
     mmds_refresh_abort_handle: AbortHandle,
     idle_vm_sweep_abort_handle: AbortHandle,
 ) -> Result<()> {
-    let tcp_listener = TcpListener::bind(format!("0.0.0.0:{port}"))
+    let addr = SocketAddr::new(IpAddr::V4(Ipv4Addr::UNSPECIFIED), port);
+    let tcp_listener = TcpListener::bind(addr)
         .await
         .with_context(|| format!("failed to bind to port {port}"))?;
     info!("listening on http://0.0.0.0:{port}");

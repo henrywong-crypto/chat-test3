@@ -11,11 +11,12 @@ import ClaudeStatus from "./ClaudeStatus";
 
 interface ChatInterfaceProps {
   selectedConversation: Conversation | null;
+  newChatKey?: number;
   onRunningConversationChange?: (conversationId: string | null) => void;
   onConversationCreated?: (conversation: Conversation) => void;
 }
 
-export default function ChatInterface({ selectedConversation, onRunningConversationChange, onConversationCreated }: ChatInterfaceProps) {
+export default function ChatInterface({ selectedConversation, newChatKey = 0, onRunningConversationChange, onConversationCreated }: ChatInterfaceProps) {
   const sseCtx = useSse();
   const {
     conversations,
@@ -45,6 +46,19 @@ export default function ChatInterface({ selectedConversation, onRunningConversat
     setMessages,
     generateId,
   } = chatState;
+
+  // Fire whenever the user clicks "New Chat" — even if selectedConversation was
+  // already null (in which case the selectedConversation effect below would not
+  // re-run, leaving viewConversationId stale and the composer unfocused).
+  const newChatKeyMounted = useRef(false);
+  useEffect(() => {
+    if (!newChatKeyMounted.current) {
+      newChatKeyMounted.current = true;
+      return;
+    }
+    setViewConversationId(null);
+    setComposerFocusKey((k) => k + 1);
+  }, [newChatKey, setViewConversationId]);
 
   useSseHandlers(
     {
@@ -108,6 +122,7 @@ export default function ChatInterface({ selectedConversation, onRunningConversat
       const newConv = sseCtx.createConversation();
       effectiveConversationId = newConv.conversationId;
       setViewConversationId(effectiveConversationId);
+      sseCtx.updateConversation(newConv.conversationId, { title: text.split("\n")[0].slice(0, 80).trim() });
       onConversationCreated?.(newConv);
     }
 

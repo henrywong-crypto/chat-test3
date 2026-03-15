@@ -5,7 +5,8 @@ use ssh_client::{SshClient, connect_ssh, open_exec_channel};
 use std::{net::Ipv4Addr, path::Path, str::from_utf8, time::Duration};
 use tokio::time::timeout;
 
-const SETTINGS_CMD: &str = "bash -lc '/usr/local/bin/uv run /opt/settings.py'";
+const GET_SETTINGS_CMD: &str = "cat ~/.claude/settings.json 2>/dev/null || echo '{}'";
+const SET_SETTINGS_CMD: &str = "mkdir -p ~/.claude && cat > ~/.claude/settings.json";
 const CHANNEL_SEND_TIMEOUT_SECS: u64 = 30;
 const CHANNEL_WAIT_TIMEOUT_SECS: u64 = 30;
 
@@ -45,33 +46,30 @@ pub async fn get_vm_settings(
     vm_host_key_path: &Path,
 ) -> Result<VmSettings> {
     let mut ssh_handle = connect_ssh(guest_ip, ssh_key_path, ssh_user, vm_host_key_path).await?;
-    let command = "{\"type\":\"get\"}\n";
-    let mut channel = open_exec_channel(&mut ssh_handle, SETTINGS_CMD).await?;
-    timeout(
-        Duration::from_secs(CHANNEL_SEND_TIMEOUT_SECS),
-        channel.data(Bytes::from(command.as_bytes()).as_ref()),
-    )
-    .await
-    .context("SSH channel send timed out")?
-    .context("SSH channel send failed")?;
+    let mut channel = open_exec_channel(&mut ssh_handle, GET_SETTINGS_CMD).await?;
     let mut stdout = String::new();
     loop {
         match timeout(Duration::from_secs(CHANNEL_WAIT_TIMEOUT_SECS), channel.wait()).await {
             Ok(Some(ChannelMsg::Data { ref data })) => {
-                stdout.push_str(from_utf8(data).unwrap_or(""));
+                stdout.push_str(from_utf8(data).context("SSH channel returned non-UTF-8 data")?);
             }
             Ok(Some(ChannelMsg::ExitStatus { .. })) | Ok(None) => break,
             Ok(_) => {}
             Err(_) => return Err(anyhow!("SSH channel read timed out")),
         }
     }
-    let response: serde_json::Value =
-        serde_json::from_str(&stdout).context("failed to parse settings response")?;
+    parse_vm_settings(stdout.trim())
+}
+
+fn parse_vm_settings(stdout: &str) -> Result<VmSettings> {
+    let settings: serde_json::Value =
+        serde_json::from_str(stdout).context("failed to parse settings JSON")?;
     Ok(VmSettings {
-        has_api_key: response
-            .get("has_api_key")
-            .and_then(|v| v.as_bool())
-            .unwrap_or(false),
+        has_api_key: settings
+            .get("env")
+            .and_then(|v| v.get("ANTHROPIC_AUTH_TOKEN"))
+            .and_then(|v| v.as_str())
+            .is_some_and(|s| !s.is_empty()),
     })
 }
 
@@ -83,26 +81,28 @@ pub async fn set_vm_settings(
     content: &str,
 ) -> Result<()> {
     let mut ssh_handle = connect_ssh(guest_ip, ssh_key_path, ssh_user, vm_host_key_path).await?;
-    send_settings_command(&mut ssh_handle, content).await
+    write_settings_file(&mut ssh_handle, content).await
 }
 
-async fn send_settings_command(
+async fn write_settings_file(
     ssh_handle: &mut client::Handle<SshClient>,
     content: &str,
 ) -> Result<()> {
-    let command = serde_json::to_string(&serde_json::json!({
-        "type": "set",
-        "content": content,
-    }))?;
-    let cmd_line = format!("{command}\n");
-    let mut channel = open_exec_channel(ssh_handle, SETTINGS_CMD).await?;
+    let mut channel = open_exec_channel(ssh_handle, SET_SETTINGS_CMD).await?;
     timeout(
         Duration::from_secs(CHANNEL_SEND_TIMEOUT_SECS),
-        channel.data(Bytes::from(cmd_line).as_ref()),
+        channel.data(Bytes::copy_from_slice(content.as_bytes()).as_ref()),
     )
     .await
     .context("SSH channel send timed out")?
     .context("SSH channel send failed")?;
+    timeout(
+        Duration::from_secs(CHANNEL_SEND_TIMEOUT_SECS),
+        channel.eof(),
+    )
+    .await
+    .context("SSH channel eof timed out")?
+    .context("SSH channel eof failed")?;
     loop {
         match timeout(Duration::from_secs(CHANNEL_WAIT_TIMEOUT_SECS), channel.wait()).await {
             Ok(Some(ChannelMsg::ExitStatus { .. })) | Ok(None) => break,

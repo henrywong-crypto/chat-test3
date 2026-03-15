@@ -56,7 +56,7 @@ pub(crate) async fn handle_chat_query(
     State(state): State<AppState>,
     Json(body): Json<QueryBody>,
 ) -> Result<Response, AppError> {
-    let Some(csrf_token) = validate_csrf(&session, &body.csrf_token).await else {
+    let Some(csrf_token) = validate_csrf(&session, &body.csrf_token).await? else {
         return Ok((StatusCode::FORBIDDEN, "Forbidden").into_response());
     };
     let task_id = Uuid::new_v4().to_string();
@@ -146,8 +146,10 @@ pub(crate) async fn handle_chat_question_answer(
     State(state): State<AppState>,
     Json(body): Json<QuestionAnswerBody>,
 ) -> Response {
-    let Some(csrf_token) = validate_csrf(&session, &body.csrf_token).await else {
-        return (StatusCode::FORBIDDEN, "Forbidden").into_response();
+    let csrf_token = match validate_csrf(&session, &body.csrf_token).await {
+        Ok(Some(token)) => token,
+        Ok(None) => return (StatusCode::FORBIDDEN, "Forbidden").into_response(),
+        Err(e) => return AppError::from(e).into_response(),
     };
     let request_id = body.request_id.clone();
     let agent_message = AgentMessage::QuestionAnswer {
@@ -173,8 +175,10 @@ pub(crate) async fn handle_chat_stop(
     State(state): State<AppState>,
     Json(body): Json<StopBody>,
 ) -> Response {
-    let Some(csrf_token) = validate_csrf(&session, &body.csrf_token).await else {
-        return (StatusCode::FORBIDDEN, "Forbidden").into_response();
+    let csrf_token = match validate_csrf(&session, &body.csrf_token).await {
+        Ok(Some(token)) => token,
+        Ok(None) => return (StatusCode::FORBIDDEN, "Forbidden").into_response(),
+        Err(e) => return AppError::from(e).into_response(),
     };
     let agent_message = AgentMessage::Interrupt { task_id: body.task_id };
     if let Err(response) = dispatch_agent_message(&user_vm, &state, &agent_message).await {

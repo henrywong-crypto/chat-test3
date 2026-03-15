@@ -73,8 +73,10 @@ pub(crate) async fn put_settings_handler(
     State(state): State<AppState>,
     Json(body): Json<SetSettingsBody>,
 ) -> Response {
-    let Some(csrf_token) = validate_csrf(&session, &body.csrf_token).await else {
-        return (StatusCode::FORBIDDEN, "Forbidden").into_response();
+    let csrf_token = match validate_csrf(&session, &body.csrf_token).await {
+        Ok(Some(token)) => token,
+        Ok(None) => return (StatusCode::FORBIDDEN, "Forbidden").into_response(),
+        Err(e) => return AppError::from(e).into_response(),
     };
     if state.config.use_iam_creds {
         return (

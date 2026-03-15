@@ -6,6 +6,7 @@
  * UF-56  New Chat auto-focus — clicking "New Chat" puts focus on the composer textarea
  * UF-57  Post-send focus    — after sending a message the composer textarea regains focus
  * UF-58  Session select focus — switching to a history session focuses the composer textarea
+ * UF-61  New Chat from blank focuses composer — clicking "New Chat" when already on blank state focuses composer
  */
 import { test, expect } from "@playwright/test";
 import { setupApp, sendMessage, sse, makeConversation } from "./helpers/setup";
@@ -113,6 +114,21 @@ test.describe("composer", () => {
     });
 
     await page.getByText("Past chat").click();
+
+    const composer = page.getByPlaceholder("Message Claude…");
+    await expect(composer).toBeFocused();
+  });
+
+  test("UF-61 clicking New Chat when already on blank state focuses the composer textarea", async ({ page }) => {
+    // Load with no conversations — selectedConversation starts as null
+    await setupApp(page, {});
+
+    // Click somewhere else first to lose focus
+    await page.getByText("Start a new conversation").click();
+
+    // Click New Chat — selectedConversation stays null but newChatKey increments,
+    // which must still trigger focus even without a selectedConversation state change
+    await page.getByRole("button", { name: "New Chat" }).click();
 
     const composer = page.getByPlaceholder("Message Claude…");
     await expect(composer).toBeFocused();
