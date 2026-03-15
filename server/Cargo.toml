@@ -27,7 +27,7 @@ russh-sftp = "2.1.1"
 serde = { version = "1.0.228", features = ["derive"] }
 serde_json = "1.0.149"
 sftp-client = { git = "https://github.com/llm-proxy-rs/web" }
-ssh-client = { git = "https://github.com/llm-proxy-rs/web" }
+ssh-client = { path = "../ssh-client" }
 store = { git = "https://github.com/llm-proxy-rs/web" }
 time = { version = "0.3.47", features = ["formatting"] }
 tokio = { version = "1.50.0", features = ["full"] }

@@ -1,10 +1,13 @@
-use anyhow::{Context, Result};
+use anyhow::{Context, Result, anyhow};
 use bytes::Bytes;
 use russh::{ChannelMsg, client};
 use ssh_client::{SshClient, connect_ssh, open_exec_channel};
-use std::{net::Ipv4Addr, path::Path, str::from_utf8};
+use std::{net::Ipv4Addr, path::Path, str::from_utf8, time::Duration};
+use tokio::time::timeout;
 
 const SETTINGS_CMD: &str = "bash -lc '/usr/local/bin/uv run /opt/settings.py'";
+const CHANNEL_SEND_TIMEOUT_SECS: u64 = 30;
+const CHANNEL_WAIT_TIMEOUT_SECS: u64 = 30;
 
 pub struct VmSettings {
     pub has_api_key: bool,
@@ -44,17 +47,22 @@ pub async fn get_vm_settings(
     let mut ssh_handle = connect_ssh(guest_ip, ssh_key_path, ssh_user, vm_host_key_path).await?;
     let command = "{\"type\":\"get\"}\n";
     let mut channel = open_exec_channel(&mut ssh_handle, SETTINGS_CMD).await?;
-    channel
-        .data(Bytes::from(command.as_bytes()).as_ref())
-        .await?;
+    timeout(
+        Duration::from_secs(CHANNEL_SEND_TIMEOUT_SECS),
+        channel.data(Bytes::from(command.as_bytes()).as_ref()),
+    )
+    .await
+    .context("SSH channel send timed out")?
+    .context("SSH channel send failed")?;
     let mut stdout = String::new();
     loop {
-        match channel.wait().await {
-            Some(ChannelMsg::Data { ref data }) => {
+        match timeout(Duration::from_secs(CHANNEL_WAIT_TIMEOUT_SECS), channel.wait()).await {
+            Ok(Some(ChannelMsg::Data { ref data })) => {
                 stdout.push_str(from_utf8(data).unwrap_or(""));
             }
-            Some(ChannelMsg::ExitStatus { .. }) | None => break,
-            _ => {}
+            Ok(Some(ChannelMsg::ExitStatus { .. })) | Ok(None) => break,
+            Ok(_) => {}
+            Err(_) => return Err(anyhow!("SSH channel read timed out")),
         }
     }
     let response: serde_json::Value =
@@ -88,11 +96,18 @@ async fn send_settings_command(
     }))?;
     let cmd_line = format!("{command}\n");
     let mut channel = open_exec_channel(ssh_handle, SETTINGS_CMD).await?;
-    channel.data(Bytes::from(cmd_line).as_ref()).await?;
+    timeout(
+        Duration::from_secs(CHANNEL_SEND_TIMEOUT_SECS),
+        channel.data(Bytes::from(cmd_line).as_ref()),
+    )
+    .await
+    .context("SSH channel send timed out")?
+    .context("SSH channel send failed")?;
     loop {
-        match channel.wait().await {
-            Some(ChannelMsg::ExitStatus { .. }) | None => break,
-            _ => {}
+        match timeout(Duration::from_secs(CHANNEL_WAIT_TIMEOUT_SECS), channel.wait()).await {
+            Ok(Some(ChannelMsg::ExitStatus { .. })) | Ok(None) => break,
+            Ok(_) => {}
+            Err(_) => return Err(anyhow!("SSH channel read timed out")),
         }
     }
     Ok(())

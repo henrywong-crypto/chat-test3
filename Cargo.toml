@@ -2,6 +2,7 @@
 members = [
     "chat-settings",
     "server",
+    "ssh-client",
     "vm-lifecycle",
 ]
 resolver = "2"
