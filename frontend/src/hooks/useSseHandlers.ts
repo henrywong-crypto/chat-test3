@@ -207,6 +207,7 @@ export function useSseHandlers(
         case "done": {
           const { session_id, task_id } = event.payload;
           const completedSession = runningRef.current;
+          const wasPending = completedSession?.startsWith("pending:") ?? false;
           localStorage.removeItem(`chat_messages_task_${task_id}`);
           currentTaskIdRef.current = null;
           setRunningSessionId(null);
@@ -218,17 +219,18 @@ export function useSseHandlers(
           toolIdToMsgId.current.clear();
 
           if (session_id && completedSession === viewRef.current) {
-            const newChatKeyUnchanged = completedSession !== null || sessionStartKeyRef.current === newChatKeyRef.current;
+            const newChatKeyUnchanged = !wasPending || sessionStartKeyRef.current === newChatKeyRef.current;
             if (newChatKeyUnchanged) {
               const msgs = getMessages(completedSession);
               setMessages(session_id, msgs);
-              if (completedSession === null) {
-                setMessages(null, []);
+              if (wasPending) {
+                // Clear the temporary pending slot now that it has a real session ID
+                setMessages(completedSession, []);
               }
               setViewSessionId(session_id);
-            } else if (completedSession === null) {
+            } else if (wasPending) {
               // New Chat was clicked after this session started — discard stale messages
-              setMessages(null, []);
+              setMessages(completedSession, []);
             }
           }
 

@@ -9,18 +9,18 @@ This document traces every message from the moment the user presses Enter throug
 ```mermaid
 graph LR
     subgraph Browser
-        SC[SseContext\nEventSource]
+        SC["SseContext<br/>EventSource"]
     end
 
     subgraph Server["Server (Rust / Axum)"]
         HS[handle_chat_stream]
         HQ[handle_chat_query]
-        VR[VmRelayHandle\nsse_output + inbound_tx]
-        RR[run_relay\ntokio::select!]
+        VR["VmRelayHandle<br/>sse_output + inbound_tx"]
+        RR["run_relay<br/>tokio::select!"]
     end
 
     subgraph VM["VM (Ubuntu guest)"]
-        AG[agent.py\n/tmp/agent.sock]
+        AG["agent.py<br/>/tmp/agent.sock"]
     end
 
     SC -- "GET /chat-stream (SSE)" --> HS
@@ -28,11 +28,11 @@ graph LR
     VR -- "Bytes stream" --> SC
 
     SC -- "POST /chat" --> HQ
-    HQ -- "AgentMessage::Query\ninto inbound_tx" --> VR
+    HQ -- "AgentMessage::Query" --> VR
     VR --> RR
 
-    RR -- "SSH direct-streamlocal\n/tmp/agent.sock" --> AG
-    AG -- "SSE lines → stdout\n→ SSH channel" --> RR
+    RR -- "SSH direct-streamlocal" --> AG
+    AG -- "SSE lines via SSH channel" --> RR
 ```
 
 There are three tiers:
@@ -463,20 +463,20 @@ flowchart TD
     A([User presses Enter]) --> B
 
     subgraph Frontend
-        B["handleSend\naddMessage user bubble\nsetRunningSessionId\nsetIsStreaming true"]
-        B --> C["sendQuery\nPOST /chat"]
-        N["useSseHandlers drains eventQueueRef\nsession_start → localStorage\ninit → add thinking bubble\ntext_delta → append to assistant msg\ndone → promote null→session_id\n        clear localStorage\n        loadHistory"]
+        B["handleSend<br/>addMessage user bubble<br/>setRunningSessionId<br/>setIsStreaming true"]
+        B --> C["sendQuery<br/>POST /chat"]
+        N["useSseHandlers drains eventQueueRef<br/>session_start → localStorage<br/>init → add thinking bubble<br/>text_delta → append to assistant msg<br/>done → promote null→session_id, clear localStorage, loadHistory"]
     end
 
     subgraph Server
-        C --> D["handle_chat_query\ngenerate task_id\nforward AgentMessage::Query\nreturn {task_id}"]
-        D --> E["run_relay inbound arm\nbuild_query_payload\nssh_channel.data(json_line)"]
-        F["run_relay SSH arm\ntake_live_sse_sender\nforward bytes to SSE body"]
+        C --> D["handle_chat_query<br/>generate task_id<br/>forward AgentMessage::Query<br/>return task_id"]
+        D --> E["run_relay inbound arm<br/>build_query_payload<br/>ssh_channel.data(json_line)"]
+        F["run_relay SSH arm<br/>take_live_sse_sender<br/>forward bytes to SSE body"]
     end
 
     subgraph VM
-        E --> G["route_connection\nhandle_query\nspawn run_query task"]
-        G --> H["run_query\ncall Claude SDK query\nemit_sse events line by line"]
+        E --> G["route_connection<br/>handle_query<br/>spawn run_query task"]
+        G --> H["run_query<br/>call Claude SDK query<br/>emit_sse events line by line"]
         H --> F
     end
 

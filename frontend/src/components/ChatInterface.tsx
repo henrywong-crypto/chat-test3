@@ -23,8 +23,12 @@ export default function ChatInterface({ sessions, setSessions, selectedSession, 
   const chatState = useChatState();
   const newChatKeyRef = useRef(newChatKey);
   newChatKeyRef.current = newChatKey;
-  // Snapshot of newChatKey at the time the current null-session request was sent
+  // Snapshot of newChatKey at the time the current pending-session request was sent
   const sessionStartKeyRef = useRef(newChatKey);
+
+  // Each new (pre-session) chat gets a unique "pending:UUID" key instead of sharing null,
+  // so concurrent new chats don't clobber each other's messages.
+  const pendingSessionIdRef = useRef(`pending:${Math.random().toString(36).slice(2, 10)}`);
 
   // Bumped whenever the composer should receive focus (new chat or session switch)
   const [composerFocusKey, setComposerFocusKey] = useState(0);
@@ -53,10 +57,11 @@ export default function ChatInterface({ sessions, setSessions, selectedSession, 
     { ...chatState, setSessions },
   );
 
-  // Load history on mount
+  // Load history on mount and set initial viewSessionId to the pending slot
   useEffect(() => {
+    setViewSessionId(pendingSessionIdRef.current);
     loadHistory().then(setSessions).catch(console.error);
-  }, [loadHistory, setSessions]);
+  }, [loadHistory, setSessions, setViewSessionId]); // eslint-disable-line react-hooks/exhaustive-deps
 
   // Load transcript when user switches to an existing session
   const loadTranscriptForSession = useCallback(async (session: ChatSession) => {
@@ -74,7 +79,7 @@ export default function ChatInterface({ sessions, setSessions, selectedSession, 
   // React to session selection from the sidebar (driven by App.tsx)
   useEffect(() => {
     if (!selectedSession) {
-      setViewSessionId(null);
+      setViewSessionId(pendingSessionIdRef.current);
       return;
     }
     setViewSessionId(selectedSession.session_id);
@@ -91,11 +96,15 @@ export default function ChatInterface({ sessions, setSessions, selectedSession, 
   // Reset to a blank new chat when the user explicitly clicks "New Chat"
   useEffect(() => {
     if (newChatKey === 0) return;
-    if (runningSessionIdRef.current === null && isStreamingRef.current) {
+    if (runningSessionIdRef.current?.startsWith("pending:") && isStreamingRef.current) {
       setNullOrphaned(true);
     }
-    setMessages(null, []);
-    setViewSessionId(null);
+    // Clear the current pending slot and rotate to a fresh key so this chat's
+    // messages don't collide with the previous (or any future) new chat.
+    setMessages(pendingSessionIdRef.current, []);
+    const freshPendingId = `pending:${Math.random().toString(36).slice(2, 10)}`;
+    pendingSessionIdRef.current = freshPendingId;
+    setViewSessionId(freshPendingId);
     setComposerFocusKey((k) => k + 1);
   }, [newChatKey, setMessages, setViewSessionId, setNullOrphaned]);
 
@@ -108,7 +117,8 @@ export default function ChatInterface({ sessions, setSessions, selectedSession, 
 
   const handleSend = useCallback(async (text: string) => {
     const sessionId = viewSessionId;
-    if (sessionId === null) {
+    const isPending = sessionId?.startsWith("pending:") ?? true;
+    if (isPending) {
       sessionStartKeyRef.current = newChatKey;
     }
     const userMsgId = generateId();
@@ -121,8 +131,10 @@ export default function ChatInterface({ sessions, setSessions, selectedSession, 
     setRunningSessionId(sessionId);
     setIsStreaming(true);
 
+    // Pending sessions are new chats — the server expects null for session_id
+    const serverSessionId = isPending ? null : sessionId;
     try {
-      await sseCtx.sendQuery(text, sessionId);
+      await sseCtx.sendQuery(text, serverSessionId);
     } catch (err) {
       addMessage(sessionId, {
         id: generateId(),
@@ -133,7 +145,7 @@ export default function ChatInterface({ sessions, setSessions, selectedSession, 
       setRunningSessionId(null);
       setIsStreaming(false);
     }
-  }, [viewSessionId, generateId, addMessage, setRunningSessionId, setIsStreaming, sseCtx]);
+  }, [viewSessionId, newChatKey, generateId, addMessage, setRunningSessionId, setIsStreaming, sseCtx]);
 
   const handleStop = useCallback(() => {
     sseCtx.sendStop(getTaskId(runningSessionId) ?? "").catch(console.error);
