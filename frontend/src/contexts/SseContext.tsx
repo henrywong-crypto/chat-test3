@@ -29,6 +29,7 @@ interface SseContextValue {
   createConversation: () => Conversation;
   updateConversation: (id: string, update: Partial<Conversation>) => void;
   deleteConversation: (id: string) => void;
+  syncConversationsFromHistory: () => Promise<void>;
   sendQuery: (content: string, conversationId: string, sessionId?: string, workDir?: string) => void;
   sendStop: (taskId: string) => Promise<void>;
   answerQuestion: (taskId: string, requestId: string, answers: Record<string, string>) => Promise<void>;
@@ -247,6 +248,39 @@ export function SseProvider({ children }: { children: React.ReactNode }) {
     });
   }, [vmId]);
 
+  const loadHistory = useCallback(async (): Promise<ChatSession[]> => {
+    const res = await fetch("/chat-history");
+    if (!res.ok) throw new Error(`HTTP ${res.status}`);
+    return res.json();
+  }, []);
+
+  const syncConversationsFromHistory = useCallback(async () => {
+    const sessions = await loadHistory();
+    setConversations((prev) => {
+      const existingSessionIds = new Set(
+        prev.map((c) => c.sessionId).filter((id): id is string => !!id),
+      );
+      const newConversations: Conversation[] = sessions
+        .filter((s) => !existingSessionIds.has(s.session_id))
+        .map((s) => ({
+          conversationId: crypto.randomUUID(),
+          sessionId: s.session_id,
+          projectDir: s.project_dir,
+          title: s.title,
+          createdAt: new Date(s.created_at).getTime(),
+        }));
+      if (newConversations.length === 0) return prev;
+      const updated = [...prev, ...newConversations];
+      saveConversationsToStorage(vmId, updated);
+      return updated;
+    });
+  }, [loadHistory, vmId]);
+
+  // On mount: sync server sessions into local conversations
+  useEffect(() => {
+    syncConversationsFromHistory().catch(console.error);
+  }, []); // eslint-disable-line react-hooks/exhaustive-deps
+
   const esRef = useRef<EventSource | null>(null);
 
   // On mount: check for in-progress task and open reconnect stream
@@ -338,12 +372,6 @@ export function SseProvider({ children }: { children: React.ReactNode }) {
     await post("/chat-question-answer", { task_id: taskId, request_id: requestId, answers });
   }, [post]);
 
-  const loadHistory = useCallback(async (): Promise<ChatSession[]> => {
-    const res = await fetch("/chat-history");
-    if (!res.ok) throw new Error(`HTTP ${res.status}`);
-    return res.json();
-  }, []);
-
   const loadTranscript = useCallback(async (
     sessionId: string,
     projectDir: string,
@@ -409,6 +437,7 @@ export function SseProvider({ children }: { children: React.ReactNode }) {
       createConversation,
       updateConversation,
       deleteConversation,
+      syncConversationsFromHistory,
       sendQuery,
       sendStop,
       answerQuestion,

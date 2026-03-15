@@ -37,7 +37,7 @@ class ErrorBoundary extends React.Component<
 }
 
 function AppContent() {
-  const { hasUserRootfs, csrfToken, conversations, createConversation, deleteConversation, deleteSession } = useSse();
+  const { hasUserRootfs, csrfToken, conversations, createConversation, deleteConversation, deleteSession, syncConversationsFromHistory } = useSse();
   const [activeTab, setActiveTab] = useState<ViewTab>("chat");
   const [selectedConversation, setSelectedConversation] = useState<Conversation | null>(null);
   const [runningConversationId, setRunningConversationId] = useState<string | null>(null);
@@ -96,6 +96,7 @@ function AppContent() {
           onSelectConversation={setSelectedConversation}
           onNewChat={handleNewChat}
           onDeleteConversation={handleDeleteConversation}
+          onRefresh={() => { syncConversationsFromHistory().catch(console.error); }}
         />
       )}
 

@@ -1,5 +1,5 @@
 import React from "react";
-import { Plus, Trash2 } from "lucide-react";
+import { Plus, RotateCw, Trash2 } from "lucide-react";
 import type { Conversation } from "../types";
 
 interface SidebarProps {
@@ -9,6 +9,7 @@ interface SidebarProps {
   onSelectConversation: (conversation: Conversation) => void;
   onNewChat: () => void;
   onDeleteConversation: (conversation: Conversation) => void;
+  onRefresh: () => void;
 }
 
 export default function Sidebar({
@@ -18,13 +19,21 @@ export default function Sidebar({
   onSelectConversation,
   onNewChat,
   onDeleteConversation,
+  onRefresh,
 }: SidebarProps) {
   return (
     <div className="flex w-60 flex-col border-r border-border bg-card">
-      <div className="flex h-11 items-center border-b border-border px-3">
+      <div className="flex h-11 items-center justify-between border-b border-border px-3">
         <span className="text-xs font-semibold uppercase tracking-wider text-muted-foreground">
           Conversations
         </span>
+        <button
+          onClick={onRefresh}
+          title="Refresh conversations"
+          className="flex h-6 w-6 items-center justify-center rounded text-muted-foreground hover:text-foreground"
+        >
+          <RotateCw className="h-3.5 w-3.5" />
+        </button>
       </div>
 
       <div className="flex-1 overflow-y-auto py-1.5">

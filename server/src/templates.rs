@@ -20,12 +20,10 @@ pub(crate) fn render_terminal_page(
     csrf_token: &str,
     upload_dir: &str,
     has_user_rootfs: bool,
-    app_js_version: &str,
-    styles_css_version: &str,
 ) -> String {
     let upload_action = "/chat-upload".to_owned();
-    let app_js_src = format!("/static/app.js?v={app_js_version}");
-    let styles_css_href = format!("/static/styles.css?v={styles_css_version}");
+    let app_js_src = format!("/static/app.js?v={}", env!("APP_JS_VERSION"));
+    let styles_css_href = format!("/static/styles.css?v={}", env!("STYLES_CSS_VERSION"));
     let has_user_rootfs_str = has_user_rootfs.to_string();
     format!(
         r#"<!DOCTYPE html>

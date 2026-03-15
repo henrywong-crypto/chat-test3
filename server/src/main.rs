@@ -55,8 +55,7 @@ async fn main() -> Result<()> {
         )
         .init();
     let app_config = load_config()?;
-    let static_assets = load_static_assets(&app_config.static_dir)
-        .with_context(|| format!("failed to load static assets from {}", app_config.static_dir.display()))?;
+    let static_assets = load_static_assets(&app_config.static_dir);
     let pg_pool = store::connect_db(&app_config.database_url).await?;
     store::run_migrations(&pg_pool).await?;
     let session_store = PostgresStore::new(pg_pool.clone());

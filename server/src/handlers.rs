@@ -213,8 +213,6 @@ async fn build_terminal_response(
         &csrf_token,
         &state.config.upload_dir,
         has_user_rootfs,
-        &state.static_assets.app_js_version,
-        &state.static_assets.styles_css_version,
     ))
     .into_response())
 }

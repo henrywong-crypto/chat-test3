@@ -2,9 +2,10 @@
  * UF-11  Resume conversation   — clicking conversation in sidebar loads its transcript
  * UF-12  Tool results resume   — tool cards from transcript include result
  * UF-13  Delete conversation   — hovering + clicking trash removes conversation
+ * UF-14  Refresh button        — clicking Refresh imports server sessions not yet in local conversations
  */
 import { test, expect } from "@playwright/test";
-import { setupApp, makeConversation } from "./helpers/setup";
+import { setupApp, makeConversation, makeSession } from "./helpers/setup";
 
 test.describe("session", () => {
   test("UF-11 clicking a conversation in the sidebar loads its transcript", async ({ page }) => {
@@ -112,5 +113,21 @@ test.describe("session", () => {
     // Conversation is no longer visible in the sidebar
     await expect(page.getByText("to be deleted")).not.toBeVisible();
     await expect(page.getByText("No conversations yet")).toBeVisible();
+  });
+
+  test("UF-14 clicking Refresh imports server sessions not yet in local conversations", async ({
+    page,
+  }) => {
+    const ctrl = await setupApp(page, {});
+
+    // Initially no sessions on the server → sidebar is empty
+    await expect(page.getByText("No conversations yet")).toBeVisible();
+
+    // Add a server session, then click Refresh
+    ctrl.setSessions([makeSession({ session_id: "sess-new", title: "Imported session" })]);
+    await page.getByTitle("Refresh conversations").click();
+
+    // The imported session now appears in the sidebar
+    await expect(page.locator("span.truncate").filter({ hasText: "Imported session" })).toBeVisible();
   });
 });
