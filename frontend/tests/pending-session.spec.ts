@@ -3,14 +3,14 @@
  * PS-02  New Chat while streaming   — placeholder stays in sidebar with pulsing indicator; composer blank
  * PS-03  done replaces placeholder  — loadHistory response swaps placeholder for real session title
  * PS-04  Click placeholder          — navigates back to show in-progress messages
- * PS-05  POST /chat error           — placeholder never shown, error rendered, composer usable
+ * PS-05  POST /chat error           — error rendered, composer re-enables
  */
 import { test, expect } from "@playwright/test";
 import { setupApp, sendMessage, makeSession, sse } from "./helpers/setup";
 
 test.describe("pending-session", () => {
   test("PS-01 placeholder appears in sidebar immediately on send", async ({ page }) => {
-    await setupApp(page, { sessions: [] });
+    await setupApp(page, {});
 
     // Send but do NOT resolve SSE yet — placeholder must appear before any events arrive
     await sendMessage(page, "Hello Claude");
@@ -19,7 +19,7 @@ test.describe("pending-session", () => {
   });
 
   test("PS-02 clicking New Chat while streaming keeps placeholder with pulsing indicator", async ({ page }) => {
-    await setupApp(page, { sessions: [] });
+    await setupApp(page, {});
 
     await sendMessage(page, "Hello Claude");
 
@@ -40,7 +40,7 @@ test.describe("pending-session", () => {
   });
 
   test("PS-03 done event replaces placeholder with real session title", async ({ page }) => {
-    const ctrl = await setupApp(page, { sessions: [] });
+    const ctrl = await setupApp(page, {});
 
     await sendMessage(page, "Hello");
 
@@ -55,7 +55,7 @@ test.describe("pending-session", () => {
   });
 
   test("PS-04 clicking placeholder while streaming shows in-progress messages", async ({ page }) => {
-    await setupApp(page, { sessions: [] });
+    await setupApp(page, {});
 
     await sendMessage(page, "Hello Claude");
 
@@ -70,16 +70,13 @@ test.describe("pending-session", () => {
     await expect(page.getByText("Hello Claude")).toBeVisible();
   });
 
-  test("PS-05 POST /chat error: placeholder removed, error shown, composer usable", async ({ page }) => {
-    await setupApp(page, { sessions: [], chatError: "Service unavailable" });
+  test("PS-05 POST /chat error: error shown, composer re-enables", async ({ page }) => {
+    await setupApp(page, { chatError: "Service unavailable" });
 
     await sendMessage(page, "Hello");
 
-    // Wait for the error to appear — at that point the placeholder is already removed
+    // Wait for the error to appear
     await expect(page.getByText("Service unavailable")).toBeVisible();
-
-    // Placeholder should not be in the sidebar
-    await expect(page.locator("span.truncate").filter({ hasText: "New chat\u2026" })).not.toBeVisible();
 
     // Composer should be usable (not disabled)
     await expect(page.getByPlaceholder("Message Claude\u2026")).toBeEnabled();

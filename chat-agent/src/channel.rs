@@ -1,11 +1,11 @@
-use anyhow::{Context, Result};
+use anyhow::{Context, Result, anyhow};
 use bytes::Bytes;
-use chrono::{TimeDelta, Utc};
 use russh::{Channel, client};
 use ssh_client::{SshClient, connect_ssh};
-use std::{net::Ipv4Addr, path::Path};
-use tokio::time::{Duration, sleep};
-use tracing::{debug, info};
+use std::net::Ipv4Addr;
+use std::path::Path;
+use tokio::time::{Duration, sleep, timeout};
+use tracing::info;
 
 use crate::AgentMessage;
 
@@ -44,19 +44,21 @@ pub async fn send_agent_message(
 }
 
 async fn open_agent_channel(ssh_handle: &client::Handle<SshClient>) -> Result<Channel<client::Msg>> {
-    let start = Utc::now();
-    let max_wait = TimeDelta::seconds(AGENT_SOCKET_WAIT_SECS as i64);
+    timeout(Duration::from_secs(AGENT_SOCKET_WAIT_SECS), poll_agent_channel(ssh_handle))
+        .await
+        .unwrap_or_else(|_| Err(anyhow!("timed out waiting for agent socket")))
+}
+
+async fn poll_agent_channel(ssh_handle: &client::Handle<SshClient>) -> Result<Channel<client::Msg>> {
     loop {
         match ssh_handle.channel_open_direct_streamlocal("/tmp/agent.sock").await {
             Ok(channel) => {
                 info!("agent socket channel opened");
                 return Ok(channel);
             }
-            Err(e) if (Utc::now() - start) < max_wait => {
-                debug!("agent socket not ready, retrying: {e}");
+            Err(_) => {
                 sleep(Duration::from_millis(500)).await;
             }
-            Err(e) => return Err(anyhow::Error::from(e)).context("timed out waiting for agent socket"),
         }
     }
 }

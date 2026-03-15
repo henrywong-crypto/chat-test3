@@ -22,8 +22,8 @@ export type SseEvent =
   | { event: "thinking_delta"; data: { thinking: string } }
   | { event: "tool_start"; data: { id: string; name: string; input: Record<string, unknown> } }
   | { event: "tool_result"; data: { tool_use_id: string; content: string; is_error: boolean } }
-  | { event: "ask_user_question"; data: { request_id: string; task_id: string; questions: Question[] } }
-  | { event: "done"; data: { session_id: string | null; task_id: string } }
+  | { event: "ask_user_question"; data: { request_id: string; task_id: string; conversation_id?: string; questions: Question[] } }
+  | { event: "done"; data: { session_id: string | null; task_id: string; conversation_id?: string } }
   | { event: "error_event"; data: { message: string } };
 
 export function buildSseBody(events: SseEvent[]): string {
@@ -33,6 +33,18 @@ export function buildSseBody(events: SseEvent[]): string {
       return `event: ${e.event}\ndata: ${data}\n\n`;
     })
     .join("");
+}
+
+function injectConversationId(events: SseEvent[], conversationId: string): SseEvent[] {
+  return events.map((e) => {
+    if (e.event === "done") {
+      return { ...e, data: { ...e.data, conversation_id: conversationId } } as SseEvent;
+    }
+    if (e.event === "ask_user_question") {
+      return { ...e, data: { ...e.data, conversation_id: conversationId } } as SseEvent;
+    }
+    return e;
+  });
 }
 
 // Preset event sequences
@@ -87,7 +99,7 @@ export const sse = {
   ],
 };
 
-// ── Mock session data ─────────────────────────────────────────────────────
+// ── Mock session data (server-side history) ──────────────────────────────
 
 export interface Session {
   session_id: string;
@@ -102,6 +114,28 @@ export function makeSession(overrides: Partial<Session> = {}): Session {
     created_at: new Date().toISOString(),
     title: "hello",
     project_dir: "/home/ubuntu",
+    ...overrides,
+  };
+}
+
+// ── Conversation (frontend localStorage model) ────────────────────────────
+
+export interface Conversation {
+  conversationId: string;
+  sessionId?: string;
+  projectDir?: string;
+  title?: string;
+  createdAt: number;
+}
+
+let _convCounter = 0;
+
+export function makeConversation(overrides: Partial<Conversation> = {}): Conversation {
+  _convCounter++;
+  return {
+    conversationId: `conv-test-${_convCounter}`,
+    title: "hello",
+    createdAt: Date.now(),
     ...overrides,
   };
 }
@@ -138,7 +172,7 @@ function buildAppHtml(hasUserRootfs: boolean): string {
     data-vm-id="${VM_ID}"
     data-csrf-token="${CSRF_TOKEN}"
     data-upload-dir="/tmp"
-    data-upload-action="/sessions/${VM_ID}/upload"
+    data-upload-action="/chat-upload"
     data-has-user-rootfs="${hasUserRootfs}"
   ></div>
   <div id="app" class="flex h-screen w-screen overflow-hidden"></div>
@@ -150,14 +184,10 @@ function buildAppHtml(hasUserRootfs: boolean): string {
 // ── App controller ────────────────────────────────────────────────────────
 
 export interface ChatBody {
+  conversation_id: string;
   content: string;
   session_id: string | null;
   work_dir?: string | null;
-  csrf_token: string;
-}
-
-export interface HelloBody {
-  task_id: string;
   csrf_token: string;
 }
 
@@ -191,12 +221,11 @@ export interface AppController {
   setChatResponseToken(token: string | null): void;
   /** CSRF token sent in the most recent DELETE /chat-transcript, or null. */
   lastDeleteCsrfToken(): string | null;
-  /** Body of the most recent POST /chat-hello, or null. */
-  lastHelloBody(): HelloBody | null;
 }
 
 export interface SetupOpts {
   sessions?: Session[];
+  conversations?: Conversation[];
   transcripts?: Record<string, unknown[]>;
   /** Map of directory path → file entries for the /ls endpoint. */
   files?: Record<string, FileEntry[]>;
@@ -235,14 +264,28 @@ export async function setupApp(
   let lastResetBody: string | null = null;
   let chatResponseToken: string | null = null;
   let lastDeleteCsrfTokenValue: string | null = null;
-  let lastHelloBodyValue: HelloBody | null = null;
 
-  // Two-phase SSE route:
-  // Phase 1 (first connection) — immediately delivers relay_ready so isVmReady becomes true.
-  // Phase 2+ (subsequent connections) — waits for sendSseEvents (or uses queued events).
+  // SSE event delivery — shared between POST /chat and GET /chat-stream/**
   let resolveSse: ((events: SseEvent[]) => void) | null = null;
   let queuedSseEvents: SseEvent[] | null = null;
-  let sseConnectionCount = 0;
+
+  function waitForSseEvents(): Promise<SseEvent[]> {
+    if (queuedSseEvents !== null) {
+      const events = queuedSseEvents;
+      queuedSseEvents = null;
+      return Promise.resolve(events);
+    }
+    return new Promise<SseEvent[]>((resolve) => {
+      resolveSse = resolve;
+    });
+  }
+
+  // ── Pre-seed conversations into localStorage ──────────────────────────────
+  if (opts.conversations && opts.conversations.length > 0) {
+    await page.addInitScript((args: { vmId: string; conversations: Conversation[] }) => {
+      localStorage.setItem(`conversations_${args.vmId}`, JSON.stringify(args.conversations));
+    }, { vmId: VM_ID, conversations: opts.conversations });
+  }
 
   // ── App HTML page ────────────────────────────────────────────────────────
   await page.route("http://localhost/", (route) =>
@@ -259,7 +302,7 @@ export async function setupApp(
   await page.route("**/favicon.ico", (route) => route.fulfill({ status: 204 }));
 
   // ── Session history ──────────────────────────────────────────────────────
-  await page.route(`**/sessions/${VM_ID}/chat-history`, (route) =>
+  await page.route("**/chat-history", (route) =>
     route.fulfill({
       status: 200,
       contentType: "application/json",
@@ -268,7 +311,7 @@ export async function setupApp(
   );
 
   // ── Transcript (GET) and delete (DELETE) ─────────────────────────────────
-  await page.route(`**/sessions/${VM_ID}/chat-transcript**`, async (route) => {
+  await page.route("**/chat-transcript**", async (route) => {
     if (route.request().method() === "DELETE") {
       const body = route.request().postDataJSON() as { session_id: string; csrf_token: string };
       lastDeleteCsrfTokenValue = body.csrf_token ?? null;
@@ -287,7 +330,7 @@ export async function setupApp(
   });
 
   // ── File listing (for Files tab) ─────────────────────────────────────────
-  await page.route(`**/sessions/${VM_ID}/ls**`, (route) => {
+  await page.route("**/ls**", (route) => {
     const url = new URL(route.request().url());
     const dirPath = url.searchParams.get("path") ?? "/tmp";
     const entries = filesByPath[dirPath] ?? [];
@@ -298,8 +341,8 @@ export async function setupApp(
     });
   });
 
-  // ── File upload endpoint ──────────────────────────────────────────────────
-  await page.route(`**/sessions/${VM_ID}/upload`, async (route) => {
+  // ── Composer file upload endpoint ─────────────────────────────────────────
+  await page.route("**/chat-upload", async (route) => {
     uploadWasReceived = true;
     await route.fulfill({ status: 200, body: "" });
   });
@@ -323,7 +366,7 @@ export async function setupApp(
   });
 
   // ── Stop endpoint ────────────────────────────────────────────────────────
-  await page.route(`**/sessions/${VM_ID}/chat-stop`, async (route) => {
+  await page.route("**/chat-stop", async (route) => {
     stopReceived = true;
     const raw = route.request().postData();
     lastStopBody = raw ? (JSON.parse(raw) as { task_id: string }) : null;
@@ -333,12 +376,11 @@ export async function setupApp(
   // ── Reset (rootfs delete) endpoint ────────────────────────────────────────
   await page.route("**/rootfs/delete", async (route) => {
     lastResetBody = route.request().postData();
-    // Redirect back to the app so the page reloads cleanly after reset.
     await route.fulfill({ status: 303, headers: { Location: "http://localhost/" } });
   });
 
   // ── Question answer endpoint ──────────────────────────────────────────────
-  await page.route(`**/sessions/${VM_ID}/chat-question-answer`, async (route) => {
+  await page.route("**/chat-question-answer", async (route) => {
     if (opts.answerError) {
       await route.fulfill({ status: 500, body: opts.answerError });
       return;
@@ -350,34 +392,14 @@ export async function setupApp(
     await route.fulfill({ status: 200, body: "" });
   });
 
-  // ── SSE stream — two-phase ────────────────────────────────────────────────
-  // Phase 1 (first connection): immediately delivers relay_ready so isVmReady
-  // becomes true and the composer renders before setupApp returns.
-  // Phase 2+ (subsequent connections): waits for sendSseEvents or uses queued events.
-  await page.route(`**/sessions/${VM_ID}/chat-stream`, async (route) => {
-    const connNumber = ++sseConnectionCount;
-    if (connNumber === 1) {
-      await route.fulfill({
-        status: 200,
-        headers: {
-          "Content-Type": "text/event-stream",
-          "Cache-Control": "no-cache",
-          "X-Accel-Buffering": "no",
-        },
-        body: "event: relay_ready\ndata: {}\n\nretry: 0\n\n",
-      });
-      return;
-    }
-    let events: SseEvent[];
-    if (queuedSseEvents !== null) {
-      events = queuedSseEvents;
-      queuedSseEvents = null;
-    } else {
-      events = await new Promise<SseEvent[]>((resolve) => {
-        resolveSse = resolve;
-      });
-      resolveSse = null;
-    }
+  // ── Reconnect SSE stream (GET /chat-stream/{taskId}) ─────────────────────
+  // Opened by the app on mount when a running task is found in localStorage.
+  await page.route("**/chat-stream/**", async (route) => {
+    const url = new URL(route.request().url());
+    const reconnectConversationId = url.searchParams.get("conversation_id") ?? "";
+
+    const events = await waitForSseEvents();
+    const injectedEvents = injectConversationId(events, reconnectConversationId);
     await route.fulfill({
       status: 200,
       headers: {
@@ -385,47 +407,56 @@ export async function setupApp(
         "Cache-Control": "no-cache",
         "X-Accel-Buffering": "no",
       },
-      body: buildSseBody(events),
+      body: buildSseBody(injectedEvents),
     });
   });
 
-  // ── Chat message endpoint ─────────────────────────────────────────────────
-  await page.route(`**/sessions/${VM_ID}/chat`, async (route) => {
+  // ── Chat message endpoint — POST /chat returns SSE stream ────────────────
+  await page.route("**/chat", async (route) => {
+    if (route.request().method() !== "POST") return route.continue();
+
     if (opts.chatError) {
       await route.fulfill({ status: 503, body: opts.chatError });
       return;
     }
+
     const body = route.request().postDataJSON() as ChatBody;
     chatBodies.push(body);
-    const headers: Record<string, string> = { "Content-Type": "application/json" };
+    const conversationId = body.conversation_id;
+
+    const events = await waitForSseEvents();
+    const injectedEvents = injectConversationId(events, conversationId);
+
+    // Prepend task_created event so the frontend learns the task_id
+    const taskCreatedData = JSON.stringify({ task_id: DEFAULT_CLIENT_SESSION_ID, conversation_id: conversationId });
+    const taskCreatedLine = `event: task_created\ndata: ${taskCreatedData}\n\n`;
+
+    const headers: Record<string, string> = {
+      "Content-Type": "text/event-stream",
+      "Cache-Control": "no-cache",
+      "X-Accel-Buffering": "no",
+    };
     if (chatResponseToken !== null) {
       headers["x-csrf-token"] = chatResponseToken;
     }
     await route.fulfill({
       status: 200,
       headers,
-      body: JSON.stringify({ task_id: DEFAULT_CLIENT_SESSION_ID }),
+      body: taskCreatedLine + buildSseBody(injectedEvents),
     });
   });
 
-  // ── Hello endpoint (registered after /chat for higher Playwright LIFO priority) ──
-  await page.route(`**/sessions/${VM_ID}/chat-hello`, async (route) => {
-    const raw = route.request().postData();
-    lastHelloBodyValue = raw ? (JSON.parse(raw) as HelloBody) : null;
-    await route.fulfill({ status: 200, body: "" });
-  });
-
   // ── Load the app ──────────────────────────────────────────────────────────
-  // Navigate to a routed URL so that script src="/static/app.js" resolves correctly.
   await page.goto("http://localhost/", { waitUntil: "domcontentloaded" });
-  // Wait for React to render the composer — by this point all useEffects have run
-  // (including the SseProvider effect that opens the EventSource).
+  // Wait for React to render the composer
   await page.waitForSelector('textarea[placeholder="Message Claude…"]');
 
   return {
     sendSseEvents: (events) => {
       if (resolveSse) {
-        resolveSse(events);
+        const resolve = resolveSse;
+        resolveSse = null;
+        resolve(events);
       } else {
         queuedSseEvents = events;
       }
@@ -446,7 +477,6 @@ export async function setupApp(
     lastResetFormData: () => lastResetBody,
     setChatResponseToken: (token) => { chatResponseToken = token; },
     lastDeleteCsrfToken: () => lastDeleteCsrfTokenValue,
-    lastHelloBody: () => lastHelloBodyValue,
   };
 }
 

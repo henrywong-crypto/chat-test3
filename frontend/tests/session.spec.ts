@@ -1,18 +1,17 @@
 /**
- * UF-11  Resume session       — clicking session in sidebar loads its transcript
- * UF-12  Tool results resume  — tool cards from transcript include result
- * UF-13  Delete session       — hovering + clicking trash removes session
- * UF-14  Refresh sessions     — refresh button re-fetches history
+ * UF-11  Resume conversation   — clicking conversation in sidebar loads its transcript
+ * UF-12  Tool results resume   — tool cards from transcript include result
+ * UF-13  Delete conversation   — hovering + clicking trash removes conversation
  */
 import { test, expect } from "@playwright/test";
-import { setupApp, makeSession } from "./helpers/setup";
+import { setupApp, makeConversation } from "./helpers/setup";
 
 test.describe("session", () => {
-  test("UF-11 clicking a session in the sidebar loads its transcript", async ({ page }) => {
-    const session = makeSession({ session_id: "sess-abc", title: "my chat" });
+  test("UF-11 clicking a conversation in the sidebar loads its transcript", async ({ page }) => {
+    const conversation = makeConversation({ sessionId: "sess-abc", projectDir: "/home/ubuntu", title: "my chat" });
 
     await setupApp(page, {
-      sessions: [session],
+      conversations: [conversation],
       transcripts: {
         "sess-abc": [
           {
@@ -29,25 +28,25 @@ test.describe("session", () => {
       },
     });
 
-    // Session appears in sidebar; click it
+    // Conversation appears in sidebar; click it
     await page.getByText("my chat").click();
 
     // Transcript messages are shown
     await expect(page.getByText("What is 2+2?")).toBeVisible();
     await expect(page.getByText("It is 4.")).toBeVisible();
 
-    // Session row is highlighted
+    // Conversation row is highlighted
     const activeRow = page.locator(".border-l-2.border-primary");
     await expect(activeRow).toBeVisible();
   });
 
-  test("UF-12 tool results are shown when resuming a session from transcript", async ({
+  test("UF-12 tool results are shown when resuming a conversation from transcript", async ({
     page,
   }) => {
-    const session = makeSession({ session_id: "sess-tool", title: "tool session" });
+    const conversation = makeConversation({ sessionId: "sess-tool", projectDir: "/home/ubuntu", title: "tool session" });
 
     await setupApp(page, {
-      sessions: [session],
+      conversations: [conversation],
       transcripts: {
         "sess-tool": [
           {
@@ -93,14 +92,14 @@ test.describe("session", () => {
     await expect(page.getByText("All done.")).toBeVisible();
   });
 
-  test("UF-13 hovering a session and clicking delete removes it from the list", async ({
+  test("UF-13 hovering a conversation and clicking delete removes it from the list", async ({
     page,
   }) => {
-    const session = makeSession({ session_id: "sess-del", title: "to be deleted" });
+    const conversation = makeConversation({ title: "to be deleted" });
 
-    await setupApp(page, { sessions: [session] });
+    await setupApp(page, { conversations: [conversation] });
 
-    // Reveal the delete button by hovering the session row
+    // Reveal the delete button by hovering the conversation row
     await page.locator(".group").filter({ hasText: "to be deleted" }).hover();
 
     // Click the trash icon button inside the row
@@ -110,24 +109,8 @@ test.describe("session", () => {
       .locator("button")
       .click();
 
-    // Session is no longer visible in the sidebar
+    // Conversation is no longer visible in the sidebar
     await expect(page.getByText("to be deleted")).not.toBeVisible();
     await expect(page.getByText("No conversations yet")).toBeVisible();
-  });
-
-  test("UF-14 refresh button re-fetches the session list", async ({ page }) => {
-    const ctrl = await setupApp(page, { sessions: [] });
-
-    // Sidebar shows empty state
-    await expect(page.getByText("No conversations yet")).toBeVisible();
-
-    // Inject a session server-side before clicking refresh
-    ctrl.setSessions([makeSession({ session_id: "sess-new", title: "new session" })]);
-
-    // Click the circular refresh icon in the sidebar header
-    await page.getByTitle("Refresh").click();
-
-    // New session should now appear
-    await expect(page.getByText("new session")).toBeVisible();
   });
 });

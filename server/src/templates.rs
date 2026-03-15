@@ -23,7 +23,7 @@ pub(crate) fn render_terminal_page(
     app_js_version: &str,
     styles_css_version: &str,
 ) -> String {
-    let upload_action = format!("/sessions/{vm_id}/upload");
+    let upload_action = "/chat-upload".to_owned();
     let app_js_src = format!("/static/app.js?v={app_js_version}");
     let styles_css_href = format!("/static/styles.css?v={styles_css_version}");
     let has_user_rootfs_str = has_user_rootfs.to_string();

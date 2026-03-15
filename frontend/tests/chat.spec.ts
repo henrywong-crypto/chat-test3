@@ -1,23 +1,23 @@
 /**
- * UF-01  Blank new chat      — "Start a new conversation" shown when no sessions
+ * UF-01  Blank new chat      — "Start a new conversation" shown when no conversations
  * UF-02  Send message        — user bubble + status bar appear
- * UF-03  Receive response    — assistant message shown, status bar gone, session in sidebar
+ * UF-03  Receive response    — assistant message shown, status bar gone, conversation in sidebar
  * UF-04  New Chat button     — clears to blank state
  * UF-05  New Chat + streaming — stays blank after done fires (not navigated away)
  */
 import { test, expect } from "@playwright/test";
-import { setupApp, sendMessage, makeSession, sse } from "./helpers/setup";
+import { setupApp, sendMessage, makeSession, makeConversation, sse } from "./helpers/setup";
 
 test.describe("chat", () => {
-  test("UF-01 blank state shown on load with no sessions", async ({ page }) => {
-    await setupApp(page, { sessions: [] });
+  test("UF-01 blank state shown on load with no conversations", async ({ page }) => {
+    await setupApp(page, {});
 
     await expect(page.getByText("Start a new conversation")).toBeVisible();
     await expect(page.getByText("No conversations yet")).toBeVisible();
   });
 
   test("UF-02 sending a message shows user bubble and streaming status bar", async ({ page }) => {
-    await setupApp(page, { sessions: [] });
+    await setupApp(page, {});
 
     await sendMessage(page, "Hello Claude");
 
@@ -28,10 +28,10 @@ test.describe("chat", () => {
     await expect(page.getByRole("status")).toBeVisible();
   });
 
-  test("UF-03 receiving response shows assistant message and session in sidebar", async ({
+  test("UF-03 receiving response shows assistant message and conversation in sidebar", async ({
     page,
   }) => {
-    const ctrl = await setupApp(page, { sessions: [] });
+    const ctrl = await setupApp(page, {});
 
     await sendMessage(page, "Hi");
 
@@ -42,22 +42,22 @@ test.describe("chat", () => {
 
     await expect(page.getByText("Hello! How can I help?")).toBeVisible();
     await expect(page.getByRole("status")).not.toBeVisible();
-    // Session title "Hi" appears in the sidebar
+    // Conversation title "Hi" appears in the sidebar
     await expect(page.locator("span.truncate").filter({ hasText: /^Hi$/ })).toBeVisible();
   });
 
   test("UF-04 New Chat button resets to blank state", async ({ page }) => {
-    const ctrl = await setupApp(page, {
-      sessions: [makeSession({ session_id: "sess-1", title: "hello" })],
+    await setupApp(page, {
+      conversations: [makeConversation({ title: "hello" })],
     });
 
-    // Click the existing session so we're viewing it
+    // Click the existing conversation so we're viewing it
     await page.getByText("hello").click();
     // Now click New Chat
     await page.getByRole("button", { name: "New Chat" }).click();
 
     await expect(page.getByText("Start a new conversation")).toBeVisible();
-    // No session highlighted in sidebar
+    // No conversation highlighted in sidebar
     const activeRow = page.locator(".border-l-2.border-primary");
     await expect(activeRow).not.toBeVisible();
   });
@@ -65,7 +65,7 @@ test.describe("chat", () => {
   test("UF-05 clicking New Chat while streaming stays blank after done fires", async ({
     page,
   }) => {
-    const ctrl = await setupApp(page, { sessions: [] });
+    const ctrl = await setupApp(page, {});
 
     // 1. Send a message — stream is now "in flight" (no events sent yet)
     await sendMessage(page, "Hello");
@@ -77,7 +77,7 @@ test.describe("chat", () => {
     ctrl.setSessions([makeSession({ session_id: "sess-2", title: "Hello" })]);
     ctrl.sendSseEvents(sse.text("Hi!", "sess-2"));
 
-    // 4. The chat should remain blank — not navigated to the completed session
+    // 4. The chat should remain blank — not navigated to the completed conversation
     await expect(page.getByText("Start a new conversation")).toBeVisible();
   });
 });

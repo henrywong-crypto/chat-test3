@@ -15,7 +15,7 @@
  * UF-46  Composer re-enables after done         — input active again once running session completes
  */
 import { test, expect } from "@playwright/test";
-import { setupApp, sendMessage, sse, makeSession } from "./helpers/setup";
+import { setupApp, sendMessage, sse, makeSession, makeConversation } from "./helpers/setup";
 
 test.describe("navigation during streaming", () => {
   // ── Null-session streaming ─────────────────────────────────────────────────
@@ -23,16 +23,14 @@ test.describe("navigation during streaming", () => {
   test("UF-34 clicking New Chat while a null-session stream is pending hides the status bar", async ({
     page,
   }) => {
-    const ctrl = await setupApp(page, { sessions: [] });
+    const ctrl = await setupApp(page, {});
 
     await sendMessage(page, "Hello");
-    // isStreaming=true, runningSessionId='__new__', viewSessionId=null → isLoading=true
     await expect(page.getByRole("status")).toBeVisible();
 
-    // Click New Chat — orphans the null-session stream, status bar hides immediately
+    // Click New Chat — orphans the running conversation, status bar hides immediately
     await page.getByRole("button", { name: "New Chat" }).click();
 
-    // nullOrphaned=true → runningMatchesView()=false → isLoading=false
     await expect(page.getByRole("status")).not.toBeVisible();
 
     // Clean up so the stream doesn't leak into the next test
@@ -41,22 +39,21 @@ test.describe("navigation during streaming", () => {
   });
 
   test("UF-35 status bar stays hidden when done fires after a stale New Chat click", async ({ page }) => {
-    const ctrl = await setupApp(page, { sessions: [] });
+    const ctrl = await setupApp(page, {});
 
     await sendMessage(page, "Hello");
     await page.getByRole("button", { name: "New Chat" }).click();
-    // Status bar is already hidden (UF-34)
     await expect(page.getByRole("status")).not.toBeVisible();
 
     ctrl.sendSseEvents(sse.text("The response", "sess-new"));
 
-    // done fires → stays hidden, view stays blank (no navigation to the new session)
+    // done fires → stays hidden, view stays blank (no navigation to the new conversation)
     await expect(page.getByRole("status")).not.toBeVisible();
     await expect(page.getByText("Start a new conversation")).toBeVisible();
   });
 
   test("UF-35b error fires after a stale New Chat click — no error shown in blank view", async ({ page }) => {
-    const ctrl = await setupApp(page, { sessions: [] });
+    const ctrl = await setupApp(page, {});
 
     await sendMessage(page, "Hello");
     await page.getByRole("button", { name: "New Chat" }).click();
@@ -64,7 +61,7 @@ test.describe("navigation during streaming", () => {
 
     ctrl.sendSseEvents([{ event: "error_event", data: { message: "something went wrong" } }]);
 
-    // error_event fires for an orphaned stream — error is silently discarded
+    // error_event fires for an orphaned stream — error is silently discarded from blank view
     await expect(page.getByText("something went wrong")).not.toBeVisible();
     await expect(page.getByText("Start a new conversation")).toBeVisible();
   });
@@ -72,7 +69,7 @@ test.describe("navigation during streaming", () => {
   test("UF-36 new session appears in the sidebar even when New Chat was clicked mid-stream", async ({
     page,
   }) => {
-    const ctrl = await setupApp(page, { sessions: [] });
+    const ctrl = await setupApp(page, {});
 
     await sendMessage(page, "Hello");
     await page.getByRole("button", { name: "New Chat" }).click();
@@ -85,7 +82,7 @@ test.describe("navigation during streaming", () => {
     await expect(
       page.locator("span.truncate").filter({ hasText: "My stale session" }),
     ).toBeVisible();
-    // But the current view is still blank — no navigation to the stale session
+    // But the current view is still blank — no navigation to the stale conversation
     await expect(page.getByText("Start a new conversation")).toBeVisible();
   });
 
@@ -94,24 +91,24 @@ test.describe("navigation during streaming", () => {
   test("UF-37 clicking New Chat while streaming an existing session immediately hides the status bar", async ({
     page,
   }) => {
-    const session = makeSession({ session_id: "sess-a", title: "Old Chat" });
-    const ctrl = await setupApp(page, { sessions: [session] });
+    const ctrl = await setupApp(page, {
+      conversations: [makeConversation({ title: "Old Chat" })],
+    });
 
     await page.getByText("Old Chat").click();
-    await sendMessage(page, "Hello from sess-a");
-    // isStreaming=true, runningSessionId="sess-a", viewSessionId="sess-a" → isLoading=true
+    await sendMessage(page, "Hello from Old Chat");
     await expect(page.getByRole("status")).toBeVisible();
 
     await page.getByRole("button", { name: "New Chat" }).click();
-    // viewSessionId=null, runningSessionId="sess-a" → isLoading=false
     await expect(page.getByRole("status")).not.toBeVisible();
   });
 
   test("UF-38 sidebar pulsing indicator stays on the running session after navigating to new chat", async ({
     page,
   }) => {
-    const session = makeSession({ session_id: "sess-a", title: "Running Session" });
-    const ctrl = await setupApp(page, { sessions: [session] });
+    const ctrl = await setupApp(page, {
+      conversations: [makeConversation({ title: "Running Session" })],
+    });
 
     await page.getByText("Running Session").click();
     await sendMessage(page, "Long task");
@@ -123,17 +120,17 @@ test.describe("navigation during streaming", () => {
   });
 
   test("UF-39 navigating back to the running session restores the status bar", async ({ page }) => {
-    const session = makeSession({ session_id: "sess-a", title: "Running Session" });
-    const ctrl = await setupApp(page, { sessions: [session] });
+    const ctrl = await setupApp(page, {
+      conversations: [makeConversation({ title: "Running Session" })],
+    });
 
     await page.getByText("Running Session").click();
     await sendMessage(page, "Long task");
     await page.getByRole("button", { name: "New Chat" }).click();
     await expect(page.getByRole("status")).not.toBeVisible();
 
-    // Click the session row to return
+    // Click the conversation row to return
     await page.getByText("Running Session").click();
-    // runningSessionId="sess-a" === viewSessionId="sess-a" → isLoading=true again
     await expect(page.getByRole("status")).toBeVisible();
   });
 
@@ -141,13 +138,13 @@ test.describe("navigation during streaming", () => {
     page,
   }) => {
     const session = makeSession({ session_id: "sess-a", title: "Running Session" });
-    const ctrl = await setupApp(page, { sessions: [session] });
+    const ctrl = await setupApp(page, {
+      conversations: [makeConversation({ sessionId: "sess-a", title: "Running Session" })],
+    });
 
     await page.getByText("Running Session").click();
     await sendMessage(page, "Long task");
     await page.getByRole("button", { name: "New Chat" }).click();
-    // Wait for the status bar to disappear before checking the sidebar dot —
-    // otherwise the ClaudeStatus animate-ping dot is still in the DOM (useEffect lag)
     await expect(page.getByRole("status")).not.toBeVisible();
     await expect(page.locator(".animate-ping")).toBeVisible();
 
@@ -155,9 +152,9 @@ test.describe("navigation during streaming", () => {
     ctrl.setSessions([session]);
     ctrl.sendSseEvents(sse.text("Finished.", "sess-a"));
 
-    // Sidebar pulsing indicator clears (runningSessionId set to null)
+    // Sidebar pulsing indicator clears (runningConversationId set to null)
     await expect(page.locator(".animate-ping")).not.toBeVisible();
-    // Status bar stays hidden (we are not viewing sess-a)
+    // Status bar stays hidden (we are not viewing Running Session)
     await expect(page.getByRole("status")).not.toBeVisible();
     // The new-chat blank state is unchanged
     await expect(page.getByText("Start a new conversation")).toBeVisible();
@@ -168,17 +165,18 @@ test.describe("navigation during streaming", () => {
   test("UF-41 viewing a non-running session disables the composer while another session is streaming", async ({
     page,
   }) => {
-    const session = makeSession({ session_id: "sess-a", title: "Other Chat" });
-    const ctrl = await setupApp(page, { sessions: [session] });
+    const ctrl = await setupApp(page, {
+      conversations: [makeConversation({ title: "Other Chat" })],
+    });
 
     // Start streaming from the new-chat blank view
     await sendMessage(page, "Streaming from new chat");
     await expect(page.getByRole("status")).toBeVisible();
 
-    // Switch to an existing session — it is not the running one
+    // Switch to an existing conversation — it is not the running one
     await page.getByText("Other Chat").click();
 
-    // isCurrentRunning=false for this session → no status bar
+    // isCurrentRunning=false for this conversation → no status bar
     // isOtherRunning=true → composer is disabled to prevent cross-session routing
     await expect(page.getByRole("status")).not.toBeVisible();
     await expect(page.getByPlaceholder("Message Claude…")).toBeDisabled();
@@ -187,19 +185,18 @@ test.describe("navigation during streaming", () => {
   test("UF-42 clicking an existing session while a pending-session stream is running hides the status bar", async ({
     page,
   }) => {
-    const session = makeSession({ session_id: "sess-a", title: "Previous Chat" });
-    const ctrl = await setupApp(page, { sessions: [session] });
+    const ctrl = await setupApp(page, {
+      conversations: [makeConversation({ title: "Previous Chat" })],
+    });
 
     await sendMessage(page, "Hello");
-    // pending-session stream: runningSessionId=pendingId, viewSessionId=pendingId → isLoading=true
     await expect(page.getByRole("status")).toBeVisible();
 
-    // Navigate to the existing session
+    // Navigate to the existing conversation
     await page.getByText("Previous Chat").click();
-    // viewSessionId="sess-a", runningSessionId=pendingId → isCurrentRunning=false → status bar hidden
     await expect(page.getByRole("status")).not.toBeVisible();
 
-    // Pending placeholder still pulses (runningSessionId=pendingId matches the placeholder row)
+    // Running conversation still pulses (runningConversationId matches its placeholder row)
     await expect(page.locator(".animate-ping")).toBeVisible();
   });
 
@@ -208,19 +205,19 @@ test.describe("navigation during streaming", () => {
   test("UF-43 clicking New Chat while the thinking indicator is visible hides it", async ({
     page,
   }) => {
-    const session = makeSession({ session_id: "sess-a", title: "Running Session" });
-    const ctrl = await setupApp(page, { sessions: [session] });
+    const ctrl = await setupApp(page, {
+      conversations: [makeConversation({ title: "Running Session" })],
+    });
 
     await page.getByText("Running Session").click();
     await sendMessage(page, "Long task");
-    // Wait for the streaming render to commit so runningSessionId="sess-a" is in the ref
     await expect(page.getByRole("status")).toBeVisible();
 
-    // init fires → thinking indicator added to sess-a's messages
+    // init fires → thinking indicator added to the running conversation's messages
     ctrl.sendSseEvents([{ event: "init" }]);
     await expect(page.locator(".thinking-dot").first()).toBeVisible();
 
-    // Navigate to New Chat — sess-a's messages are no longer shown
+    // Navigate to New Chat — running conversation's messages are no longer shown
     await page.getByRole("button", { name: "New Chat" }).click();
     await expect(page.locator(".thinking-dot").first()).not.toBeVisible();
   });
@@ -228,15 +225,15 @@ test.describe("navigation during streaming", () => {
   test("UF-44 navigating back to the running session restores the thinking indicator", async ({
     page,
   }) => {
-    const session = makeSession({ session_id: "sess-a", title: "Running Session" });
-    const ctrl = await setupApp(page, { sessions: [session] });
+    const ctrl = await setupApp(page, {
+      conversations: [makeConversation({ title: "Running Session" })],
+    });
 
     await page.getByText("Running Session").click();
     await sendMessage(page, "Long task");
-    // Wait for the streaming render to commit so runningSessionId="sess-a" is in the ref
     await expect(page.getByRole("status")).toBeVisible();
 
-    // init fires → thinking indicator added to sess-a's messages
+    // init fires → thinking indicator added
     ctrl.sendSseEvents([{ event: "init" }]);
     await expect(page.locator(".thinking-dot").first()).toBeVisible();
 
@@ -256,7 +253,12 @@ test.describe("navigation during streaming", () => {
   }) => {
     const sessA = makeSession({ session_id: "sess-a", title: "Session A" });
     const sessB = makeSession({ session_id: "sess-b", title: "Session B" });
-    const ctrl = await setupApp(page, { sessions: [sessA, sessB] });
+    const ctrl = await setupApp(page, {
+      conversations: [
+        makeConversation({ sessionId: "sess-a", title: "Session A" }),
+        makeConversation({ sessionId: "sess-b", title: "Session B" }),
+      ],
+    });
 
     // Start streaming from Session A
     await page.getByText("Session A").click();
@@ -283,7 +285,12 @@ test.describe("navigation during streaming", () => {
   }) => {
     const sessA = makeSession({ session_id: "sess-a", title: "Session A" });
     const sessB = makeSession({ session_id: "sess-b", title: "Session B" });
-    const ctrl = await setupApp(page, { sessions: [sessA, sessB] });
+    const ctrl = await setupApp(page, {
+      conversations: [
+        makeConversation({ sessionId: "sess-a", title: "Session A" }),
+        makeConversation({ sessionId: "sess-b", title: "Session B" }),
+      ],
+    });
 
     // Start streaming from Session A
     await page.getByText("Session A").click();

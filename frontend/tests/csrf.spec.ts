@@ -4,13 +4,13 @@
  * UF-55  Token rotated on delete — when server returns x-csrf-token, the next DELETE uses it
  */
 import { test, expect } from "@playwright/test";
-import { setupApp, sendMessage, makeSession, sse, CSRF_TOKEN, VM_ID } from "./helpers/setup";
+import { setupApp, sendMessage, makeConversation, sse, CSRF_TOKEN } from "./helpers/setup";
 
 test.describe("csrf", () => {
   test("UF-53 first POST /chat carries the initial CSRF token from the page", async ({ page }) => {
-    const ctrl = await setupApp(page, { sessions: [] });
+    const ctrl = await setupApp(page, {});
 
-    const responseReceived = page.waitForResponse(`**/sessions/${VM_ID}/chat`);
+    const responseReceived = page.waitForResponse("**/chat");
     await sendMessage(page, "Hello");
     await responseReceived;
 
@@ -18,11 +18,11 @@ test.describe("csrf", () => {
   });
 
   test("UF-54 next POST /chat uses the rotated token returned by the server", async ({ page }) => {
-    const ctrl = await setupApp(page, { sessions: [] });
+    const ctrl = await setupApp(page, {});
 
     // First send — server responds with a rotated token in the header
     ctrl.setChatResponseToken("rotated-1");
-    const firstResponse = page.waitForResponse(`**/sessions/${VM_ID}/chat`);
+    const firstResponse = page.waitForResponse("**/chat");
     await sendMessage(page, "first message");
     await firstResponse;
 
@@ -31,7 +31,7 @@ test.describe("csrf", () => {
     await expect(page.getByRole("status")).not.toBeVisible();
 
     // Second send — must carry the rotated token, not the original
-    const secondResponse = page.waitForResponse(`**/sessions/${VM_ID}/chat`);
+    const secondResponse = page.waitForResponse("**/chat");
     await sendMessage(page, "second message");
     await secondResponse;
 
@@ -41,18 +41,19 @@ test.describe("csrf", () => {
   });
 
   test("UF-55 DELETE /chat-transcript uses the rotated token after a send", async ({ page }) => {
-    const session = makeSession({ session_id: "sess-del", title: "to delete" });
-    const ctrl = await setupApp(page, { sessions: [session] });
+    const ctrl = await setupApp(page, {
+      conversations: [makeConversation({ sessionId: "sess-del", projectDir: "/home/ubuntu", title: "to delete" })],
+    });
 
     // Trigger a rotation via a chat send
     ctrl.setChatResponseToken("rotated-1");
-    const chatResponse = page.waitForResponse(`**/sessions/${VM_ID}/chat`);
+    const chatResponse = page.waitForResponse("**/chat");
     await sendMessage(page, "hi");
     await chatResponse;
 
-    // Delete the session — should use the rotated token
+    // Delete the conversation — should call DELETE /chat-transcript with rotated token
     const deleteResponse = page.waitForResponse(
-      (res) => res.url().includes(`/sessions/${VM_ID}/chat-transcript`) && res.request().method() === "DELETE",
+      (res) => res.url().includes("/chat-transcript") && res.request().method() === "DELETE",
     );
     await page.locator(".group").filter({ hasText: "to delete" }).hover();
     await page.locator(".group").filter({ hasText: "to delete" }).locator("button").click();

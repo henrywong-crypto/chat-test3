@@ -8,11 +8,11 @@
  * UF-58  Session select focus — switching to a history session focuses the composer textarea
  */
 import { test, expect } from "@playwright/test";
-import { setupApp, sendMessage, sse, makeSession } from "./helpers/setup";
+import { setupApp, sendMessage, sse, makeConversation } from "./helpers/setup";
 
 test.describe("composer", () => {
   test("UF-30 Shift+Enter inserts a newline without submitting", async ({ page }) => {
-    await setupApp(page, { sessions: [] });
+    await setupApp(page, {});
 
     const composer = page.getByPlaceholder("Message Claude…");
     await composer.click();
@@ -29,7 +29,7 @@ test.describe("composer", () => {
   });
 
   test("UF-31 SSE error event shows an error message in the chat", async ({ page }) => {
-    const ctrl = await setupApp(page, { sessions: [] });
+    const ctrl = await setupApp(page, {});
 
     await sendMessage(page, "Do something");
     ctrl.sendSseEvents([
@@ -44,7 +44,7 @@ test.describe("composer", () => {
   });
 
   test("UF-32 hovering an assistant message reveals the copy button", async ({ page }) => {
-    const ctrl = await setupApp(page, { sessions: [] });
+    const ctrl = await setupApp(page, {});
 
     await sendMessage(page, "Hello");
     ctrl.sendSseEvents(sse.text("Here is my response.", "sess-1"));
@@ -57,7 +57,7 @@ test.describe("composer", () => {
   });
 
   test("UF-33 copy format dropdown shows markdown and plain-text options", async ({ page }) => {
-    const ctrl = await setupApp(page, { sessions: [] });
+    const ctrl = await setupApp(page, {});
 
     await sendMessage(page, "Hello");
     ctrl.sendSseEvents(sse.text("**Bold** response", "sess-1"));
@@ -79,10 +79,11 @@ test.describe("composer", () => {
   });
 
   test("UF-56 clicking New Chat focuses the composer textarea", async ({ page }) => {
-    const session = makeSession({ session_id: "sess-abc", title: "Old chat" });
-    await setupApp(page, { sessions: [session] });
+    await setupApp(page, {
+      conversations: [makeConversation({ title: "Old chat" })],
+    });
 
-    // Navigate away to an existing session
+    // Navigate away to an existing conversation
     await page.getByText("Old chat").click();
 
     // Click "New Chat" in the sidebar
@@ -94,7 +95,7 @@ test.describe("composer", () => {
   });
 
   test("UF-57 composer textarea regains focus after sending a message", async ({ page }) => {
-    const ctrl = await setupApp(page, { sessions: [] });
+    const ctrl = await setupApp(page, {});
 
     await sendMessage(page, "Hello");
 
@@ -107,8 +108,9 @@ test.describe("composer", () => {
   });
 
   test("UF-58 switching to a history session focuses the composer textarea", async ({ page }) => {
-    const session = makeSession({ session_id: "sess-abc", title: "Past chat" });
-    await setupApp(page, { sessions: [session] });
+    await setupApp(page, {
+      conversations: [makeConversation({ title: "Past chat" })],
+    });
 
     await page.getByText("Past chat").click();
 
