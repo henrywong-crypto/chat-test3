@@ -4,7 +4,6 @@ members = [
     "chat-relay",
     "common",
     "server",
-    "ssh-client",
     "store",
     "vm-lifecycle",
 ]

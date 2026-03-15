@@ -5,7 +5,7 @@ edition = "2024"
 
 [dependencies]
 chat-agent = { path = "../chat-agent" }
-ssh-client = { path = "../ssh-client" }
+ssh-client = { git = "https://github.com/llm-proxy-rs/web" }
 anyhow = "1.0.102"
 tokio-stream = "0.1"
 bytes = "1.11.1"

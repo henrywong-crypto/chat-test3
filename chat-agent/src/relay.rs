@@ -2,7 +2,7 @@ use anyhow::{Context, Result};
 use bytes::Bytes;
 use futures::stream::Stream;
 use russh::{Channel, ChannelMsg, client};
-use ssh_client::{SshClient, connect_ssh, open_direct_streamlocal_channel};
+use ssh_client::{SshClient, connect_ssh};
 use std::{
     net::Ipv4Addr,
     path::{Path, PathBuf},
@@ -19,7 +19,7 @@ use tokio::{
 use tokio_stream::wrappers::ReceiverStream;
 use tracing::{debug, error, info};
 
-use crate::{AgentMessage, HelloPayload, InterruptPayload, QueryPayload, QuestionAnswerPayload};
+use crate::AgentMessage;
 
 const HEARTBEAT_SECS: u64 = 60;
 const SEND_TIMEOUT_SECS: u64 = 30;
@@ -194,7 +194,7 @@ async fn connect_ssh_and_open_channel(
 async fn open_agent_channel(ssh_handle: &client::Handle<SshClient>) -> Result<Channel<client::Msg>> {
     let deadline = Instant::now() + Duration::from_secs(AGENT_SOCKET_WAIT_SECS);
     loop {
-        match open_direct_streamlocal_channel(ssh_handle, "/tmp/agent.sock").await {
+        match ssh_handle.channel_open_direct_streamlocal("/tmp/agent.sock").await {
             Ok(channel) => {
                 info!("agent socket channel opened");
                 return Ok(channel);
@@ -203,7 +203,7 @@ async fn open_agent_channel(ssh_handle: &client::Handle<SshClient>) -> Result<Ch
                 debug!("agent socket not ready, retrying: {e}");
                 sleep(Duration::from_millis(500)).await;
             }
-            Err(e) => return Err(e).context("timed out waiting for agent socket"),
+            Err(e) => return Err(anyhow::Error::from(e)).context("timed out waiting for agent socket"),
         }
     }
 }
@@ -225,33 +225,9 @@ async fn run_relay(
                         info!("inbound channel closed, ending relay");
                         break;
                     }
-                    Some(AgentMessage::Query { task_id, content, session_id, work_dir }) => {
-                        info!("sending query to agent  content_len={}", content.len());
-                        let payload = QueryPayload { type_: "query".to_string(), task_id, content, session_id, work_dir };
-                        let line = format!("{}\n", serde_json::to_string(&payload)?);
+                    Some(msg) => {
+                        let line = format!("{}\n", serde_json::to_string(&msg)?);
                         ssh_channel.data(Bytes::from(line).as_ref()).await?;
-                        info!("query sent to agent");
-                    }
-                    Some(AgentMessage::Hello { task_id }) => {
-                        info!("sending hello to agent  task_id={task_id}");
-                        let payload = HelloPayload { type_: "hello".to_string(), task_id };
-                        let line = format!("{}\n", serde_json::to_string(&payload)?);
-                        ssh_channel.data(Bytes::from(line).as_ref()).await?;
-                        info!("hello sent to agent");
-                    }
-                    Some(AgentMessage::QuestionAnswer { request_id, answers }) => {
-                        info!("sending question answer to agent  request_id={request_id}");
-                        let payload = QuestionAnswerPayload { type_: "answer_question".to_string(), request_id, answers };
-                        let line = format!("{}\n", serde_json::to_string(&payload)?);
-                        ssh_channel.data(Bytes::from(line).as_ref()).await?;
-                        info!("question answer sent to agent");
-                    }
-                    Some(AgentMessage::Interrupt { task_id }) => {
-                        info!("sending interrupt to agent  task_id={task_id}");
-                        let payload = InterruptPayload { type_: "interrupt".to_string(), task_id };
-                        let line = format!("{}\n", serde_json::to_string(&payload)?);
-                        ssh_channel.data(Bytes::from(line).as_ref()).await?;
-                        info!("interrupt sent to agent");
                     }
                 }
             }
