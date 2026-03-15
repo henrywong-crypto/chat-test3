@@ -1,10 +1,7 @@
 [workspace]
 members = [
-    "chat-agent",
     "chat-settings",
-    "common",
     "server",
-    "store",
     "vm-lifecycle",
 ]
 resolver = "2"
