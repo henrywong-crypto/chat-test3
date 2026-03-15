@@ -1,7 +1,7 @@
 [workspace]
 members = [
     "chat-agent",
-    "chat-relay",
+    "chat-settings",
     "common",
     "server",
     "store",

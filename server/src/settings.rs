@@ -4,7 +4,7 @@ use axum::{
     http::StatusCode,
     response::{IntoResponse, Response},
 };
-use chat_relay::{build_api_key_settings_json, get_vm_settings, set_vm_settings};
+use chat_settings::{build_api_key_settings_json, get_vm_settings, set_vm_settings};
 use serde::{Deserialize, Serialize};
 use store::get_user_by_email;
 use tower_sessions::Session;

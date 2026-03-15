@@ -7,7 +7,7 @@ use axum::{
     response::{IntoResponse, Response},
 };
 use bytes::Bytes;
-use chat_relay::{AgentMessage, send_agent_message, stream_task_sse};
+use chat_agent::{AgentMessage, send_agent_message, stream_task_sse};
 use futures::StreamExt;
 use serde::Deserialize;
 use std::convert::Infallible;

@@ -13,7 +13,8 @@ anyhow = "1.0.102"
 axum = { version = "0.8.8", features = ["multipart", "ws"] }
 bytes = "1.11.1"
 chat-history = { git = "https://github.com/llm-proxy-rs/web" }
-chat-relay = { path = "../chat-relay" }
+chat-agent = { path = "../chat-agent" }
+chat-settings = { path = "../chat-settings" }
 chrono = { version = "0.4", features = ["serde"] }
 common = { path = "../common" }
 config = "0.15.19"
