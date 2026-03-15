@@ -29,7 +29,10 @@ import unittest.mock
 
 def _load_agent():
     """Import agent.py but prevent asyncio.run(main()) from executing."""
-    with unittest.mock.patch("asyncio.run"):
+    async def _noop():
+        pass
+
+    with unittest.mock.patch("asyncio.run", side_effect=lambda coro: coro.close()):
         spec = importlib.util.spec_from_file_location(
             "agent",
             pathlib.Path(__file__).parent / "agent.py",
