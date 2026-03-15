@@ -3,7 +3,7 @@ use bytes::Bytes;
 use futures::stream::Stream;
 use russh::{Channel, ChannelMsg, client};
 use serde::Serialize;
-use ssh_client::{SshClient, connect_ssh, open_exec_channel};
+use ssh_client::{SshClient, connect_ssh, open_direct_streamlocal_channel};
 use std::{
     net::Ipv4Addr,
     path::{Path, PathBuf},
@@ -17,18 +17,18 @@ use tokio::{
 use tokio_stream::wrappers::ReceiverStream;
 use tracing::{debug, error, info};
 
-const AGENT_CMD: &str = "bash -lc '\
-    /usr/sbin/logrotate --force --state \"$HOME/.logrotate.status\" /etc/logrotate.d/agent; \
-    PYTHONUNBUFFERED=1 exec /usr/local/bin/uv run /opt/connector.py 2> >(tee -a \"$HOME/agent.log\" >&2)\
-'";
-
 const HEARTBEAT_SECS: u64 = 60;
 const SEND_TIMEOUT_SECS: u64 = 30;
 
 pub enum AgentMessage {
     Query {
+        task_id: String,
         content: String,
         session_id: Option<String>,
+        work_dir: Option<String>,
+    },
+    Hello {
+        task_id: String,
     },
     QuestionAnswer {
         request_id: String,
@@ -162,9 +162,9 @@ async fn connect_agent_relay(
     inbound: mpsc::Receiver<AgentMessage>,
     sse_output: Arc<Mutex<Option<mpsc::Sender<Bytes>>>>,
 ) -> Result<()> {
-    let mut ssh_handle = connect_ssh(guest_ip, &ssh_key_path, &ssh_user, &vm_host_key_path).await?;
+    let ssh_handle = connect_ssh(guest_ip, &ssh_key_path, &ssh_user, &vm_host_key_path).await?;
     info!("agent ssh channel opened");
-    let ssh_channel = open_exec_channel(&mut ssh_handle, AGENT_CMD).await?;
+    let ssh_channel = open_direct_streamlocal_channel(&ssh_handle, "/tmp/agent.sock").await?;
     run_relay(ssh_handle, ssh_channel, inbound, sse_output).await
 }
 
@@ -185,12 +185,19 @@ async fn run_relay(
                         info!("inbound channel closed, ending relay");
                         break;
                     }
-                    Some(AgentMessage::Query { content, session_id }) => {
+                    Some(AgentMessage::Query { task_id, content, session_id, work_dir }) => {
                         info!("sending query to agent  content_len={}", content.len());
-                        let payload = build_query_payload(&content, session_id.as_deref())?;
+                        let payload = build_query_payload(&task_id, &content, session_id.as_deref(), work_dir.as_deref())?;
                         let line = format!("{payload}\n");
                         ssh_channel.data(Bytes::from(line).as_ref()).await?;
                         info!("query sent to agent");
+                    }
+                    Some(AgentMessage::Hello { task_id }) => {
+                        info!("sending hello to agent  task_id={task_id}");
+                        let payload = build_hello_payload(&task_id)?;
+                        let line = format!("{payload}\n");
+                        ssh_channel.data(Bytes::from(line).as_ref()).await?;
+                        info!("hello sent to agent");
                     }
                     Some(AgentMessage::QuestionAnswer { request_id, answers }) => {
                         info!("sending question answer to agent  request_id={request_id}");
@@ -283,19 +290,39 @@ fn build_interrupt_payload(task_id: &str) -> Result<String> {
 }
 
 #[derive(Serialize)]
+struct HelloPayload<'a> {
+    #[serde(rename = "type")]
+    type_: &'a str,
+    task_id: &'a str,
+}
+
+fn build_hello_payload(task_id: &str) -> Result<String> {
+    let hello_payload = HelloPayload {
+        type_: "hello",
+        task_id,
+    };
+    Ok(serde_json::to_string(&hello_payload)?)
+}
+
+#[derive(Serialize)]
 struct QueryPayload<'a> {
     #[serde(rename = "type")]
     type_: &'a str,
+    task_id: &'a str,
     content: &'a str,
     #[serde(skip_serializing_if = "Option::is_none")]
     session_id: Option<&'a str>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    work_dir: Option<&'a str>,
 }
 
-fn build_query_payload(content: &str, session_id: Option<&str>) -> Result<String> {
+fn build_query_payload(task_id: &str, content: &str, session_id: Option<&str>, work_dir: Option<&str>) -> Result<String> {
     let query_payload = QueryPayload {
         type_: "query",
+        task_id,
         content,
         session_id,
+        work_dir,
     };
     Ok(serde_json::to_string(&query_payload)?)
 }
@@ -339,37 +366,67 @@ mod tests {
 
     #[test]
     fn test_query_type_field() {
-        let json = build_query_payload("hello", None).unwrap();
+        let json = build_query_payload("task-1", "hello", None, None).unwrap();
         assert_eq!(parse(&json)["type"], "query");
     }
 
     #[test]
     fn test_content_field_is_present() {
-        let json = build_query_payload("hello world", None).unwrap();
+        let json = build_query_payload("task-1", "hello world", None, None).unwrap();
         assert_eq!(parse(&json)["content"], "hello world");
     }
 
     #[test]
     fn test_session_id_included_when_some() {
-        let json = build_query_payload("hello", Some("abc-123")).unwrap();
+        let json = build_query_payload("task-1", "hello", Some("abc-123"), None).unwrap();
         assert_eq!(parse(&json)["session_id"], "abc-123");
     }
 
     #[test]
     fn test_session_id_omitted_when_none() {
-        let json = build_query_payload("hello", None).unwrap();
+        let json = build_query_payload("task-1", "hello", None, None).unwrap();
         assert!(parse(&json).get("session_id").is_none());
     }
 
     #[test]
     fn test_special_characters_in_content_are_escaped() {
-        let json = build_query_payload("say \"hello\"\nand\\goodbye", None).unwrap();
+        let json = build_query_payload("task-1", "say \"hello\"\nand\\goodbye", None, None).unwrap();
         assert_eq!(parse(&json)["content"], "say \"hello\"\nand\\goodbye");
     }
 
     #[test]
     fn test_empty_content() {
-        let json = build_query_payload("", None).unwrap();
+        let json = build_query_payload("task-1", "", None, None).unwrap();
         assert_eq!(parse(&json)["content"], "");
+    }
+
+    #[test]
+    fn test_task_id_included_in_query() {
+        let json = build_query_payload("my-task-id", "hello", None, None).unwrap();
+        assert_eq!(parse(&json)["task_id"], "my-task-id");
+    }
+
+    #[test]
+    fn test_work_dir_included_when_some() {
+        let json = build_query_payload("task-1", "hello", None, Some("/home/ubuntu")).unwrap();
+        assert_eq!(parse(&json)["work_dir"], "/home/ubuntu");
+    }
+
+    #[test]
+    fn test_work_dir_omitted_when_none() {
+        let json = build_query_payload("task-1", "hello", None, None).unwrap();
+        assert!(parse(&json).get("work_dir").is_none());
+    }
+
+    #[test]
+    fn test_hello_type_field() {
+        let json = build_hello_payload("task-abc").unwrap();
+        assert_eq!(parse(&json)["type"], "hello");
+    }
+
+    #[test]
+    fn test_hello_task_id_field() {
+        let json = build_hello_payload("task-abc").unwrap();
+        assert_eq!(parse(&json)["task_id"], "task-abc");
     }
 }

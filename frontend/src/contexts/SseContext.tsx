@@ -10,7 +10,7 @@ interface SseContextValue {
   hasUserRootfs: boolean;
   latestEvent: SseEvent | null;
   isConnected: boolean;
-  sendQuery: (content: string, sessionId: string | null) => Promise<void>;
+  sendQuery: (content: string, sessionId: string | null, workDir?: string) => Promise<string>;
   sendStop: (taskId: string) => Promise<void>;
   answerQuestion: (taskId: string, requestId: string, answers: Record<string, string>) => Promise<void>;
   loadHistory: () => Promise<ChatSession[]>;
@@ -69,7 +69,7 @@ export function SseProvider({ children }: { children: React.ReactNode }) {
       const saved = localStorage.getItem(storageKey);
       if (saved) {
         try {
-          const parsed = JSON.parse(saved) as { task_id?: string; running_session_id?: string | null };
+          const parsed = JSON.parse(saved) as { task_id?: string; running_session_id?: string | null; project_dir?: string | null };
           if (parsed.task_id) {
             fetch(`/sessions/${vmId}/chat-hello`, {
               method: "POST",
@@ -79,7 +79,11 @@ export function SseProvider({ children }: { children: React.ReactNode }) {
             flushSync(() =>
               setLatestEvent({
                 type: "reconnecting",
-                payload: { task_id: parsed.task_id!, running_session_id: parsed.running_session_id ?? null },
+                payload: {
+                  task_id: parsed.task_id!,
+                  running_session_id: parsed.running_session_id ?? null,
+                  project_dir: parsed.project_dir ?? null,
+                },
               })
             );
           } else {
@@ -158,9 +162,20 @@ export function SseProvider({ children }: { children: React.ReactNode }) {
     refreshCsrfToken(res);
   }, [refreshCsrfToken]);
 
-  const sendQuery = useCallback(async (content: string, sessionId: string | null) => {
-    await post(`/sessions/${vmId}/chat`, { content, session_id: sessionId });
-  }, [post, vmId]);
+  const sendQuery = useCallback(async (content: string, sessionId: string | null, workDir?: string): Promise<string> => {
+    const res = await fetch(`/sessions/${vmId}/chat`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ content, session_id: sessionId, work_dir: workDir ?? null, csrf_token: csrfTokenRef.current }),
+    });
+    if (!res.ok) {
+      const msg = await res.text();
+      throw new Error(msg || `HTTP ${res.status}`);
+    }
+    refreshCsrfToken(res);
+    const { task_id } = await res.json() as { task_id: string };
+    return task_id;
+  }, [vmId, refreshCsrfToken]);
 
   const sendStop = useCallback(async (taskId: string) => {
     await post(`/sessions/${vmId}/chat-stop`, { task_id: taskId });

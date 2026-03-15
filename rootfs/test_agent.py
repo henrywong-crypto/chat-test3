@@ -16,6 +16,7 @@ import asyncio
 import dataclasses
 import importlib.util
 import json
+import os
 import pathlib
 import sys
 import types
@@ -490,6 +491,124 @@ class TestHandleQuery(unittest.IsolatedAsyncioTestCase):
                 self.assertIsNotNone(sess.task)
                 agent._sessions.pop(tid)
                 break
+
+    async def test_handle_query_uses_client_task_id(self):
+        writer = MockWriter()
+        captured_args = []
+
+        async def fake_run_query(*args, **kwargs):
+            captured_args.extend(args)
+
+        with unittest.mock.patch.object(agent, "run_query", side_effect=fake_run_query):
+            agent.handle_query(
+                {"type": "query", "content": "hi", "task_id": "custom-id"}, writer
+            )
+        try:
+            self.assertIn("custom-id", agent._sessions)
+        finally:
+            agent._sessions.pop("custom-id", None)
+
+    async def test_handle_query_passes_work_dir_to_run_query(self):
+        writer = MockWriter()
+        captured_args = []
+
+        async def fake_run_query(*args, **kwargs):
+            captured_args.extend(args)
+
+        with unittest.mock.patch.object(agent, "run_query", side_effect=fake_run_query):
+            agent.handle_query(
+                {"type": "query", "content": "hi", "task_id": "wd-task", "work_dir": "/tmp"},
+                writer,
+            )
+            await asyncio.sleep(0)  # allow the created task to execute
+        # run_query(content, sdk_session_id, task_id, work_dir)
+        # resolve_work_dir returns os.path.realpath("/tmp") which may differ on macOS
+        self.assertEqual(captured_args[3], os.path.realpath("/tmp"))
+        agent._sessions.pop("wd-task", None)
+
+    async def test_handle_query_rejects_work_dir_outside_allowed_roots(self):
+        writer = MockWriter()
+        captured_args = []
+
+        async def fake_run_query(*args, **kwargs):
+            captured_args.extend(args)
+
+        with unittest.mock.patch.object(agent, "run_query", side_effect=fake_run_query):
+            agent.handle_query(
+                {"type": "query", "content": "hi", "task_id": "wd-reject", "work_dir": "/etc"},
+                writer,
+            )
+            await asyncio.sleep(0)
+        # /etc is outside allowed roots — should fall back to HOME (realpath'd)
+        fallback = os.path.realpath(os.environ.get("HOME", "/root"))
+        self.assertEqual(captured_args[3], fallback)
+        agent._sessions.pop("wd-reject", None)
+
+    async def test_handle_query_accepts_subdir_of_allowed_root(self):
+        writer = MockWriter()
+        captured_args = []
+        home = os.path.realpath(os.environ.get("HOME", "/root"))
+        subdir = os.path.join(home, "projects", "myapp")
+        os.makedirs(subdir, exist_ok=True)
+
+        async def fake_run_query(*args, **kwargs):
+            captured_args.extend(args)
+
+        with unittest.mock.patch.object(agent, "run_query", side_effect=fake_run_query):
+            agent.handle_query(
+                {"type": "query", "content": "hi", "task_id": "wd-sub", "work_dir": subdir},
+                writer,
+            )
+            await asyncio.sleep(0)
+        self.assertEqual(captured_args[3], subdir)
+        agent._sessions.pop("wd-sub", None)
+
+    async def test_handle_hello_rebinds_writer_for_running_task(self):
+        task = asyncio.create_task(asyncio.sleep(0))
+        old_writer = MockWriter()
+        new_writer = MockWriter()
+        task_id = "rebind-task"
+        agent._sessions[task_id] = agent.Session(task=task, writer=old_writer)
+        try:
+            agent.handle_hello({"type": "hello", "task_id": task_id}, new_writer)
+            self.assertIs(agent._sessions[task_id].writer, new_writer)
+            # No extra SSE events emitted when there is no pending question
+            self.assertEqual(new_writer.written_events(), [])
+        finally:
+            agent._sessions.pop(task_id, None)
+
+    async def test_handle_hello_reemits_pending_question(self):
+        task = asyncio.create_task(asyncio.sleep(0))
+        new_writer = MockWriter()
+        task_id = "reemit-task"
+        question_data = {
+            "request_id": "req-2",
+            "task_id": task_id,
+            "questions": [{"question": "Yes?", "options": [{"label": "Yes"}]}],
+        }
+        agent._sessions[task_id] = agent.Session(
+            task=task,
+            writer=MockWriter(),
+            pending_question=asyncio.get_running_loop().create_future(),
+            pending_question_data=question_data,
+        )
+        try:
+            agent.handle_hello({"type": "hello", "task_id": task_id}, new_writer)
+            events = new_writer.written_events()
+            self.assertEqual(len(events), 1)
+            self.assertEqual(events[0]["event"], "ask_user_question")
+            self.assertEqual(events[0]["data"]["request_id"], "req-2")
+        finally:
+            agent._sessions.pop(task_id, None)
+
+    async def test_handle_hello_emits_done_for_unknown_task(self):
+        writer = MockWriter()
+        agent.handle_hello({"type": "hello", "task_id": "does-not-exist"}, writer)
+        events = writer.written_events()
+        self.assertEqual(len(events), 1)
+        self.assertEqual(events[0]["event"], "done")
+        self.assertIsNone(events[0]["data"]["session_id"])
+        self.assertEqual(events[0]["data"]["task_id"], "does-not-exist")
 
 
 # ── Stream event processing tests ─────────────────────────────────────────
@@ -1238,7 +1357,7 @@ class TestRunQuery(unittest.IsolatedAsyncioTestCase):
         token1 = agent._emit_writer.set(writer)
         token2 = agent._emit_session_id.set(task_id)
         try:
-            await agent.run_query("test content", sdk_session_id, task_id)
+            await agent.run_query("test content", sdk_session_id, task_id, "/root")
         finally:
             _restore_sdk_mock(old_mods)
             agent._emit_writer.reset(token1)
@@ -1319,7 +1438,7 @@ class TestRunQuery(unittest.IsolatedAsyncioTestCase):
         token1 = agent._emit_writer.set(writer)
         token2 = agent._emit_session_id.set(task_id)
         try:
-            await agent.run_query("test", None, task_id)
+            await agent.run_query("test", None, task_id, "/root")
         finally:
             _restore_sdk_mock(old_mods)
             agent._emit_writer.reset(token1)
@@ -1406,7 +1525,7 @@ class TestAskUserQuestionHook(unittest.IsolatedAsyncioTestCase):
         token1 = agent._emit_writer.set(writer)
         token2 = agent._emit_session_id.set(task_id)
         try:
-            await agent.run_query("test", sdk_session_id, task_id)
+            await agent.run_query("test", sdk_session_id, task_id, "/root")
         finally:
             _restore_sdk_mock(old_mods)
             agent._emit_writer.reset(token1)

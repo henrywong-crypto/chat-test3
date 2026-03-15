@@ -102,6 +102,7 @@ export interface SseErrorEvent {
 export interface SseReconnecting {
   task_id: string;
   running_session_id: string | null;
+  project_dir: string | null;
 }
 
 export type SseEvent =

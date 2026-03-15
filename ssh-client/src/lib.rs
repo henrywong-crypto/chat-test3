@@ -106,3 +106,13 @@ pub async fn open_exec_channel(
     ssh_channel.exec(false, command).await?;
     Ok(ssh_channel)
 }
+
+pub async fn open_direct_streamlocal_channel(
+    ssh_handle: &Handle<SshClient>,
+    socket_path: &str,
+) -> Result<Channel<Msg>> {
+    ssh_handle
+        .channel_open_direct_streamlocal(socket_path)
+        .await
+        .with_context(|| format!("failed to open direct-streamlocal channel to {socket_path}"))
+}

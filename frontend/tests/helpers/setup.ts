@@ -152,6 +152,12 @@ function buildAppHtml(hasUserRootfs: boolean): string {
 export interface ChatBody {
   content: string;
   session_id: string | null;
+  work_dir?: string | null;
+  csrf_token: string;
+}
+
+export interface HelloBody {
+  task_id: string;
   csrf_token: string;
 }
 
@@ -185,6 +191,8 @@ export interface AppController {
   setChatResponseToken(token: string | null): void;
   /** CSRF token sent in the most recent DELETE /chat-transcript, or null. */
   lastDeleteCsrfToken(): string | null;
+  /** Body of the most recent POST /chat-hello, or null. */
+  lastHelloBody(): HelloBody | null;
 }
 
 export interface SetupOpts {
@@ -223,6 +231,7 @@ export async function setupApp(
   let lastResetBody: string | null = null;
   let chatResponseToken: string | null = null;
   let lastDeleteCsrfTokenValue: string | null = null;
+  let lastHelloBodyValue: HelloBody | null = null;
 
   // resolveSse is set each time the EventSource connects/reconnects.
   // sendSseEvents calls it to deliver events and close the stream.
@@ -353,11 +362,22 @@ export async function setupApp(
   await page.route(`**/sessions/${VM_ID}/chat`, async (route) => {
     const body = route.request().postDataJSON() as ChatBody;
     chatBodies.push(body);
-    const headers: Record<string, string> = {};
+    const headers: Record<string, string> = { "Content-Type": "application/json" };
     if (chatResponseToken !== null) {
       headers["x-csrf-token"] = chatResponseToken;
     }
-    await route.fulfill({ status: 200, body: "", headers });
+    await route.fulfill({
+      status: 200,
+      headers,
+      body: JSON.stringify({ task_id: DEFAULT_CLIENT_SESSION_ID }),
+    });
+  });
+
+  // ── Hello endpoint (registered after /chat for higher Playwright LIFO priority) ──
+  await page.route(`**/sessions/${VM_ID}/chat-hello`, async (route) => {
+    const raw = route.request().postData();
+    lastHelloBodyValue = raw ? (JSON.parse(raw) as HelloBody) : null;
+    await route.fulfill({ status: 200, body: "" });
   });
 
   // ── Load the app ──────────────────────────────────────────────────────────
@@ -385,6 +405,7 @@ export async function setupApp(
     lastResetFormData: () => lastResetBody,
     setChatResponseToken: (token) => { chatResponseToken = token; },
     lastDeleteCsrfToken: () => lastDeleteCsrfTokenValue,
+    lastHelloBody: () => lastHelloBodyValue,
   };
 }
 

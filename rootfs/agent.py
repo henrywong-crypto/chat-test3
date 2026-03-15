@@ -14,6 +14,38 @@ import uuid
 SOCKET_PATH = "/tmp/agent.sock"
 QUESTION_TIMEOUT_SECS = 3600
 
+# Allowed root directories for work_dir. Populated at startup via _init_allowed_roots().
+_ALLOWED_WORK_DIR_ROOTS: list[str] = []
+
+
+def _init_allowed_roots() -> None:
+    home = os.path.realpath(os.environ.get("HOME", "/root"))
+    tmp = os.path.realpath("/tmp")
+    for root in [home, tmp]:
+        if root not in _ALLOWED_WORK_DIR_ROOTS:
+            _ALLOWED_WORK_DIR_ROOTS.append(root)
+
+
+def resolve_work_dir(raw: str | None) -> str:
+    """Resolve and validate a work_dir path.
+
+    Returns the real path when it falls within an allowed root directory and
+    exists on disk, otherwise falls back to HOME.
+    """
+    fallback = os.path.realpath(os.environ.get("HOME", "/root"))
+    if not raw:
+        return fallback
+    real = os.path.realpath(raw)
+    for root in _ALLOWED_WORK_DIR_ROOTS:
+        if real == root or real.startswith(root + os.sep):
+            if os.path.isdir(real):
+                return real
+    log(f"work_dir {raw!r} outside allowed roots, using fallback")
+    return fallback
+
+
+_init_allowed_roots()
+
 
 def log(msg: str) -> None:
     """Write a log line to stderr so it appears in server logs without polluting the stdout protocol."""
@@ -124,11 +156,12 @@ def handle_interrupt(msg: dict, writer: asyncio.StreamWriter) -> None:
 def handle_query(msg: dict, writer: asyncio.StreamWriter) -> None:
     """Spawn a new run_query task and register it in _sessions."""
     sdk_session_id = msg.get("session_id")  # non-None when resuming
-    task_id = str(uuid.uuid4())
+    task_id = msg.get("task_id") or str(uuid.uuid4())
+    work_dir = resolve_work_dir(msg.get("work_dir"))
     token1 = _emit_writer.set(writer)
     token2 = _emit_session_id.set(task_id)
     task = asyncio.create_task(
-        run_query(msg.get("content", ""), sdk_session_id, task_id)
+        run_query(msg.get("content", ""), sdk_session_id, task_id, work_dir)
     )
     _emit_writer.reset(token1)
     _emit_session_id.reset(token2)
@@ -204,7 +237,7 @@ async def main():
 # ── Query execution ───────────────────────────────────────────────────────────
 
 
-async def run_query(content: str, sdk_session_id: str | None, task_id: str):
+async def run_query(content: str, sdk_session_id: str | None, task_id: str, work_dir: str):
     from claude_agent_sdk import ClaudeAgentOptions, PermissionResultAllow, query
     from claude_agent_sdk.types import HookMatcher, StreamEvent
 
@@ -245,7 +278,7 @@ async def run_query(content: str, sdk_session_id: str | None, task_id: str):
         }
 
     options = ClaudeAgentOptions(
-        cwd=os.environ.get("HOME", "/root"),
+        cwd=work_dir,
         can_use_tool=handle_tool_permission,
         hooks={
             "PreToolUse": [

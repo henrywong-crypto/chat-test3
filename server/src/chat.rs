@@ -8,7 +8,7 @@ use axum::{
 };
 use chat_relay::{AgentMessage, VmRelayHandle, start_vm_relay};
 use futures::StreamExt;
-use serde::Deserialize;
+use serde::{Deserialize, Serialize};
 use std::{convert::Infallible, net::Ipv4Addr, time::Duration};
 use tokio::{sync::mpsc, time::timeout};
 use tower_sessions::Session;
@@ -112,7 +112,13 @@ async fn forward_agent_message(
 pub(crate) struct QueryBody {
     content: String,
     session_id: Option<String>,
+    work_dir: Option<String>,
     csrf_token: String,
+}
+
+#[derive(Serialize)]
+struct QueryResponse {
+    task_id: String,
 }
 
 pub(crate) async fn handle_chat_query(
@@ -123,16 +129,22 @@ pub(crate) async fn handle_chat_query(
     let Some(csrf_token) = validate_csrf(&session, &body.csrf_token).await else {
         return (StatusCode::FORBIDDEN, "Forbidden").into_response();
     };
+    let task_id = Uuid::new_v4().to_string();
     let content_len = body.content.len();
     let agent_message = AgentMessage::Query {
+        task_id: task_id.clone(),
         content: body.content,
         session_id: body.session_id,
+        work_dir: body.work_dir,
     };
     if let Err(response) = forward_agent_message(agent_tx, agent_message).await {
         return response;
     }
-    info!("query forwarded  content_len={content_len}");
-    attach_csrf_token((StatusCode::OK, "").into_response(), &csrf_token)
+    info!("query forwarded  task_id={task_id}  content_len={content_len}");
+    attach_csrf_token(
+        (StatusCode::OK, Json(QueryResponse { task_id })).into_response(),
+        &csrf_token,
+    )
 }
 
 #[derive(Deserialize)]
@@ -180,5 +192,25 @@ pub(crate) async fn handle_chat_stop(
         return response;
     }
     info!("interrupt forwarded");
+    attach_csrf_token((StatusCode::OK, "").into_response(), &csrf_token)
+}
+
+#[derive(Deserialize)]
+pub(crate) struct HelloBody {
+    task_id: String,
+    csrf_token: String,
+}
+
+pub(crate) async fn handle_chat_hello(
+    VerifiedVmSender(agent_tx): VerifiedVmSender,
+    session: Session,
+    Json(body): Json<HelloBody>,
+) -> Response {
+    let Some(csrf_token) = validate_csrf(&session, &body.csrf_token).await else {
+        return (StatusCode::FORBIDDEN, "Forbidden").into_response();
+    };
+    if let Err(response) = forward_agent_message(agent_tx, AgentMessage::Hello { task_id: body.task_id }).await {
+        return response;
+    }
     attach_csrf_token((StatusCode::OK, "").into_response(), &csrf_token)
 }

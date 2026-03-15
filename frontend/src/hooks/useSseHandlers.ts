@@ -1,12 +1,15 @@
 import { useEffect, useRef } from "react";
-import type { SseEvent } from "../types";
+import type { ChatMessage, ChatSession, SseEvent, TranscriptMessage } from "../types";
 import type { ChatStateResult } from "./useChatState";
+import { buildMessagesFromTranscript } from "../utils/transcript";
 
 interface SseHandlerDeps {
   latestEvent: SseEvent | null;
   loadHistory: () => Promise<import("../types").ChatSession[]>;
+  loadTranscript: (sessionId: string, projectDir: string, signal?: AbortSignal) => Promise<TranscriptMessage[]>;
   newChatKeyRef: { current: number };
   sessionStartKeyRef: { current: number };
+  sessions: ChatSession[];
   vmId: string;
 }
 
@@ -14,7 +17,7 @@ export function useSseHandlers(
   sseState: SseHandlerDeps,
   chatState: ChatStateResult & { setSessions: (s: import("../types").ChatSession[]) => void },
 ) {
-  const { latestEvent, loadHistory, newChatKeyRef, sessionStartKeyRef, vmId } = sseState;
+  const { latestEvent, loadHistory, loadTranscript, newChatKeyRef, sessionStartKeyRef, sessions, vmId } = sseState;
   const {
     viewSessionId,
     runningSessionId,
@@ -43,6 +46,9 @@ export function useSseHandlers(
 
   const nullOrphanedRef = useRef(chatState.nullOrphaned);
   nullOrphanedRef.current = chatState.nullOrphaned;
+
+  // Track the current task_id for message persistence
+  const currentTaskIdRef = useRef<string | null>(null);
 
   // Track pending tool message IDs by tool_use_id
   const toolIdToMsgId = useRef<Map<string, string>>(new Map());
@@ -75,10 +81,12 @@ export function useSseHandlers(
     switch (event.type) {
       case "session_start": {
         const { task_id } = event.payload;
+        currentTaskIdRef.current = task_id;
         setTaskId(session, task_id);
+        const project_dir = sessions.find((s) => s.session_id === session)?.project_dir ?? null;
         localStorage.setItem(
           `chat_running_task_${vmId}`,
-          JSON.stringify({ task_id, running_session_id: session }),
+          JSON.stringify({ task_id, running_session_id: session, project_dir }),
         );
         break;
       }
@@ -95,6 +103,9 @@ export function useSseHandlers(
           timestamp: Date.now(),
           isThinking: true,
         });
+        if (currentTaskIdRef.current) {
+          localStorage.setItem(`chat_messages_task_${currentTaskIdRef.current}`, JSON.stringify(getMessages(session)));
+        }
         break;
       }
 
@@ -105,6 +116,9 @@ export function useSseHandlers(
             ...m,
             content: m.content + thinking,
           }));
+          if (currentTaskIdRef.current) {
+            localStorage.setItem(`chat_messages_task_${currentTaskIdRef.current}`, JSON.stringify(getMessages(session)));
+          }
         }
         break;
       }
@@ -127,6 +141,9 @@ export function useSseHandlers(
             content: m.content + text,
           }));
         }
+        if (currentTaskIdRef.current) {
+          localStorage.setItem(`chat_messages_task_${currentTaskIdRef.current}`, JSON.stringify(getMessages(session)));
+        }
         break;
       }
 
@@ -147,6 +164,9 @@ export function useSseHandlers(
           toolName: name,
           toolInput: input,
         });
+        if (currentTaskIdRef.current) {
+          localStorage.setItem(`chat_messages_task_${currentTaskIdRef.current}`, JSON.stringify(getMessages(session)));
+        }
         break;
       }
 
@@ -158,6 +178,9 @@ export function useSseHandlers(
             ...m,
             toolResult: { content, isError: is_error },
           }));
+          if (currentTaskIdRef.current) {
+            localStorage.setItem(`chat_messages_task_${currentTaskIdRef.current}`, JSON.stringify(getMessages(session)));
+          }
         }
         break;
       }
@@ -171,8 +194,10 @@ export function useSseHandlers(
       }
 
       case "done": {
-        const { session_id } = event.payload;
+        const { session_id, task_id } = event.payload;
         const completedSession = runningRef.current;
+        localStorage.removeItem(`chat_messages_task_${task_id}`);
+        currentTaskIdRef.current = null;
         setRunningSessionId(null);
         setIsStreaming(false);
         setNullOrphaned(false);
@@ -203,6 +228,10 @@ export function useSseHandlers(
       case "error_event": {
         const { message } = event.payload;
         const wasOrphaned = nullOrphanedRef.current;
+        if (currentTaskIdRef.current) {
+          localStorage.removeItem(`chat_messages_task_${currentTaskIdRef.current}`);
+          currentTaskIdRef.current = null;
+        }
         setRunningSessionId(null);
         setIsStreaming(false);
         setNullOrphaned(false);
@@ -224,11 +253,30 @@ export function useSseHandlers(
       }
 
       case "reconnecting": {
-        const { task_id, running_session_id } = event.payload;
+        const { task_id, running_session_id, project_dir } = event.payload;
+        currentTaskIdRef.current = task_id;
         setTaskId(running_session_id, task_id);
         setRunningSessionId(running_session_id);
         setIsStreaming(true);
         setViewSessionId(running_session_id);
+        let inProgressMessages: ChatMessage[] = [];
+        const savedMessages = localStorage.getItem(`chat_messages_task_${task_id}`);
+        if (savedMessages) {
+          try {
+            inProgressMessages = JSON.parse(savedMessages) as ChatMessage[];
+            setMessages(running_session_id, inProgressMessages);
+          } catch {
+            // ignore parse errors
+          }
+        }
+        if (running_session_id && project_dir) {
+          loadTranscript(running_session_id, project_dir).then((transcript) => {
+            const historical = buildMessagesFromTranscript(transcript);
+            if (historical.length > 0) {
+              setMessages(running_session_id, [...historical, ...inProgressMessages]);
+            }
+          }).catch(console.error);
+        }
         break;
       }
     }
