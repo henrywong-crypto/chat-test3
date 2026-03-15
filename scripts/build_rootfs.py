@@ -38,7 +38,7 @@ S3_ARTIFACTS = f"{S3_BUCKET}/firecracker-ci"
 INSTALL_DIR = Path("/var/lib/fc")
 ROOTFS_DIR = Path(__file__).parent.parent / "rootfs"
 AGENT_PY = ROOTFS_DIR / "agent.py"
-CONNECTOR_PY = ROOTFS_DIR / "connector.py"
+AGENT_SERVICE = ROOTFS_DIR / "agent.service"
 SETTINGS_PY = ROOTFS_DIR / "settings.py"
 
 CLAUDE_SETTINGS = """\
@@ -279,9 +279,18 @@ def install_agent(rootfs: Path) -> None:
     opt = rootfs / "opt"
     opt.mkdir(exist_ok=True)
     shutil.copy(str(AGENT_PY), str(opt / "agent.py"))
-    shutil.copy(str(CONNECTOR_PY), str(opt / "connector.py"))
     shutil.copy(str(SETTINGS_PY), str(opt / "settings.py"))
     run(["chown", "-R", "1000:1000", str(opt)])
+
+    # Install and enable the agent systemd service so agent.py starts on boot.
+    systemd_system = rootfs / "etc/systemd/system"
+    systemd_system.mkdir(parents=True, exist_ok=True)
+    shutil.copy(str(AGENT_SERVICE), str(systemd_system / "agent.service"))
+    multi_user_wants = systemd_system / "multi-user.target.wants"
+    multi_user_wants.mkdir(exist_ok=True)
+    service_link = multi_user_wants / "agent.service"
+    if not service_link.exists():
+        service_link.symlink_to("../agent.service")
 
     # Pre-warm the uv package cache as the ubuntu user so the first VM startup
     # is instant.  Running any script with the same dependency set populates
