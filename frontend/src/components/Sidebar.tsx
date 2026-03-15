@@ -1,53 +1,44 @@
 import React from "react";
-import { Plus, RefreshCw, Trash2 } from "lucide-react";
-import type { ChatSession } from "../types";
+import { Plus, Trash2 } from "lucide-react";
+import type { Conversation } from "../types";
 
 interface SidebarProps {
-  sessions: ChatSession[];
-  viewSessionId: string | null;
-  runningSessionId: string | null;
-  onSelectSession: (session: ChatSession) => void;
+  conversations: Conversation[];
+  viewConversationId: string | null;
+  runningConversationId: string | null;
+  onSelectConversation: (conversation: Conversation) => void;
   onNewChat: () => void;
-  onRefresh: () => void;
-  onDeleteSession: (session: ChatSession) => void;
+  onDeleteConversation: (conversation: Conversation) => void;
 }
 
 export default function Sidebar({
-  sessions,
-  viewSessionId,
-  runningSessionId,
-  onSelectSession,
+  conversations,
+  viewConversationId,
+  runningConversationId,
+  onSelectConversation,
   onNewChat,
-  onRefresh,
-  onDeleteSession,
+  onDeleteConversation,
 }: SidebarProps) {
   return (
     <div className="flex w-60 flex-col border-r border-border bg-card">
-      <div className="flex h-11 items-center justify-between border-b border-border px-3">
+      <div className="flex h-11 items-center border-b border-border px-3">
         <span className="text-xs font-semibold uppercase tracking-wider text-muted-foreground">
           Conversations
         </span>
-        <button
-          title="Refresh"
-          onClick={onRefresh}
-          className="flex h-6 w-6 items-center justify-center rounded text-muted-foreground hover:bg-accent hover:text-foreground"
-        >
-          <RefreshCw className="h-3 w-3" />
-        </button>
       </div>
 
       <div className="flex-1 overflow-y-auto py-1.5">
-        {sessions.length === 0 ? (
+        {conversations.length === 0 ? (
           <p className="px-3 py-8 text-center text-xs text-muted-foreground">No conversations yet</p>
         ) : (
-          sessions.map((session) => (
-            <SessionRow
-              key={session.session_id}
-              session={session}
-              isActive={session.session_id === viewSessionId}
-              isRunning={session.session_id === runningSessionId}
-              onSelect={() => onSelectSession(session)}
-              onDelete={() => onDeleteSession(session)}
+          conversations.map((conversation) => (
+            <ConversationRow
+              key={conversation.conversationId}
+              conversation={conversation}
+              isActive={conversation.conversationId === viewConversationId}
+              isRunning={conversation.conversationId === runningConversationId}
+              onSelect={() => onSelectConversation(conversation)}
+              onDelete={() => onDeleteConversation(conversation)}
             />
           ))
         )}
@@ -66,21 +57,22 @@ export default function Sidebar({
   );
 }
 
-function SessionRow({
-  session,
+function ConversationRow({
+  conversation,
   isActive,
   isRunning,
   onSelect,
   onDelete,
 }: {
-  session: ChatSession;
+  conversation: Conversation;
   isActive: boolean;
   isRunning: boolean;
   onSelect: () => void;
   onDelete: () => void;
 }) {
   const [hovered, setHovered] = React.useState(false);
-  const title = session.is_pending ? "New chat\u2026" : session.title || `Session ${session.session_id.slice(0, 8)}`;
+  const title = conversation.title ?? "New chat\u2026";
+  const isPending = !conversation.title;
 
   return (
     <div
@@ -99,10 +91,10 @@ function SessionRow({
           <span className="relative inline-flex h-1.5 w-1.5 rounded-full bg-primary" />
         </span>
       )}
-      <span className={`flex-1 truncate leading-snug ${session.is_pending ? "italic opacity-60" : ""}`}>
+      <span className={`flex-1 truncate leading-snug ${isPending ? "italic opacity-60" : ""}`}>
         {title}
       </span>
-      {hovered && !session.is_pending && (
+      {hovered && (
         <button
           onClick={(e) => { e.stopPropagation(); onDelete(); }}
           className="flex h-5 w-5 flex-shrink-0 items-center justify-center rounded text-muted-foreground hover:text-destructive"

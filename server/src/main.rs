@@ -31,7 +31,7 @@ use crate::{
     auth::{
         get_callback_handler, get_cognito_login_handler, get_login_handler, get_logout_handler,
     },
-    chat::{handle_chat_hello, handle_chat_query, handle_chat_question_answer, handle_chat_stop, handle_chat_stream},
+    chat::{handle_chat_query, handle_chat_question_answer, handle_chat_reconnect, handle_chat_stop},
     download::download_file_handler,
     files::list_files_handler,
     handlers::{
@@ -89,31 +89,24 @@ fn build_router(app_state: AppState, session_store: PostgresStore) -> Router {
     let session_layer = build_session_layer(session_store);
     Router::new()
         .route("/", get(get_or_create_terminal))
-        .route("/sessions/{id}/download", get(download_file_handler))
-        .route("/sessions/{id}/ls", get(list_files_handler))
+        .route("/chat", post(handle_chat_query))
+        .route("/chat-stream/{taskId}", get(handle_chat_reconnect))
+        .route("/chat-question-answer", post(handle_chat_question_answer))
+        .route("/chat-stop", post(handle_chat_stop))
+        .route("/chat-history", get(list_chat_sessions_handler))
         .route(
-            "/sessions/{id}/upload",
-            post(upload_file_handler).layer(DefaultBodyLimit::max(50 * 1024 * 1024)),
-        )
-        .route("/sessions/{id}/chat-stream", get(handle_chat_stream))
-        .route("/sessions/{id}/chat", post(handle_chat_query))
-        .route("/sessions/{id}/chat-hello", post(handle_chat_hello))
-        .route(
-            "/sessions/{id}/chat-question-answer",
-            post(handle_chat_question_answer),
-        )
-        .route("/sessions/{id}/chat-stop", post(handle_chat_stop))
-        .route(
-            "/sessions/{id}/chat-history",
-            get(list_chat_sessions_handler),
-        )
-        .route(
-            "/sessions/{id}/chat-transcript",
+            "/chat-transcript",
             get(get_chat_transcript_handler).delete(delete_chat_session_handler),
         )
         .route(
-            "/sessions/{id}/chat-upload",
+            "/chat-upload",
             post(handle_chat_upload).layer(DefaultBodyLimit::max(50 * 1024 * 1024)),
+        )
+        .route("/ls", get(list_files_handler))
+        .route("/download", get(download_file_handler))
+        .route(
+            "/upload",
+            post(upload_file_handler).layer(DefaultBodyLimit::max(50 * 1024 * 1024)),
         )
         .route(
             "/api/settings",

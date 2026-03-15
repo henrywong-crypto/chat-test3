@@ -12,7 +12,7 @@ use ssh_client::connect_ssh;
 use std::path::{Path as StdPath, PathBuf};
 
 use crate::{
-    handlers::UserVmById,
+    handlers::UserVm,
     state::{AppError, AppState},
 };
 
@@ -34,7 +34,7 @@ struct ListResponse {
 }
 
 pub(crate) async fn list_files_handler(
-    user_vm: UserVmById,
+    user_vm: UserVm,
     Query(query): Query<ListQuery>,
     State(state): State<AppState>,
 ) -> Result<impl IntoResponse, AppError> {

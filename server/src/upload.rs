@@ -16,7 +16,7 @@ use tokio_util::io::StreamReader;
 use tower_sessions::Session;
 
 use crate::{
-    handlers::{UserVmById, attach_csrf_token, validate_csrf},
+    handlers::{UserVm, attach_csrf_token, validate_csrf},
     state::{AppError, AppState},
 };
 
@@ -26,7 +26,7 @@ struct UploadMetadata {
 }
 
 pub(crate) async fn upload_file_handler(
-    user_vm: UserVmById,
+    user_vm: UserVm,
     session: Session,
     State(state): State<AppState>,
     mut multipart: Multipart,

@@ -1,5 +1,5 @@
 import React, { useCallback, useEffect, useRef, useState } from "react";
-import type { ChatSession } from "../types";
+import type { Conversation } from "../types";
 import { useSse } from "../contexts/SseContext";
 import { useChatState } from "../hooks/useChatState";
 import { useSseHandlers } from "../hooks/useSseHandlers";
@@ -10,25 +10,30 @@ import ChatMessagesPane from "./ChatMessagesPane";
 import ClaudeStatus from "./ClaudeStatus";
 
 interface ChatInterfaceProps {
-  sessions: ChatSession[];
-  setSessions: (s: ChatSession[]) => void;
-  selectedSession: ChatSession | null;
-  onRunningSessionChange?: (sessionId: string | null) => void;
+  selectedConversation: Conversation | null;
+  onRunningConversationChange?: (conversationId: string | null) => void;
 }
 
-export default function ChatInterface({ sessions, setSessions, selectedSession, onRunningSessionChange }: ChatInterfaceProps) {
+export default function ChatInterface({ selectedConversation, onRunningConversationChange }: ChatInterfaceProps) {
   const sseCtx = useSse();
-  const { loadHistory, loadTranscript } = sseCtx;
+  const {
+    conversations,
+    loadTranscript,
+    loadHistory,
+    updateConversation,
+    storeQuestion,
+    clearQuestion,
+    getQuestionsForConversation,
+  } = sseCtx;
   const chatState = useChatState();
 
-  // Bumped whenever the composer should receive focus (new chat or session switch)
   const [composerFocusKey, setComposerFocusKey] = useState(0);
 
   const {
-    viewSessionId,
-    setViewSessionId,
-    runningSessionId,
-    setRunningSessionId,
+    viewConversationId,
+    setViewConversationId,
+    runningConversationId,
+    setRunningConversationId,
     isStreaming,
     setIsStreaming,
     getSessionPendingQuestion,
@@ -40,122 +45,113 @@ export default function ChatInterface({ sessions, setSessions, selectedSession, 
     generateId,
   } = chatState;
 
-  // Wire SSE events to chat state
   useSseHandlers(
-    { eventQueueRef: sseCtx.eventQueueRef, eventSeq: sseCtx.eventSeq, loadHistory, loadTranscript, sessions, vmId: sseCtx.vmId },
-    { ...chatState, setSessions },
+    {
+      eventQueueRef: sseCtx.eventQueueRef,
+      eventSeq: sseCtx.eventSeq,
+      loadHistory,
+      loadTranscript,
+      updateConversation,
+      storeQuestion,
+      clearQuestion,
+      getQuestionsForConversation,
+      conversations,
+      vmId: sseCtx.vmId,
+    },
+    chatState,
   );
 
-  // Load history on mount
-  useEffect(() => {
-    loadHistory().then(setSessions).catch(console.error);
-  }, [loadHistory, setSessions]); // eslint-disable-line react-hooks/exhaustive-deps
-
-  // Load transcript when user switches to an existing session
-  const loadTranscriptForSession = useCallback(async (session: ChatSession) => {
-    if (!session.project_dir) return;
-    if (getMessages(session.session_id).length > 0) return;
+  const loadTranscriptForConversation = useCallback(async (conversation: Conversation) => {
+    if (!conversation.sessionId || !conversation.projectDir) return;
+    if (getMessages(conversation.conversationId).length > 0) return;
     try {
-      const transcript = await loadTranscript(session.session_id, session.project_dir);
+      const transcript = await loadTranscript(conversation.sessionId, conversation.projectDir);
       const msgs = buildMessagesFromTranscript(transcript);
-      setMessages(session.session_id, msgs);
+      setMessages(conversation.conversationId, msgs);
     } catch (err) {
       console.error("Failed to load transcript", err);
     }
   }, [loadTranscript, getMessages, setMessages]);
 
-  // React to session selection from the sidebar (driven by App.tsx)
   useEffect(() => {
-    if (!selectedSession) {
-      setViewSessionId(null);
+    if (!selectedConversation) {
+      setViewConversationId(null);
       setComposerFocusKey((k) => k + 1);
       return;
     }
-    setViewSessionId(selectedSession.session_id);
-    if (!selectedSession.is_pending) {
-      loadTranscriptForSession(selectedSession);
+    setViewConversationId(selectedConversation.conversationId);
+    loadTranscriptForConversation(selectedConversation);
+
+    // Restore any pending question for this conversation
+    const storedQuestion = getQuestionsForConversation(selectedConversation.conversationId);
+    if (storedQuestion) {
+      setSessionPendingQuestion(selectedConversation.conversationId, {
+        requestId: storedQuestion.requestId,
+        taskId: storedQuestion.taskId,
+        questions: storedQuestion.questions,
+      });
     }
+
     setComposerFocusKey((k) => k + 1);
-  }, [selectedSession, setViewSessionId, loadTranscriptForSession]);
+  }, [selectedConversation, setViewConversationId, loadTranscriptForConversation, getQuestionsForConversation, setSessionPendingQuestion]);
 
-  // Notify parent when the running session changes so Sidebar can show the active indicator
-  const onRunningSessionChangeRef = useRef(onRunningSessionChange);
-  onRunningSessionChangeRef.current = onRunningSessionChange;
+  const onRunningConversationChangeRef = useRef(onRunningConversationChange);
+  onRunningConversationChangeRef.current = onRunningConversationChange;
   useEffect(() => {
-    onRunningSessionChangeRef.current?.(runningSessionId);
-  }, [runningSessionId]);
+    onRunningConversationChangeRef.current?.(runningConversationId);
+  }, [runningConversationId]);
 
-  const selectedSessionRef = useRef(selectedSession);
-  selectedSessionRef.current = selectedSession;
+  const handleSend = useCallback((text: string) => {
+    let effectiveConversationId = viewConversationId;
+    if (!effectiveConversationId) {
+      const newConv = sseCtx.createConversation();
+      effectiveConversationId = newConv.conversationId;
+      setViewConversationId(effectiveConversationId);
+    }
 
-  const handleSend = useCallback(async (text: string) => {
-    const conversationId = viewSessionId;
-    const effectiveId = conversationId ?? crypto.randomUUID();
-    const isNewConversation = !conversationId || (selectedSessionRef.current?.is_pending ?? false);
-    const serverSessionId = isNewConversation ? null : effectiveId;
+    const conversation = conversations.find((c) => c.conversationId === effectiveConversationId);
+    const sessionId = conversation?.sessionId;
 
-    addMessage(effectiveId, {
+    addMessage(effectiveConversationId, {
       id: generateId(),
       type: "user",
       content: text,
       timestamp: Date.now(),
     });
-    setRunningSessionId(effectiveId);
+    setRunningConversationId(effectiveConversationId);
     setIsStreaming(true);
 
-    if (!conversationId) {
-      setViewSessionId(effectiveId);
-      setSessions((prev: ChatSession[]) => [
-        { session_id: effectiveId, created_at: new Date().toISOString(), title: "New chat\u2026", is_pending: true },
-        ...prev,
-      ]);
-    } else if (isNewConversation && selectedSessionRef.current) {
-      setSessions((prev: ChatSession[]) => [selectedSessionRef.current!, ...prev]);
-    }
-
-    try {
-      await sseCtx.sendQuery(text, serverSessionId);
-    } catch (err) {
-      if (isNewConversation) {
-        setSessions((prev: ChatSession[]) => prev.filter((s) => s.session_id !== effectiveId));
-      }
-      addMessage(effectiveId, {
-        id: generateId(),
-        type: "error",
-        content: String(err),
-        timestamp: Date.now(),
-      });
-      setRunningSessionId(null);
-      setIsStreaming(false);
-    }
-  }, [viewSessionId, generateId, addMessage, setRunningSessionId, setIsStreaming, setViewSessionId, setSessions, sseCtx]);
+    sseCtx.sendQuery(text, effectiveConversationId, sessionId);
+  }, [viewConversationId, conversations, generateId, addMessage, setRunningConversationId, setIsStreaming, setViewConversationId, sseCtx]);
 
   const handleStop = useCallback(() => {
-    sseCtx.sendStop(getTaskId(runningSessionId) ?? "").catch(console.error);
-  }, [sseCtx, getTaskId, runningSessionId]);
+    sseCtx.sendStop(getTaskId(runningConversationId) ?? "").catch(console.error);
+  }, [sseCtx, getTaskId, runningConversationId]);
 
   const handleAnswerQuestion = useCallback(
     async (requestId: string, answers: Record<string, string>) => {
-      const taskId = getSessionPendingQuestion(viewSessionId)?.taskId ?? "";
-      setSessionPendingQuestion(viewSessionId, null);
+      const taskId = getSessionPendingQuestion(viewConversationId)?.taskId ?? "";
+      setSessionPendingQuestion(viewConversationId, null);
+      clearQuestion(requestId);
       await sseCtx.answerQuestion(taskId, requestId, answers);
     },
-    [sseCtx, setSessionPendingQuestion, getSessionPendingQuestion, viewSessionId],
+    [sseCtx, setSessionPendingQuestion, getSessionPendingQuestion, viewConversationId, clearQuestion],
   );
 
   const handleSkipQuestion = useCallback(
     async (requestId: string) => {
-      const taskId = getSessionPendingQuestion(viewSessionId)?.taskId ?? "";
-      setSessionPendingQuestion(viewSessionId, null);
+      const taskId = getSessionPendingQuestion(viewConversationId)?.taskId ?? "";
+      setSessionPendingQuestion(viewConversationId, null);
+      clearQuestion(requestId);
       await sseCtx.answerQuestion(taskId, requestId, {});
     },
-    [sseCtx, setSessionPendingQuestion, getSessionPendingQuestion, viewSessionId],
+    [sseCtx, setSessionPendingQuestion, getSessionPendingQuestion, viewConversationId, clearQuestion],
   );
 
-  const messages = getMessages(viewSessionId);
-  const pendingQuestion = getSessionPendingQuestion(viewSessionId);
-  const isCurrentRunning = isStreaming && runningSessionId === viewSessionId;
-  const isOtherRunning = isStreaming && runningSessionId !== viewSessionId;
+  const messages = getMessages(viewConversationId);
+  const pendingQuestion = getSessionPendingQuestion(viewConversationId);
+  const isCurrentRunning = isStreaming && runningConversationId === viewConversationId;
+  const isOtherRunning = isStreaming && runningConversationId !== viewConversationId;
 
   return (
     <div className="flex min-h-0 flex-1 flex-col">
@@ -175,7 +171,6 @@ export default function ChatInterface({ sessions, setSessions, selectedSession, 
         <ChatComposer
           isLoading={isCurrentRunning}
           isOtherRunning={isOtherRunning}
-          isVmReady={sseCtx.isVmReady}
           onSend={handleSend}
           onStop={handleStop}
           focusKey={composerFocusKey}

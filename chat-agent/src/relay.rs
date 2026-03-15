@@ -1,4 +1,4 @@
-use anyhow::Result;
+use anyhow::{Context, Result};
 use bytes::Bytes;
 use futures::stream::Stream;
 use russh::{Channel, ChannelMsg, client};
@@ -15,29 +15,30 @@ use tokio::{
 use tokio_stream::wrappers::ReceiverStream;
 use tracing::{debug, error, info};
 
-use crate::channel::connect_ssh_and_open_channel;
+use crate::{AgentMessage, channel::connect_ssh_and_open_channel};
 
 const HEARTBEAT_SECS: u64 = 60;
 const SEND_TIMEOUT_SECS: u64 = 30;
 const SSE_CHANNEL_CAPACITY: usize = 16;
-const RELAY_READY_EVENT: &[u8] = b"event: relay_ready\ndata: {}\n\n";
 
-pub fn stream_agent_sse(
+pub fn stream_task_sse(
     guest_ip: Ipv4Addr,
     ssh_key_path: PathBuf,
     ssh_user: String,
     vm_host_key_path: PathBuf,
+    message: AgentMessage,
 ) -> impl Stream<Item = Bytes> + use<> {
     let (tx, rx) = mpsc::channel::<Bytes>(SSE_CHANNEL_CAPACITY);
-    tokio::spawn(run_agent_stream(guest_ip, ssh_key_path, ssh_user, vm_host_key_path, tx));
+    tokio::spawn(run_task_stream(guest_ip, ssh_key_path, ssh_user, vm_host_key_path, message, tx));
     ReceiverStream::new(rx)
 }
 
-async fn run_agent_stream(
+async fn run_task_stream(
     guest_ip: Ipv4Addr,
     ssh_key_path: PathBuf,
     ssh_user: String,
     vm_host_key_path: PathBuf,
+    message: AgentMessage,
     tx: mpsc::Sender<Bytes>,
 ) {
     let mut heartbeat = interval(Duration::from_secs(HEARTBEAT_SECS));
@@ -60,7 +61,23 @@ async fn run_agent_stream(
             send_sse(&tx, build_sse_error_event(e)).await;
         }
         Ok((ssh_handle, ssh_channel)) => {
-            if !send_sse(&tx, Bytes::from_static(RELAY_READY_EVENT)).await {
+            let line = match serde_json::to_string(&message) {
+                Ok(s) => format!("{s}\n"),
+                Err(e) => {
+                    send_sse(
+                        &tx,
+                        build_sse_error_event(anyhow::anyhow!("failed to serialize message: {e}")),
+                    )
+                    .await;
+                    return;
+                }
+            };
+            if let Err(e) = ssh_channel
+                .data(Bytes::from(line).as_ref())
+                .await
+                .context("failed to write message to agent socket")
+            {
+                send_sse(&tx, build_sse_error_event(e)).await;
                 return;
             }
             if let Err(e) = stream_ssh_channel(ssh_handle, ssh_channel, &tx).await {

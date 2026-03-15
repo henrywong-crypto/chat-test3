@@ -1,7 +1,7 @@
 use anyhow::{Context, Result, anyhow};
 use axum::{
     Json,
-    extract::{Form, FromRequestParts, Multipart, Path as RoutePath, Query, State},
+    extract::{Form, FromRequestParts, Multipart, Query, State},
     http::{StatusCode, header::HeaderValue, request::Parts},
     response::{Html, IntoResponse, Redirect, Response},
 };
@@ -15,7 +15,6 @@ use ssh_client::connect_ssh;
 use std::{
     io::{Error as IoError, ErrorKind},
     net::Ipv4Addr,
-    ops,
     path::{Path, PathBuf},
     time::{Duration, Instant, SystemTime, UNIX_EPOCH},
 };
@@ -87,10 +86,6 @@ pub(crate) async fn get_csrf_token_handler(
     Ok(Json(CsrfTokenResponse { csrf_token }).into_response())
 }
 
-fn validate_vm_id(id: &str) -> bool {
-    Uuid::parse_str(id).is_ok()
-}
-
 fn register_vm(vms: &VmRegistry, vm_id: String, vm_entry: VmEntry) -> Result<(), AppError> {
     vms.lock()
         .map_err(|_| anyhow!("vm registry lock poisoned"))?
@@ -140,40 +135,6 @@ impl FromRequestParts<AppState> for UserVm {
             }
         };
         Ok(UserVm { user_id: db_user.id, vm_id, guest_ip })
-    }
-}
-
-pub(crate) struct UserVmById(pub(crate) UserVm);
-
-impl ops::Deref for UserVmById {
-    type Target = UserVm;
-    fn deref(&self) -> &UserVm {
-        &self.0
-    }
-}
-
-impl FromRequestParts<AppState> for UserVmById {
-    type Rejection = Response;
-
-    async fn from_request_parts(parts: &mut Parts, state: &AppState) -> Result<Self, Self::Rejection> {
-        let RoutePath(vm_id) = RoutePath::<String>::from_request_parts(parts, state).await
-            .map_err(IntoResponse::into_response)?;
-        if !validate_vm_id(&vm_id) {
-            return Err((StatusCode::NOT_FOUND, "Not found").into_response());
-        }
-        let user = User::from_request_parts(parts, state).await
-            .map_err(IntoResponse::into_response)?;
-        let db_user = get_user_by_email(&state.db, &user.email).await.map_err(|e| {
-            error!("db error: {e}");
-            (StatusCode::INTERNAL_SERVER_ERROR, "An internal error occurred").into_response()
-        })?.ok_or_else(|| Redirect::to("/login").into_response())?;
-        let Some(guest_ip) = find_vm_guest_ip_for_user(&state.vms, &vm_id, db_user.id).map_err(|e| {
-            error!("vm registry error: {e}");
-            (StatusCode::INTERNAL_SERVER_ERROR, "An internal error occurred").into_response()
-        })? else {
-            return Err((StatusCode::NOT_FOUND, "Session not found or expired").into_response());
-        };
-        Ok(UserVmById(UserVm { user_id: db_user.id, vm_id, guest_ip }))
     }
 }
 
@@ -282,7 +243,7 @@ pub(crate) async fn delete_user_rootfs_handler(
 }
 
 pub(crate) async fn get_terminal_page(
-    user_vm: UserVmById,
+    user_vm: UserVm,
     session: Session,
     State(state): State<AppState>,
 ) -> Result<Response, AppError> {
@@ -290,7 +251,7 @@ pub(crate) async fn get_terminal_page(
 }
 
 pub(crate) async fn list_chat_sessions_handler(
-    user_vm: UserVmById,
+    user_vm: UserVm,
     State(state): State<AppState>,
 ) -> Result<Response, AppError> {
     Ok(list_chat_sessions(
@@ -315,7 +276,7 @@ pub(crate) struct TranscriptQuery {
 }
 
 pub(crate) async fn get_chat_transcript_handler(
-    user_vm: UserVmById,
+    user_vm: UserVm,
     Query(query): Query<TranscriptQuery>,
     State(state): State<AppState>,
 ) -> Result<Response, AppError> {
@@ -343,7 +304,7 @@ pub(crate) struct DeleteChatSessionForm {
 }
 
 pub(crate) async fn delete_chat_session_handler(
-    user_vm: UserVmById,
+    user_vm: UserVm,
     session: Session,
     State(state): State<AppState>,
     Json(form): Json<DeleteChatSessionForm>,
@@ -368,7 +329,7 @@ struct ChatUploadMetadata {
 }
 
 pub(crate) async fn handle_chat_upload(
-    user_vm: UserVmById,
+    user_vm: UserVm,
     session: Session,
     State(state): State<AppState>,
     mut multipart: Multipart,

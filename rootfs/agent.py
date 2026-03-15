@@ -57,6 +57,7 @@ def log(msg: str) -> None:
 class Session:
     task: asyncio.Task
     writer: asyncio.StreamWriter
+    conversation_id: str
     pending_question: asyncio.Future | None = None
     pending_question_data: dict | None = None
 
@@ -148,7 +149,7 @@ def handle_interrupt(msg: dict, writer: asyncio.StreamWriter) -> None:
     if not task_id:
         return
     session = _sessions.get(task_id)
-    if session and not session.task.done() and writer is session.writer:
+    if session and not session.task.done():
         log(f"interrupt received for session {task_id!r}, cancelling")
         session.task.cancel()
 
@@ -157,15 +158,16 @@ def handle_query(msg: dict, writer: asyncio.StreamWriter) -> None:
     """Spawn a new run_query task and register it in _sessions."""
     sdk_session_id = msg.get("session_id")  # non-None when resuming
     task_id = msg.get("task_id") or str(uuid.uuid4())
+    conversation_id = msg.get("conversation_id", "")
     work_dir = resolve_work_dir(msg.get("work_dir"))
     token1 = _emit_writer.set(writer)
     token2 = _emit_session_id.set(task_id)
     task = asyncio.create_task(
-        run_query(msg.get("content", ""), sdk_session_id, task_id, work_dir)
+        run_query(msg.get("content", ""), sdk_session_id, task_id, conversation_id, work_dir)
     )
     _emit_writer.reset(token1)
     _emit_session_id.reset(token2)
-    _sessions[task_id] = Session(task=task, writer=writer)
+    _sessions[task_id] = Session(task=task, writer=writer, conversation_id=conversation_id)
     log(f"query started  task_id={task_id!r}  resume={sdk_session_id!r}")
 
 
@@ -238,7 +240,7 @@ async def main():
 # ── Query execution ───────────────────────────────────────────────────────────
 
 
-async def run_query(content: str, sdk_session_id: str | None, task_id: str, work_dir: str):
+async def run_query(content: str, sdk_session_id: str | None, task_id: str, conversation_id: str, work_dir: str):
     from claude_agent_sdk import ClaudeAgentOptions, PermissionResultAllow, query
     from claude_agent_sdk.types import HookMatcher, StreamEvent
 
@@ -260,6 +262,7 @@ async def run_query(content: str, sdk_session_id: str | None, task_id: str, work
         question_data = {
             "request_id": tool_use_id,
             "task_id": task_id,
+            "conversation_id": conversation_id,
             "session_id": captured_session_id,
             "questions": questions,
         }
@@ -329,7 +332,7 @@ async def run_query(content: str, sdk_session_id: str | None, task_id: str, work
         emit_sse("error_event", {"message": str(exc)})
     finally:
         log(f"query done  task_id={task_id!r}  session_id={captured_session_id!r}")
-        emit_sse("done", {"session_id": captured_session_id, "task_id": task_id})
+        emit_sse("done", {"session_id": captured_session_id, "task_id": task_id, "conversation_id": conversation_id})
         session = _sessions.pop(task_id, None)
         if session:
             session.pending_question = None

@@ -1,63 +1,70 @@
 import { useEffect, useRef, type MutableRefObject } from "react";
-import type { ChatMessage, ChatSession, SseEvent, TranscriptMessage } from "../types";
+import type { ChatMessage, ChatSession, Conversation, SseEvent, StoredQuestion, TranscriptMessage } from "../types";
 import type { ChatStateResult } from "./useChatState";
 import { buildMessagesFromTranscript } from "../utils/transcript";
 
 interface SseHandlerDeps {
   eventQueueRef: MutableRefObject<SseEvent[]>;
   eventSeq: number;
-  loadHistory: () => Promise<import("../types").ChatSession[]>;
+  loadHistory: () => Promise<ChatSession[]>;
   loadTranscript: (sessionId: string, projectDir: string, signal?: AbortSignal) => Promise<TranscriptMessage[]>;
-  sessions: ChatSession[];
+  updateConversation: (id: string, update: Partial<Conversation>) => void;
+  storeQuestion: (requestId: string, data: StoredQuestion) => void;
+  clearQuestion: (requestId: string) => void;
+  getQuestionsForConversation: (conversationId: string) => StoredQuestion | null;
+  conversations: Conversation[];
   vmId: string;
 }
 
 export function useSseHandlers(
   sseState: SseHandlerDeps,
-  chatState: ChatStateResult & { setSessions: (s: import("../types").ChatSession[]) => void },
+  chatState: ChatStateResult,
 ) {
-  const { eventQueueRef, eventSeq, loadHistory, loadTranscript, sessions, vmId } = sseState;
   const {
-    viewSessionId,
-    runningSessionId,
-    setRunningSessionId,
+    eventQueueRef,
+    eventSeq,
+    loadHistory,
+    loadTranscript,
+    updateConversation,
+    storeQuestion,
+    clearQuestion,
+    getQuestionsForConversation,
+    conversations,
+    vmId,
+  } = sseState;
+  const {
+    viewConversationId,
+    runningConversationId,
+    setRunningConversationId,
     setIsStreaming,
     setSessionPendingQuestion,
     setTaskId,
-    setSessions,
     addMessage,
     removeMessage,
     updateLastMessage,
     updateMessageById,
     getMessages,
     setMessages,
-    setViewSessionId,
+    setViewConversationId,
     generateId,
   } = chatState;
 
-  // Track the current running session at event time via ref
-  const runningRef = useRef(runningSessionId);
-  runningRef.current = runningSessionId;
+  const runningRef = useRef(runningConversationId);
+  runningRef.current = runningConversationId;
 
-  const viewRef = useRef(viewSessionId);
-  viewRef.current = viewSessionId;
+  const viewRef = useRef(viewConversationId);
+  viewRef.current = viewConversationId;
 
-  // Track the current task_id for message persistence
   const currentTaskIdRef = useRef<string | null>(null);
-
-  // Track pending tool message IDs by tool_use_id
   const toolIdToMsgId = useRef<Map<string, string>>(new Map());
-
-  // Track current thinking message id
   const thinkingMsgId = useRef<string | null>(null);
-
-  // Track current assistant message id (accumulating text)
   const assistantMsgId = useRef<string | null>(null);
 
+  // Keep stable refs for conversations to avoid stale closures in the effect
+  const conversationsRef = useRef(conversations);
+  conversationsRef.current = conversations;
+
   useEffect(() => {
-    // Drain all queued events in one effect run. React 18 auto-batches the
-    // setState(seq+1) calls from SSE listeners so multiple rapid events are
-    // processed together here without flushSync.
     const events = eventQueueRef.current.splice(0);
     for (const event of events) {
       handleEvent(event);
@@ -66,9 +73,6 @@ export function useSseHandlers(
     function handleEvent(event: SseEvent) {
       const session = runningRef.current;
 
-      // Seal the active thinking message. If it accumulated no content (no
-      // thinking_delta arrived), remove it entirely so the animated dots don't
-      // linger after the response starts arriving.
       const sealThinking = () => {
         if (!thinkingMsgId.current) return;
         const msgId = thinkingMsgId.current;
@@ -81,23 +85,26 @@ export function useSseHandlers(
       };
 
       switch (event.type) {
-        case "relay_ready":
+        case "task_created": {
+          const { task_id, conversation_id } = event.payload;
+          currentTaskIdRef.current = task_id;
+          setTaskId(conversation_id, task_id);
           break;
+        }
 
         case "session_start": {
           const { task_id } = event.payload;
           currentTaskIdRef.current = task_id;
-          setTaskId(session, task_id);
-          const project_dir = sessions.find((s) => s.session_id === session)?.project_dir ?? null;
+          const conversationId = runningRef.current;
+          setTaskId(conversationId, task_id);
           localStorage.setItem(
             `chat_running_task_${vmId}`,
-            JSON.stringify({ task_id, running_session_id: session, project_dir }),
+            JSON.stringify({ task_id, running_session_id: conversationId }),
           );
           break;
         }
 
         case "init": {
-          // Push a thinking indicator as an assistant message
           const id = generateId();
           thinkingMsgId.current = id;
           assistantMsgId.current = null;
@@ -191,37 +198,47 @@ export function useSseHandlers(
         }
 
         case "ask_user_question": {
-          const { request_id, task_id, questions } = event.payload;
+          const { request_id, task_id, conversation_id, questions } = event.payload;
           sealThinking();
           assistantMsgId.current = null;
-          setSessionPendingQuestion(session, { requestId: request_id, taskId: task_id, questions });
+          setSessionPendingQuestion(conversation_id, { requestId: request_id, taskId: task_id, questions });
+          storeQuestion(request_id, {
+            conversationId: conversation_id,
+            taskId: task_id,
+            requestId: request_id,
+            questions,
+          });
           break;
         }
 
         case "done": {
-          const { session_id, task_id } = event.payload;
-          const completedSession = runningRef.current;
+          const { session_id, task_id, conversation_id } = event.payload;
           localStorage.removeItem(`chat_messages_task_${task_id}`);
           currentTaskIdRef.current = null;
-          setRunningSessionId(null);
+          setRunningConversationId(null);
           setIsStreaming(false);
-          setSessionPendingQuestion(completedSession, null);
+          setSessionPendingQuestion(conversation_id, null);
           sealThinking();
           assistantMsgId.current = null;
           toolIdToMsgId.current.clear();
 
-          if (session_id) {
-            if (completedSession !== session_id) {
-              const msgs = getMessages(completedSession);
-              setMessages(session_id, msgs);
-              setMessages(completedSession, []);
-            }
-            if (completedSession === viewRef.current) {
-              setViewSessionId(session_id);
-            }
+          const storedQuestion = getQuestionsForConversation(conversation_id);
+          if (storedQuestion) {
+            clearQuestion(storedQuestion.requestId);
           }
 
-          loadHistory().then(setSessions).catch(console.error);
+          if (session_id) {
+            updateConversation(conversation_id, { sessionId: session_id });
+            loadHistory().then((sessions) => {
+              const match = sessions.find((s) => s.session_id === session_id);
+              if (match) {
+                updateConversation(conversation_id, {
+                  projectDir: match.project_dir,
+                  title: match.title,
+                });
+              }
+            }).catch(console.error);
+          }
           break;
         }
 
@@ -231,7 +248,7 @@ export function useSseHandlers(
             localStorage.removeItem(`chat_messages_task_${currentTaskIdRef.current}`);
             currentTaskIdRef.current = null;
           }
-          setRunningSessionId(null);
+          setRunningConversationId(null);
           setIsStreaming(false);
           setSessionPendingQuestion(session, null);
           thinkingMsgId.current = null;
@@ -247,37 +264,29 @@ export function useSseHandlers(
         }
 
         case "reconnecting": {
-          const { task_id, running_session_id: rawRunningId, project_dir } = event.payload;
-          // onopen fires for every EventSource connection; deduplicate by task_id.
+          const { task_id, conversation_id } = event.payload;
           if (currentTaskIdRef.current === task_id) break;
-          // Legacy localStorage may have stored null for new-chat sessions; generate a UUID for those.
-          const running_session_id = rawRunningId ?? crypto.randomUUID();
           currentTaskIdRef.current = task_id;
-          setTaskId(running_session_id, task_id);
-          setRunningSessionId(running_session_id);
+          setTaskId(conversation_id, task_id);
+          setRunningConversationId(conversation_id);
           setIsStreaming(true);
-          setViewSessionId(running_session_id);
-          if (running_session_id && !sessions.find((s) => s.session_id === running_session_id)) {
-            setSessions([
-              { session_id: running_session_id, created_at: new Date().toISOString(), title: "New chat\u2026", is_pending: true },
-              ...sessions,
-            ]);
-          }
+          setViewConversationId(conversation_id);
+
           let inProgressMessages: ChatMessage[] = [];
           const savedMessages = localStorage.getItem(`chat_messages_task_${task_id}`);
           if (savedMessages) {
             try {
               inProgressMessages = JSON.parse(savedMessages) as ChatMessage[];
-              setMessages(running_session_id, inProgressMessages);
-            } catch {
-              // ignore parse errors
-            }
+              setMessages(conversation_id, inProgressMessages);
+            } catch { /* ignore parse errors */ }
           }
-          if (running_session_id && project_dir) {
-            loadTranscript(running_session_id, project_dir).then((transcript) => {
+
+          const conversation = conversationsRef.current.find((c) => c.conversationId === conversation_id);
+          if (conversation?.sessionId && conversation?.projectDir) {
+            loadTranscript(conversation.sessionId, conversation.projectDir).then((transcript) => {
               const historical = buildMessagesFromTranscript(transcript);
               if (historical.length > 0) {
-                setMessages(running_session_id, [...historical, ...inProgressMessages]);
+                setMessages(conversation_id, [...historical, ...inProgressMessages]);
               }
             }).catch(console.error);
           }

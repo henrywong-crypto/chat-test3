@@ -1,4 +1,4 @@
-import React, { useCallback, useEffect, useState } from "react";
+import React, { useCallback, useState } from "react";
 import { SseProvider, useSse } from "./contexts/SseContext";
 import IconRail from "./components/IconRail";
 import Sidebar from "./components/Sidebar";
@@ -6,7 +6,7 @@ import ChatInterface from "./components/ChatInterface";
 import Terminal from "./components/Terminal";
 import FileManager from "./components/FileManager";
 import SettingsPanel from "./components/SettingsPanel";
-import type { ChatSession, ViewTab } from "./types";
+import type { Conversation, ViewTab } from "./types";
 
 class ErrorBoundary extends React.Component<
   { children: React.ReactNode },
@@ -37,18 +37,17 @@ class ErrorBoundary extends React.Component<
 }
 
 function AppContent() {
-  const { hasUserRootfs, csrfToken, loadHistory, deleteSession } = useSse();
+  const { hasUserRootfs, csrfToken, conversations, createConversation, deleteConversation, deleteSession } = useSse();
   const [activeTab, setActiveTab] = useState<ViewTab>("chat");
-  const [sessions, setSessions] = useState<ChatSession[]>([]);
-  const [selectedSession, setSelectedSession] = useState<ChatSession | null>(null);
+  const [selectedConversation, setSelectedConversation] = useState<Conversation | null>(null);
+  const [runningConversationId, setRunningConversationId] = useState<string | null>(null);
   const [showSettings, setShowSettings] = useState(false);
-  const [runningSessionId, setRunningSessionId] = useState<string | null>(null);
   const [darkMode, setDarkMode] = useState<boolean>(() => {
     const saved = localStorage.getItem("ui-theme");
     return saved ? saved === "dark" : true;
   });
 
-  useEffect(() => {
+  React.useEffect(() => {
     if (darkMode) {
       document.documentElement.classList.remove("light");
     } else {
@@ -59,26 +58,24 @@ function AppContent() {
 
   const toggleDarkMode = useCallback(() => setDarkMode((m) => !m), []);
 
-  useEffect(() => {
-    loadHistory().then(setSessions).catch(console.error);
-  }, [loadHistory, setSessions]);
+  const handleNewChat = useCallback(() => {
+    const conversation = createConversation();
+    setSelectedConversation(conversation);
+  }, [createConversation]);
 
-  const handleDeleteSession = useCallback(async (session: ChatSession) => {
-    if (!session.project_dir) return;
+  const handleDeleteConversation = useCallback(async (conversation: Conversation) => {
     try {
-      await deleteSession(session.session_id, session.project_dir);
-      setSessions((prev) => prev.filter((s) => s.session_id !== session.session_id));
-      if (selectedSession?.session_id === session.session_id) {
-        setSelectedSession(null);
+      if (conversation.sessionId && conversation.projectDir) {
+        await deleteSession(conversation.sessionId, conversation.projectDir);
       }
     } catch (err) {
-      console.error("Failed to delete session", err);
+      console.error("Failed to delete session from server", err);
     }
-  }, [deleteSession, selectedSession]);
-
-  const handleRefresh = useCallback(() => {
-    loadHistory().then(setSessions).catch(console.error);
-  }, [loadHistory]);
+    deleteConversation(conversation.conversationId);
+    if (selectedConversation?.conversationId === conversation.conversationId) {
+      setSelectedConversation(null);
+    }
+  }, [deleteSession, deleteConversation, selectedConversation]);
 
   return (
     <div className="flex h-screen w-screen overflow-hidden bg-background">
@@ -94,30 +91,20 @@ function AppContent() {
 
       {activeTab === "chat" && (
         <Sidebar
-          sessions={sessions}
-          viewSessionId={selectedSession?.session_id ?? null}
-          runningSessionId={runningSessionId}
-          onSelectSession={setSelectedSession}
-          onNewChat={() => {
-            setSelectedSession({
-              session_id: crypto.randomUUID(),
-              created_at: new Date().toISOString(),
-              title: "New chat\u2026",
-              is_pending: true,
-            });
-          }}
-          onRefresh={handleRefresh}
-          onDeleteSession={handleDeleteSession}
+          conversations={conversations}
+          viewConversationId={selectedConversation?.conversationId ?? null}
+          runningConversationId={runningConversationId}
+          onSelectConversation={setSelectedConversation}
+          onNewChat={handleNewChat}
+          onDeleteConversation={handleDeleteConversation}
         />
       )}
 
       <main className="flex min-w-0 flex-1 flex-col overflow-hidden">
         {activeTab === "chat" && (
           <ChatInterface
-            sessions={sessions}
-            setSessions={setSessions}
-            selectedSession={selectedSession}
-            onRunningSessionChange={setRunningSessionId}
+            selectedConversation={selectedConversation}
+            onRunningConversationChange={setRunningConversationId}
           />
         )}
         <div

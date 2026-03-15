@@ -11,7 +11,7 @@ use ssh_client::connect_ssh;
 use std::path::PathBuf;
 
 use crate::{
-    handlers::UserVmById,
+    handlers::UserVm,
     state::{AppError, AppState},
 };
 
@@ -21,7 +21,7 @@ pub(crate) struct DownloadQuery {
 }
 
 pub(crate) async fn download_file_handler(
-    user_vm: UserVmById,
+    user_vm: UserVm,
     Query(query): Query<DownloadQuery>,
     State(state): State<AppState>,
 ) -> Result<Response<axum::body::Body>, AppError> {

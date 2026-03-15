@@ -1,5 +1,5 @@
 import React, { useCallback, useRef, useState } from "react";
-import type { ChatMessage, ChatSession, PendingQuestion } from "../types";
+import type { ChatMessage, PendingQuestion } from "../types";
 
 function generateId(): string {
   return Math.random().toString(36).slice(2, 10);
@@ -7,18 +7,16 @@ function generateId(): string {
 
 export interface ChatStateResult {
   messagesBySession: React.MutableRefObject<Map<string, ChatMessage[]>>;
-  viewSessionId: string | null;
-  setViewSessionId: (id: string | null) => void;
-  runningSessionId: string | null;
-  setRunningSessionId: (id: string | null) => void;
+  viewConversationId: string | null;
+  setViewConversationId: (id: string | null) => void;
+  runningConversationId: string | null;
+  setRunningConversationId: (id: string | null) => void;
   isStreaming: boolean;
   setIsStreaming: (v: boolean) => void;
   getSessionPendingQuestion: (conversationId: string | null) => PendingQuestion | null;
   setSessionPendingQuestion: (conversationId: string | null, q: PendingQuestion | null) => void;
   getTaskId: (conversationId: string | null) => string | undefined;
   setTaskId: (conversationId: string | null, clientId: string) => void;
-  sessions: ChatSession[];
-  setSessions: (s: ChatSession[]) => void;
   getMessages: (conversationId: string | null) => ChatMessage[];
   setMessages: (conversationId: string | null, msgs: ChatMessage[]) => void;
   addMessage: (conversationId: string | null, msg: ChatMessage) => void;
@@ -34,10 +32,9 @@ export function useChatState(): ChatStateResult {
   const messagesBySession = useRef<Map<string, ChatMessage[]>>(new Map());
   const pendingQuestionsBySession = useRef<Map<string, PendingQuestion>>(new Map());
   const taskIdBySession = useRef<Map<string, string>>(new Map());
-  const [viewSessionId, setViewSessionId] = useState<string | null>(null);
-  const [runningSessionId, setRunningSessionId] = useState<string | null>(null);
+  const [viewConversationId, setViewConversationId] = useState<string | null>(null);
+  const [runningConversationId, setRunningConversationId] = useState<string | null>(null);
   const [isStreaming, setIsStreaming] = useState(false);
-  const [sessions, setSessions] = useState<ChatSession[]>([]);
   const [renderTick, setRenderTick] = useState(0);
 
   const bumpRender = useCallback(() => setRenderTick((t) => t + 1), []);
@@ -119,18 +116,16 @@ export function useChatState(): ChatStateResult {
 
   return {
     messagesBySession,
-    viewSessionId,
-    setViewSessionId,
-    runningSessionId,
-    setRunningSessionId,
+    viewConversationId,
+    setViewConversationId,
+    runningConversationId,
+    setRunningConversationId,
     isStreaming,
     setIsStreaming,
     getSessionPendingQuestion,
     setSessionPendingQuestion,
     getTaskId,
     setTaskId,
-    sessions,
-    setSessions,
     getMessages,
     setMessages,
     addMessage,

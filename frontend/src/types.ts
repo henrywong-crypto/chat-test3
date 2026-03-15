@@ -1,3 +1,11 @@
+export interface Conversation {
+  conversationId: string;
+  sessionId?: string;
+  projectDir?: string;
+  title?: string;
+  createdAt: number;
+}
+
 export interface ChatSession {
   session_id: string;
   created_at: string;
@@ -42,6 +50,13 @@ export interface PendingQuestion {
   questions: Question[];
 }
 
+export interface StoredQuestion {
+  conversationId: string;
+  taskId: string;
+  requestId: string;
+  questions: Question[];
+}
+
 export interface ToolResult {
   content: string;
   isError: boolean;
@@ -79,9 +94,15 @@ export interface SseSessionStart {
   task_id: string;
 }
 
+export interface SseTaskCreated {
+  task_id: string;
+  conversation_id: string;
+}
+
 export interface SseAskUserQuestion {
   request_id: string;
   task_id: string;
+  conversation_id: string;
   questions: Question[];
 }
 
@@ -94,20 +115,15 @@ export interface SseToolResult {
 export interface SseDone {
   session_id: string | null;
   task_id: string;
+  conversation_id: string;
 }
 
 export interface SseErrorEvent {
   message: string;
 }
 
-export interface SseReconnecting {
-  task_id: string;
-  running_session_id: string | null;
-  project_dir: string | null;
-}
-
 export type SseEvent =
-  | { type: "relay_ready" }
+  | { type: "task_created"; payload: SseTaskCreated }
   | { type: "session_start"; payload: SseSessionStart }
   | { type: "init" }
   | { type: "text_delta"; payload: SseTextDelta }
@@ -117,7 +133,7 @@ export type SseEvent =
   | { type: "tool_result"; payload: SseToolResult }
   | { type: "done"; payload: SseDone }
   | { type: "error_event"; payload: SseErrorEvent }
-  | { type: "reconnecting"; payload: SseReconnecting };
+  | { type: "reconnecting"; payload: { task_id: string; conversation_id: string } };
 
 export interface FileEntry {
   name: string;

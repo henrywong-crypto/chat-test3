@@ -18,7 +18,7 @@ use uuid::Uuid;
 use vm_lifecycle::{VmEntry, build_user_rootfs_path};
 
 use crate::{
-    handlers::UserVmById,
+    handlers::UserVm,
     state::{AppError, AppState, update_vm_last_activity},
 };
 
@@ -26,7 +26,7 @@ const LOCK_TIMEOUT_SECS: u64 = 30;
 const SEND_TIMEOUT_SECS: u64 = 30;
 
 pub(crate) async fn handle_ws_upgrade(
-    user_vm: UserVmById,
+    user_vm: UserVm,
     ws: WebSocketUpgrade,
     State(state): State<AppState>,
 ) -> Result<Response, AppError> {

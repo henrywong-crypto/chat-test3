@@ -5,7 +5,6 @@ import { useSse } from "../contexts/SseContext";
 interface ChatComposerProps {
   isLoading: boolean;
   isOtherRunning?: boolean;
-  isVmReady: boolean;
   onSend: (text: string) => void;
   onStop: () => void;
   focusKey?: number;
@@ -36,7 +35,7 @@ const SLASH_COMMANDS: SlashCommand[] = [
   { name: "/vim",         description: "Enter vim mode" },
 ];
 
-export default function ChatComposer({ isLoading, isOtherRunning, isVmReady, onSend, onStop, focusKey }: ChatComposerProps) {
+export default function ChatComposer({ isLoading, isOtherRunning, onSend, onStop, focusKey }: ChatComposerProps) {
   const { uploadAction, csrfToken, uploadDir } = useSse();
 
   const [input, setInput] = useState("");
@@ -61,7 +60,7 @@ export default function ChatComposer({ isLoading, isOtherRunning, isVmReady, onS
   }, [isLoading]);
 
   const busy = isLoading || uploading;
-  const blocked = busy || (isOtherRunning ?? false) || !isVmReady;
+  const blocked = busy || (isOtherRunning ?? false);
 
   const filteredCommands = input.startsWith("/")
     ? SLASH_COMMANDS.filter((cmd) => cmd.name.startsWith(input.split(" ")[0].toLowerCase()))
@@ -237,7 +236,7 @@ export default function ChatComposer({ isLoading, isOtherRunning, isVmReady, onS
               value={input}
               onInput={handleInput}
               onKeyDown={handleKeyDown}
-              placeholder={isVmReady ? "Message Claude…" : "Connecting to VM…"}
+              placeholder="Message Claude…"
               disabled={blocked}
               rows={1}
               className="max-h-[260px] min-h-[36px] flex-1 resize-none bg-transparent py-1 text-sm text-foreground placeholder-muted-foreground/50 focus:outline-none disabled:opacity-60"
