@@ -25,19 +25,22 @@ test.describe("reconnect", () => {
       );
     }, { vmId: VM_ID, taskId: "task-rc01", convId: "conv-rc01" });
 
-    const ctrl = await setupApp(page, {});
-
-    // Wait for the reconnect stream request — app opens GET /chat-stream/{taskId}
-    const streamReq = await page.waitForRequest((r) =>
+    // Set up waitForRequest before setupApp so it captures the request fired during page load
+    const streamReqPromise = page.waitForRequest((r) =>
       r.url().includes("chat-stream/task-rc01") && r.method() === "GET",
     );
+
+    const ctrl = await setupApp(page, {});
+
+    // Deliver done to unblock the route handler and clean up
+    ctrl.sendSseEvents([{ event: "done", data: { session_id: null, task_id: "task-rc01" } }]);
+
+    const streamReq = await streamReqPromise;
 
     // The conversation_id query param should match the stored running_session_id
     const url = new URL(streamReq.url());
     expect(url.searchParams.get("conversation_id")).toBe("conv-rc01");
 
-    // Deliver done to clean up
-    ctrl.sendSseEvents([{ event: "done", data: { session_id: null, task_id: "task-rc01" } }]);
     await expect(page.getByRole("status")).not.toBeVisible();
   });
 

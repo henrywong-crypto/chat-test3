@@ -12,9 +12,10 @@ import ClaudeStatus from "./ClaudeStatus";
 interface ChatInterfaceProps {
   selectedConversation: Conversation | null;
   onRunningConversationChange?: (conversationId: string | null) => void;
+  onConversationCreated?: (conversation: Conversation) => void;
 }
 
-export default function ChatInterface({ selectedConversation, onRunningConversationChange }: ChatInterfaceProps) {
+export default function ChatInterface({ selectedConversation, onRunningConversationChange, onConversationCreated }: ChatInterfaceProps) {
   const sseCtx = useSse();
   const {
     conversations,
@@ -107,6 +108,7 @@ export default function ChatInterface({ selectedConversation, onRunningConversat
       const newConv = sseCtx.createConversation();
       effectiveConversationId = newConv.conversationId;
       setViewConversationId(effectiveConversationId);
+      onConversationCreated?.(newConv);
     }
 
     const conversation = conversations.find((c) => c.conversationId === effectiveConversationId);
@@ -122,7 +124,7 @@ export default function ChatInterface({ selectedConversation, onRunningConversat
     setIsStreaming(true);
 
     sseCtx.sendQuery(text, effectiveConversationId, sessionId);
-  }, [viewConversationId, conversations, generateId, addMessage, setRunningConversationId, setIsStreaming, setViewConversationId, sseCtx]);
+  }, [viewConversationId, conversations, generateId, addMessage, setRunningConversationId, setIsStreaming, setViewConversationId, onConversationCreated, sseCtx]);
 
   const handleStop = useCallback(() => {
     sseCtx.sendStop(getTaskId(runningConversationId) ?? "").catch(console.error);

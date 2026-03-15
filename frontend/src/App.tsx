@@ -59,9 +59,8 @@ function AppContent() {
   const toggleDarkMode = useCallback(() => setDarkMode((m) => !m), []);
 
   const handleNewChat = useCallback(() => {
-    const conversation = createConversation();
-    setSelectedConversation(conversation);
-  }, [createConversation]);
+    setSelectedConversation(null);
+  }, []);
 
   const handleDeleteConversation = useCallback(async (conversation: Conversation) => {
     try {
@@ -105,6 +104,7 @@ function AppContent() {
           <ChatInterface
             selectedConversation={selectedConversation}
             onRunningConversationChange={setRunningConversationId}
+            onConversationCreated={setSelectedConversation}
           />
         )}
         <div

@@ -6,14 +6,13 @@ use ssh_client::SshClient;
 use std::{
     net::Ipv4Addr,
     path::PathBuf,
-    str::from_utf8,
 };
 use tokio::{
     sync::mpsc,
     time::{Duration, interval, timeout},
 };
 use tokio_stream::wrappers::ReceiverStream;
-use tracing::{debug, error, info};
+use tracing::{error, info};
 
 use crate::{AgentMessage, channel::connect_ssh_and_open_channel};
 
@@ -123,15 +122,7 @@ async fn stream_ssh_channel(
                             break;
                         }
                     }
-                    Some(ChannelMsg::ExtendedData { ref data, .. }) => {
-                        if let Ok(text) = from_utf8(data) {
-                            for stderr_line in text.lines() {
-                                if !stderr_line.is_empty() {
-                                    debug!("{stderr_line}");
-                                }
-                            }
-                        }
-                    }
+                    Some(ChannelMsg::ExtendedData { .. }) => {}
                     Some(ChannelMsg::ExitStatus { exit_status }) => {
                         info!("agent exited  status={exit_status}");
                         break;
