@@ -1,4 +1,4 @@
-import { useCallback, useRef, useState } from "react";
+import React, { useCallback, useRef, useState } from "react";
 import type { ChatMessage, ChatSession, PendingQuestion } from "../types";
 
 function generateId(): string {
@@ -31,9 +31,6 @@ export interface ChatStateResult {
   renderTick: number;
   bumpRender: () => void;
 }
-
-// React is imported for the MutableRefObject type annotation
-import React from "react";
 
 export function useChatState(): ChatStateResult {
   const messagesBySession = useRef<Map<string | null, ChatMessage[]>>(new Map());

@@ -16,7 +16,7 @@ use tokio_util::io::StreamReader;
 use tower_sessions::Session;
 
 use crate::{
-    handlers::UserVmById,
+    handlers::{UserVmById, attach_csrf_token, validate_csrf},
     state::{AppError, AppState},
 };
 
@@ -32,9 +32,9 @@ pub(crate) async fn upload_file_handler(
     mut multipart: Multipart,
 ) -> Result<Response, AppError> {
     let upload_metadata = extract_upload_metadata(&mut multipart).await?;
-    if !validate_csrf(&session, &upload_metadata.csrf_token).await {
+    let Some(csrf_token) = validate_csrf(&session, &upload_metadata.csrf_token).await else {
         return Ok((StatusCode::FORBIDDEN, "Forbidden").into_response());
-    }
+    };
     let mut ssh_handle = connect_ssh(
         user_vm.guest_ip,
         &state.config.ssh_key_path,
@@ -50,16 +50,7 @@ pub(crate) async fn upload_file_handler(
         Path::new(&state.config.upload_dir),
     )
     .await?;
-    Ok((StatusCode::OK, "").into_response())
-}
-
-async fn validate_csrf(session: &Session, submitted: &str) -> bool {
-    session
-        .get::<String>("csrf_token")
-        .await
-        .ok()
-        .flatten()
-        .is_some_and(|token| token == submitted)
+    Ok(attach_csrf_token((StatusCode::OK, "").into_response(), &csrf_token))
 }
 
 async fn extract_upload_metadata(multipart: &mut Multipart) -> Result<UploadMetadata> {

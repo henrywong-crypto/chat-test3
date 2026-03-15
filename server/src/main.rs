@@ -36,7 +36,8 @@ use crate::{
     files::list_files_handler,
     handlers::{
         delete_chat_session_handler, delete_user_rootfs_handler, get_chat_transcript_handler,
-        get_or_create_terminal, get_terminal_page, handle_chat_upload, list_chat_sessions_handler,
+        get_csrf_token_handler, get_or_create_terminal, get_terminal_page, handle_chat_upload,
+        list_chat_sessions_handler,
     },
     settings::{get_settings_handler, put_settings_handler},
     state::{AppState, load_config},
@@ -115,6 +116,7 @@ fn build_router(app_state: AppState, session_store: PostgresStore) -> Router {
             "/api/settings",
             get(get_settings_handler).put(put_settings_handler),
         )
+        .route("/api/csrf-token", get(get_csrf_token_handler))
         .route("/rootfs/delete", post(delete_user_rootfs_handler))
         .route("/terminal/{id}", get(get_terminal_page))
         .route("/ws/{id}", get(handle_ws_upgrade))

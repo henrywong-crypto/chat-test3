@@ -16,7 +16,7 @@ use tracing::{error, info};
 use uuid::Uuid;
 
 use crate::{
-    handlers::UserVm,
+    handlers::{UserVm, attach_csrf_token, validate_csrf},
     state::{AppError, AppState, update_vm_last_activity},
 };
 
@@ -114,9 +114,9 @@ pub(crate) async fn handle_chat_query(
     session: Session,
     Json(body): Json<QueryBody>,
 ) -> Response {
-    if !validate_csrf(&session, &body.csrf_token).await {
+    let Some(csrf_token) = validate_csrf(&session, &body.csrf_token).await else {
         return (StatusCode::FORBIDDEN, "Forbidden").into_response();
-    }
+    };
     let content_len = body.content.len();
     let agent_message = AgentMessage::Query {
         content: body.content,
@@ -126,7 +126,7 @@ pub(crate) async fn handle_chat_query(
         return response;
     }
     info!("query forwarded  content_len={content_len}");
-    (StatusCode::OK, "").into_response()
+    attach_csrf_token((StatusCode::OK, "").into_response(), &csrf_token)
 }
 
 #[derive(Deserialize)]
@@ -141,9 +141,9 @@ pub(crate) async fn handle_chat_question_answer(
     session: Session,
     Json(body): Json<QuestionAnswerBody>,
 ) -> Response {
-    if !validate_csrf(&session, &body.csrf_token).await {
+    let Some(csrf_token) = validate_csrf(&session, &body.csrf_token).await else {
         return (StatusCode::FORBIDDEN, "Forbidden").into_response();
-    }
+    };
     let request_id = body.request_id.clone();
     let agent_message = AgentMessage::QuestionAnswer {
         request_id: body.request_id,
@@ -153,7 +153,7 @@ pub(crate) async fn handle_chat_question_answer(
         return response;
     }
     info!("question answer forwarded  request_id={request_id}");
-    (StatusCode::OK, "").into_response()
+    attach_csrf_token((StatusCode::OK, "").into_response(), &csrf_token)
 }
 
 #[derive(Deserialize)]
@@ -167,21 +167,13 @@ pub(crate) async fn handle_chat_stop(
     session: Session,
     Json(body): Json<StopBody>,
 ) -> Response {
-    if !validate_csrf(&session, &body.csrf_token).await {
+    let Some(csrf_token) = validate_csrf(&session, &body.csrf_token).await else {
         return (StatusCode::FORBIDDEN, "Forbidden").into_response();
-    }
+    };
     if let Err(response) = forward_agent_message(agent_tx, AgentMessage::Interrupt { task_id: body.task_id }).await {
         return response;
     }
     info!("interrupt forwarded");
-    (StatusCode::OK, "").into_response()
+    attach_csrf_token((StatusCode::OK, "").into_response(), &csrf_token)
 }
 
-async fn validate_csrf(session: &Session, submitted: &str) -> bool {
-    session
-        .get::<String>("csrf_token")
-        .await
-        .ok()
-        .flatten()
-        .is_some_and(|token| token == submitted)
-}

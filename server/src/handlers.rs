@@ -2,14 +2,14 @@ use anyhow::{Context, Result, anyhow};
 use axum::{
     Json,
     extract::{Form, FromRequestParts, Multipart, Path as RoutePath, Query, State},
-    http::{StatusCode, request::Parts},
+    http::{StatusCode, header::HeaderValue, request::Parts},
     response::{Html, IntoResponse, Redirect, Response},
 };
 use chat_history::{delete_chat_session, fetch_chat_history, list_chat_sessions};
 use firecracker_manager::create_vm;
 use futures::TryStreamExt;
 use russh_sftp::client::SftpSession;
-use serde::Deserialize;
+use serde::{Deserialize, Serialize};
 use sftp_client::open_sftp_session;
 use ssh_client::connect_ssh;
 use std::{
@@ -57,13 +57,34 @@ async fn get_csrf_token(session: &Session) -> Result<String> {
     Ok(token)
 }
 
-async fn validate_csrf(session: &Session, submitted: &str) -> bool {
-    session
-        .get::<String>("csrf_token")
-        .await
-        .ok()
-        .flatten()
-        .is_some_and(|token| token == submitted)
+pub(crate) async fn validate_csrf(session: &Session, submitted: &str) -> Option<String> {
+    let stored = session.get::<String>("csrf_token").await.ok().flatten()?;
+    if stored != submitted {
+        return None;
+    }
+    let new_token = Uuid::new_v4().to_string().replace('-', "");
+    session.insert("csrf_token", &new_token).await.ok()?;
+    Some(new_token)
+}
+
+pub(crate) fn attach_csrf_token(mut response: Response, csrf_token: &str) -> Response {
+    if let Ok(value) = csrf_token.parse::<HeaderValue>() {
+        response.headers_mut().insert("x-csrf-token", value);
+    }
+    response
+}
+
+#[derive(Serialize)]
+pub(crate) struct CsrfTokenResponse {
+    csrf_token: String,
+}
+
+pub(crate) async fn get_csrf_token_handler(
+    _user: User,
+    session: Session,
+) -> Result<Response, AppError> {
+    let csrf_token = get_csrf_token(&session).await?;
+    Ok(Json(CsrfTokenResponse { csrf_token }).into_response())
 }
 
 fn validate_vm_id(id: &str) -> bool {
@@ -240,7 +261,7 @@ pub(crate) async fn delete_user_rootfs_handler(
     State(state): State<AppState>,
     Form(form): Form<CsrfForm>,
 ) -> Result<Response, AppError> {
-    if !validate_csrf(&session, &form.csrf_token).await {
+    if validate_csrf(&session, &form.csrf_token).await.is_none() {
         return Ok((StatusCode::FORBIDDEN, "Forbidden").into_response());
     }
     let db_user = upsert_user(&state.db, &user.email).await?;
@@ -322,9 +343,9 @@ pub(crate) async fn delete_chat_session_handler(
     State(state): State<AppState>,
     Json(form): Json<DeleteChatSessionForm>,
 ) -> Result<Response, AppError> {
-    if !validate_csrf(&session, &form.csrf_token).await {
+    let Some(csrf_token) = validate_csrf(&session, &form.csrf_token).await else {
         return Ok((StatusCode::FORBIDDEN, "Forbidden").into_response());
-    }
+    };
     delete_chat_session(
         user_vm.guest_ip,
         &state.config.ssh_key_path,
@@ -334,7 +355,7 @@ pub(crate) async fn delete_chat_session_handler(
         Path::new(&form.project_dir),
     )
     .await?;
-    Ok(StatusCode::NO_CONTENT.into_response())
+    Ok(attach_csrf_token(StatusCode::NO_CONTENT.into_response(), &csrf_token))
 }
 
 struct ChatUploadMetadata {
@@ -348,9 +369,9 @@ pub(crate) async fn handle_chat_upload(
     mut multipart: Multipart,
 ) -> Result<Response, AppError> {
     let chat_upload_metadata = extract_chat_upload_metadata(&mut multipart).await?;
-    if !validate_csrf(&session, &chat_upload_metadata.csrf_token).await {
+    let Some(csrf_token) = validate_csrf(&session, &chat_upload_metadata.csrf_token).await else {
         return Ok((StatusCode::FORBIDDEN, "Forbidden").into_response());
-    }
+    };
     info!("uploading chat attachment via sftp");
     let mut ssh_handle = connect_ssh(
         user_vm.guest_ip,
@@ -364,7 +385,7 @@ pub(crate) async fn handle_chat_upload(
     let remote_path_str = remote_path
         .to_str()
         .context("remote path is not valid UTF-8")?;
-    Ok(Json(serde_json::json!({"path": remote_path_str})).into_response())
+    Ok(attach_csrf_token(Json(serde_json::json!({"path": remote_path_str})).into_response(), &csrf_token))
 }
 
 async fn extract_chat_upload_metadata(multipart: &mut Multipart) -> Result<ChatUploadMetadata> {

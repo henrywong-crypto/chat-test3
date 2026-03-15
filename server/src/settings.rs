@@ -11,6 +11,7 @@ use tower_sessions::Session;
 
 use crate::{
     auth::User,
+    handlers::{attach_csrf_token, validate_csrf},
     state::{AppError, AppState, find_user_vm_guest_ip},
 };
 
@@ -70,9 +71,9 @@ pub(crate) async fn put_settings_handler(
     State(state): State<AppState>,
     Json(body): Json<SetSettingsBody>,
 ) -> Response {
-    if !validate_csrf(&session, &body.csrf_token).await {
+    let Some(csrf_token) = validate_csrf(&session, &body.csrf_token).await else {
         return (StatusCode::FORBIDDEN, "Forbidden").into_response();
-    }
+    };
     if state.config.use_iam_creds {
         return (
             StatusCode::BAD_REQUEST,
@@ -109,14 +110,6 @@ pub(crate) async fn put_settings_handler(
     {
         return AppError::from(e).into_response();
     }
-    (StatusCode::OK, "").into_response()
+    attach_csrf_token((StatusCode::OK, "").into_response(), &csrf_token)
 }
 
-async fn validate_csrf(session: &Session, submitted: &str) -> bool {
-    session
-        .get::<String>("csrf_token")
-        .await
-        .ok()
-        .flatten()
-        .is_some_and(|token| token == submitted)
-}
