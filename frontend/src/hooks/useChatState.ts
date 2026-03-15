@@ -13,6 +13,8 @@ export interface ChatStateResult {
   setRunningSessionId: (id: string | null) => void;
   isStreaming: boolean;
   setIsStreaming: (v: boolean) => void;
+  nullOrphaned: boolean;
+  setNullOrphaned: (v: boolean) => void;
   getSessionPendingQuestion: (sessionId: string | null) => PendingQuestion | null;
   setSessionPendingQuestion: (sessionId: string | null, q: PendingQuestion | null) => void;
   getTaskId: (sessionId: string | null) => string | undefined;
@@ -40,6 +42,7 @@ export function useChatState(): ChatStateResult {
   const [viewSessionId, setViewSessionId] = useState<string | null>(null);
   const [runningSessionId, setRunningSessionId] = useState<string | null>(null);
   const [isStreaming, setIsStreaming] = useState(false);
+  const [nullOrphaned, setNullOrphaned] = useState(false);
   const [sessions, setSessions] = useState<ChatSession[]>([]);
   const [renderTick, setRenderTick] = useState(0);
 
@@ -118,6 +121,8 @@ export function useChatState(): ChatStateResult {
     setRunningSessionId,
     isStreaming,
     setIsStreaming,
+    nullOrphaned,
+    setNullOrphaned,
     getSessionPendingQuestion,
     setSessionPendingQuestion,
     getTaskId,

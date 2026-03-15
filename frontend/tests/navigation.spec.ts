@@ -1,6 +1,7 @@
 /**
- * UF-34  New Chat mid-stream (null session)    — status bar stays visible after clicking New Chat
- * UF-35  Done fires after stale New Chat       — status bar clears, view stays blank
+ * UF-34  New Chat mid-stream (null session)    — status bar hides immediately after clicking New Chat
+ * UF-35  Done fires after stale New Chat       — status bar stays hidden, view stays blank
+ * UF-35b Error fires after stale New Chat      — no error shown, view stays blank
  * UF-36  New session in sidebar after stale done — session appears but view stays blank
  * UF-37  New Chat while streaming existing session — status bar disappears immediately
  * UF-38  Sidebar pulsing indicator stays        — shown on running session after navigating away
@@ -17,39 +18,52 @@ import { setupApp, sendMessage, sse, makeSession } from "./helpers/setup";
 test.describe("navigation during streaming", () => {
   // ── Null-session streaming ─────────────────────────────────────────────────
 
-  test("UF-34 clicking New Chat while a null-session stream is pending keeps the status bar visible", async ({
+  test("UF-34 clicking New Chat while a null-session stream is pending hides the status bar", async ({
     page,
   }) => {
     const ctrl = await setupApp(page, { sessions: [] });
 
     await sendMessage(page, "Hello");
-    // isStreaming=true, runningSessionId=null, viewSessionId=null → isLoading=true
+    // isStreaming=true, runningSessionId='__new__', viewSessionId=null → isLoading=true
     await expect(page.getByRole("status")).toBeVisible();
 
-    // Click New Chat before any SSE events arrive
+    // Click New Chat — orphans the null-session stream, status bar hides immediately
     await page.getByRole("button", { name: "New Chat" }).click();
 
-    // viewSessionId stays null, runningSessionId stays null → isLoading still true
-    await expect(page.getByRole("status")).toBeVisible();
+    // nullOrphaned=true → runningMatchesView()=false → isLoading=false
+    await expect(page.getByRole("status")).not.toBeVisible();
 
     // Clean up so the stream doesn't leak into the next test
-    ctrl.sendSseEvents([{ event: "done", data: { session_id: null } }]);
+    ctrl.sendSseEvents([{ event: "done", data: { session_id: null, task_id: "t" } }]);
     await expect(page.getByRole("status")).not.toBeVisible();
   });
 
-  test("UF-35 status bar clears when done fires after a stale New Chat click", async ({ page }) => {
+  test("UF-35 status bar stays hidden when done fires after a stale New Chat click", async ({ page }) => {
     const ctrl = await setupApp(page, { sessions: [] });
 
     await sendMessage(page, "Hello");
     await page.getByRole("button", { name: "New Chat" }).click();
-    // Status bar is still visible at this point (UF-34)
-    await expect(page.getByRole("status")).toBeVisible();
+    // Status bar is already hidden (UF-34)
+    await expect(page.getByRole("status")).not.toBeVisible();
 
     ctrl.sendSseEvents(sse.text("The response", "sess-new"));
 
-    // done fires → isStreaming=false → isLoading=false → status bar gone
+    // done fires → stays hidden, view stays blank (no navigation to the new session)
     await expect(page.getByRole("status")).not.toBeVisible();
-    // stale-message detection discards the response; blank state remains
+    await expect(page.getByText("Start a new conversation")).toBeVisible();
+  });
+
+  test("UF-35b error fires after a stale New Chat click — no error shown in blank view", async ({ page }) => {
+    const ctrl = await setupApp(page, { sessions: [] });
+
+    await sendMessage(page, "Hello");
+    await page.getByRole("button", { name: "New Chat" }).click();
+    await expect(page.getByRole("status")).not.toBeVisible();
+
+    ctrl.sendSseEvents([{ event: "error_event", data: { message: "something went wrong" } }]);
+
+    // error_event fires for an orphaned stream — error is silently discarded
+    await expect(page.getByText("something went wrong")).not.toBeVisible();
     await expect(page.getByText("Start a new conversation")).toBeVisible();
   });
 

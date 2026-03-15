@@ -251,11 +251,18 @@ pub(crate) fn find_vm_guest_ip_for_user(
 }
 
 pub(crate) fn find_user_vm_guest_ip(vms: &VmRegistry, user_id: Uuid) -> Result<Option<Ipv4Addr>> {
+    Ok(find_user_vm(vms, user_id)?.map(|(_, ip)| ip))
+}
+
+pub(crate) fn find_user_vm(
+    vms: &VmRegistry,
+    user_id: Uuid,
+) -> Result<Option<(String, Ipv4Addr)>> {
     let registry = vms
         .lock()
         .map_err(|_| anyhow!("vm registry lock poisoned"))?;
     Ok(registry
-        .values()
-        .find(|e| e.user_id == user_id)
-        .map(|e| e.vm.guest_ip()))
+        .iter()
+        .find(|(_, e)| e.user_id == user_id)
+        .map(|(id, e)| (id.clone(), e.vm.guest_ip())))
 }

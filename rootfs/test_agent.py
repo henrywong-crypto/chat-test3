@@ -13,9 +13,12 @@ Frontend SSE event shapes:
   error_event      { message: string }
 """
 import asyncio
+import dataclasses
 import importlib.util
 import json
 import pathlib
+import sys
+import types
 import unittest
 import unittest.mock
 
@@ -1039,6 +1042,469 @@ class TestProcessAgentEvent(unittest.IsolatedAsyncioTestCase):
 
         agent.process_agent_event(ResultEvent(), emitted_streaming_text=False)
         agent.process_agent_event(SystemEvent(), emitted_streaming_text=False)
+
+
+# ── SDK mock helpers (used by TestRunQuery and TestAskUserQuestionHook) ────
+
+
+class _StreamEvent:
+    """Instances of this class represent raw API streaming events in tests.
+
+    The mock SDK installs this as claude_agent_sdk.types.StreamEvent so that
+    isinstance(event, StreamEvent) returns True for these objects and False for
+    plain agent-event objects, matching the real SDK's type hierarchy.
+    """
+
+    def __init__(self, event_dict: dict):
+        self.event = event_dict
+
+
+def _install_sdk_mock(events=None, raise_exc=None, custom_query=None):
+    """Install a mock claude_agent_sdk in sys.modules.
+
+    Returns (old_mods dict) that _restore_sdk_mock uses to put originals back.
+    The mock types.StreamEvent is set to _StreamEvent so isinstance checks work.
+    """
+    mod = types.ModuleType("claude_agent_sdk")
+    types_mod = types.ModuleType("claude_agent_sdk.types")
+
+    ev_list = list(events or [])
+    exc = raise_exc
+
+    class HookMatcher:
+        def __init__(self, matcher, hooks, timeout):
+            self.matcher = matcher
+            self.hooks = hooks
+            self.timeout = timeout
+
+    class ClaudeAgentOptions:
+        def __init__(self, **kwargs):
+            self.hooks = kwargs.get("hooks", {})
+
+    if custom_query is not None:
+        mock_query = custom_query
+    else:
+        async def mock_query(prompt, options):
+            for event in ev_list:
+                yield event
+            if exc:
+                raise exc
+
+    mod.ClaudeAgentOptions = ClaudeAgentOptions
+    mod.PermissionResultAllow = object
+    mod.query = mock_query
+    types_mod.HookMatcher = HookMatcher
+    types_mod.StreamEvent = _StreamEvent
+
+    old_mods = {k: sys.modules.get(k) for k in ("claude_agent_sdk", "claude_agent_sdk.types")}
+    sys.modules["claude_agent_sdk"] = mod
+    sys.modules["claude_agent_sdk.types"] = types_mod
+    return old_mods
+
+
+def _restore_sdk_mock(old_mods: dict):
+    for k, v in old_mods.items():
+        if v is None:
+            sys.modules.pop(k, None)
+        else:
+            sys.modules[k] = v
+
+
+# ── TestEncoder ───────────────────────────────────────────────────────────
+
+
+class TestEncoder(unittest.TestCase):
+    """_Encoder serialises SDK objects (dataclasses, Pydantic-like) into JSON."""
+
+    def test_serializes_dataclass(self):
+        @dataclasses.dataclass
+        class FeedEvent:
+            name: str
+            count: int
+
+        result = json.loads(json.dumps(FeedEvent(name="hay", count=3), cls=agent._Encoder))
+        self.assertEqual(result, {"name": "hay", "count": 3})
+
+    def test_serializes_pydantic_model_dump(self):
+        class PydanticLike:
+            def model_dump(self):
+                return {"tool_id": "t1", "text": "ok"}
+
+        result = json.loads(json.dumps(PydanticLike(), cls=agent._Encoder))
+        self.assertEqual(result, {"tool_id": "t1", "text": "ok"})
+
+    def test_reinjects_type_discriminator_when_missing_from_model_dump(self):
+        """The SDK's model_dump() may omit the 'type' key; _Encoder re-injects
+        it from the .type attribute so the frontend's event parser can distinguish
+        block types (e.g. text vs tool_use)."""
+
+        class PydanticBlock:
+            type = "text"
+
+            def model_dump(self):
+                return {"text": "hello"}  # no "type" key
+
+        result = json.loads(json.dumps(PydanticBlock(), cls=agent._Encoder))
+        self.assertEqual(result["type"], "text")
+        self.assertEqual(result["text"], "hello")
+
+    def test_does_not_reinject_type_when_already_present_in_model_dump(self):
+        class PydanticBlock:
+            type = "should_not_overwrite"
+
+            def model_dump(self):
+                return {"type": "tool_use", "id": "t1"}
+
+        result = json.loads(json.dumps(PydanticBlock(), cls=agent._Encoder))
+        self.assertEqual(result["type"], "tool_use")  # model_dump value wins
+
+    def test_raises_type_error_for_unrecognised_object(self):
+        with self.assertRaises(TypeError):
+            json.dumps(object(), cls=agent._Encoder)
+
+
+# ── TestRouteConnection ───────────────────────────────────────────────────
+
+
+class TestRouteConnection(unittest.IsolatedAsyncioTestCase):
+    """route_connection parses JSON lines and dispatches to the right handler."""
+
+    async def _run_route(self, lines: list[str]) -> None:
+        reader = asyncio.StreamReader()
+        for line in lines:
+            reader.feed_data((line + "\n").encode())
+        reader.feed_eof()
+        await agent.route_connection(reader, MockWriter())
+
+    async def test_dispatches_query_message_to_handle_query(self):
+        with unittest.mock.patch.object(agent, "handle_query") as mock_fn:
+            await self._run_route([json.dumps({"type": "query", "content": "hi"})])
+            mock_fn.assert_called_once()
+
+    async def test_dispatches_hello_message_to_handle_hello(self):
+        with unittest.mock.patch.object(agent, "handle_hello") as mock_fn:
+            await self._run_route([json.dumps({"type": "hello", "task_id": "t1"})])
+            mock_fn.assert_called_once()
+
+    async def test_dispatches_answer_question_to_handle_answer_question(self):
+        with unittest.mock.patch.object(agent, "handle_answer_question") as mock_fn:
+            await self._run_route([json.dumps({"type": "answer_question", "request_id": "r1"})])
+            mock_fn.assert_called_once()
+
+    async def test_dispatches_interrupt_to_handle_interrupt(self):
+        with unittest.mock.patch.object(agent, "handle_interrupt") as mock_fn:
+            await self._run_route([json.dumps({"type": "interrupt", "task_id": "t1"})])
+            mock_fn.assert_called_once()
+
+    async def test_unknown_message_type_does_not_raise(self):
+        await self._run_route([json.dumps({"type": "noop_unknown"})])
+
+    async def test_invalid_json_does_not_raise(self):
+        await self._run_route(["not { valid json!!!"])
+
+    async def test_empty_lines_are_skipped(self):
+        with unittest.mock.patch.object(agent, "handle_query") as mock_fn:
+            await self._run_route(["", "   ", json.dumps({"type": "query", "content": "x"})])
+            mock_fn.assert_called_once()
+
+    async def test_multiple_messages_all_dispatched_in_order(self):
+        with (
+            unittest.mock.patch.object(agent, "handle_hello") as mock_hello,
+            unittest.mock.patch.object(agent, "handle_query") as mock_query,
+        ):
+            await self._run_route([
+                json.dumps({"type": "hello", "task_id": "t1"}),
+                json.dumps({"type": "query", "content": "hi"}),
+            ])
+            mock_hello.assert_called_once()
+            mock_query.assert_called_once()
+
+
+# ── TestRunQuery ──────────────────────────────────────────────────────────
+
+
+class TestRunQuery(unittest.IsolatedAsyncioTestCase):
+    """run_query emits the correct SSE event sequence and cleans up state."""
+
+    async def _run(self, task_id, writer, *, events=None, raise_exc=None, sdk_session_id=None):
+        """Run run_query under a mock SDK and return all emitted SSE events."""
+        old_mods = _install_sdk_mock(events=events, raise_exc=raise_exc)
+        agent._sessions[task_id] = agent.Session(task=asyncio.current_task(), writer=writer)
+        token1 = agent._emit_writer.set(writer)
+        token2 = agent._emit_session_id.set(task_id)
+        try:
+            await agent.run_query("test content", sdk_session_id, task_id)
+        finally:
+            _restore_sdk_mock(old_mods)
+            agent._emit_writer.reset(token1)
+            agent._emit_session_id.reset(token2)
+            agent._sessions.pop(task_id, None)
+        return writer.written_events()
+
+    async def test_session_start_is_first_event_with_correct_task_id(self):
+        """The frontend captures task_id from session_start to use in stop and
+        answer-question requests — it must be the very first event emitted."""
+        writer = MockWriter()
+        events = await self._run("rq-start", writer)
+        self.assertGreater(len(events), 0)
+        self.assertEqual(events[0]["event"], "session_start")
+        self.assertEqual(events[0]["data"]["task_id"], "rq-start")
+
+    async def test_done_is_last_event_on_successful_completion(self):
+        """done triggers history refresh in the frontend; it must always be last."""
+        writer = MockWriter()
+        events = await self._run("rq-done", writer)
+        self.assertEqual(events[-1]["event"], "done")
+        self.assertEqual(events[-1]["data"]["task_id"], "rq-done")
+
+    async def test_done_always_emitted_when_exception_raised(self):
+        """done fires in the finally block even when the SDK raises."""
+        writer = MockWriter()
+        events = await self._run("rq-exc", writer, raise_exc=RuntimeError("boom"))
+        self.assertEqual(events[-1]["event"], "done")
+
+    async def test_error_event_emitted_before_done_on_exception(self):
+        """The frontend shows an error banner on error_event; it must precede done."""
+        writer = MockWriter()
+        events = await self._run("rq-err", writer, raise_exc=RuntimeError("sdk failed"))
+        names = [e["event"] for e in events]
+        self.assertIn("error_event", names)
+        self.assertIn("done", names)
+        self.assertLess(names.index("error_event"), names.index("done"))
+        self.assertEqual(
+            events[names.index("error_event")]["data"]["message"], "sdk failed"
+        )
+
+    async def test_done_emitted_on_cancellation_with_no_error_event(self):
+        """When the user clicks Stop, CancelledError is caught; done must still
+        fire so the frontend clears the streaming state, and no error banner
+        should appear."""
+        writer = MockWriter()
+        events = await self._run("rq-cancel", writer, raise_exc=asyncio.CancelledError())
+        names = [e["event"] for e in events]
+        self.assertIn("done", names)
+        self.assertNotIn("error_event", names)
+
+    async def test_captured_session_id_from_sdk_event_propagated_to_done(self):
+        """The SDK yields events that carry a session_id (the conversation thread
+        identifier).  run_query captures the latest one and sends it in done so
+        the frontend can resume the session on the next query."""
+
+        class SessionUpdateEvent:
+            session_id = "sdk-session-xyz"
+
+        writer = MockWriter()
+        events = await self._run("rq-sessid", writer, events=[SessionUpdateEvent()])
+        done = next(e for e in events if e["event"] == "done")
+        self.assertEqual(done["data"]["session_id"], "sdk-session-xyz")
+
+    async def test_done_session_id_is_none_when_no_session_established(self):
+        writer = MockWriter()
+        events = await self._run("rq-nosess", writer, sdk_session_id=None)
+        done = next(e for e in events if e["event"] == "done")
+        self.assertIsNone(done["data"]["session_id"])
+
+    async def test_session_removed_from_registry_after_completion(self):
+        """run_query pops its task from _sessions in the finally block so stale
+        senders do not accumulate."""
+        writer = MockWriter()
+        task_id = "rq-cleanup"
+        old_mods = _install_sdk_mock()
+        agent._sessions[task_id] = agent.Session(task=asyncio.current_task(), writer=writer)
+        token1 = agent._emit_writer.set(writer)
+        token2 = agent._emit_session_id.set(task_id)
+        try:
+            await agent.run_query("test", None, task_id)
+        finally:
+            _restore_sdk_mock(old_mods)
+            agent._emit_writer.reset(token1)
+            agent._emit_session_id.reset(token2)
+        self.assertNotIn(task_id, agent._sessions)
+
+    async def test_streaming_text_flag_suppresses_duplicate_text_from_assistant_event(self):
+        """When the SDK streams text via content_block_delta events, the subsequent
+        AssistantMessage event must NOT re-emit the same text — the frontend would
+        render it twice if it did."""
+
+        class AssistantMessage:
+            """Non-_StreamEvent: goes through process_agent_event as 'assistant'."""
+            session_id = None
+            message = None
+
+            class _TB:
+                type = "text"
+                text = "Streaming text"
+
+            content = [_TB()]
+
+        stream_events = [
+            _StreamEvent({"type": "content_block_start", "index": 0, "content_block": {"type": "text"}}),
+            _StreamEvent({"type": "content_block_delta", "index": 0, "delta": {"type": "text_delta", "text": "Streaming text"}}),
+            _StreamEvent({"type": "content_block_stop", "index": 0}),
+            AssistantMessage(),  # same text — must NOT produce a second text_delta
+        ]
+
+        writer = MockWriter()
+        events = await self._run("rq-dedup", writer, events=stream_events)
+
+        text_deltas = [e for e in events if e["event"] == "text_delta"]
+        self.assertEqual(len(text_deltas), 1)
+        self.assertEqual(text_deltas[0]["data"]["text"], "Streaming text")
+
+
+# ── TestAskUserQuestionHook ───────────────────────────────────────────────
+
+
+class TestAskUserQuestionHook(unittest.IsolatedAsyncioTestCase):
+    """The ask_user_question_hook inside run_query drives the interactive Q&A
+    flow between Claude and the user via the frontend."""
+
+    async def _run_with_hook(self, task_id, writer, hook_caller, *, sdk_session_id=None):
+        """Run run_query with a custom mock_query that extracts the
+        AskUserQuestion hook and passes it to hook_caller(hook)."""
+
+        class HookMatcher:
+            def __init__(self, matcher, hooks, timeout):
+                self.matcher = matcher
+                self.hooks = hooks
+                self.timeout = timeout
+
+        class ClaudeAgentOptions:
+            def __init__(self, **kwargs):
+                self.hooks = kwargs.get("hooks", {})
+
+        caller = hook_caller
+
+        async def mock_query(prompt, options):
+            hook = None
+            for hm in options.hooks.get("PreToolUse", []):
+                if hm.matcher == "AskUserQuestion":
+                    hook = hm.hooks[0]
+            if hook is not None:
+                await caller(hook)
+            if False:
+                yield  # make this an async generator
+
+        mod = types.ModuleType("claude_agent_sdk")
+        types_mod = types.ModuleType("claude_agent_sdk.types")
+        mod.ClaudeAgentOptions = ClaudeAgentOptions
+        mod.PermissionResultAllow = object
+        mod.query = mock_query
+        types_mod.HookMatcher = HookMatcher
+        types_mod.StreamEvent = _StreamEvent
+
+        old_mods = {k: sys.modules.get(k) for k in ("claude_agent_sdk", "claude_agent_sdk.types")}
+        sys.modules["claude_agent_sdk"] = mod
+        sys.modules["claude_agent_sdk.types"] = types_mod
+
+        agent._sessions[task_id] = agent.Session(task=asyncio.current_task(), writer=writer)
+        token1 = agent._emit_writer.set(writer)
+        token2 = agent._emit_session_id.set(task_id)
+        try:
+            await agent.run_query("test", sdk_session_id, task_id)
+        finally:
+            _restore_sdk_mock(old_mods)
+            agent._emit_writer.reset(token1)
+            agent._emit_session_id.reset(token2)
+            agent._sessions.pop(task_id, None)
+
+        return writer.written_events()
+
+    async def test_hook_emits_ask_user_question_with_all_required_frontend_fields(self):
+        """The frontend's SseContext expects request_id, task_id, session_id,
+        and questions — all must be present in the emitted event."""
+        task_id = "aq-fields"
+        writer = MockWriter()
+
+        async def call_hook(hook):
+            async def resolve():
+                agent.handle_answer_question(
+                    {"type": "answer_question", "request_id": "req-f", "answers": {}}
+                )
+            asyncio.create_task(resolve())
+            await hook(
+                {"tool_input": {"questions": [{"question": "Q1", "options": []}]}},
+                "req-f",
+                None,
+            )
+
+        events = await self._run_with_hook(task_id, writer, call_hook)
+        aq_events = [e for e in events if e["event"] == "ask_user_question"]
+        self.assertEqual(len(aq_events), 1)
+        data = aq_events[0]["data"]
+        self.assertIn("request_id", data)
+        self.assertIn("task_id", data)
+        self.assertIn("session_id", data)
+        self.assertIn("questions", data)
+        self.assertEqual(data["request_id"], "req-f")
+        self.assertEqual(data["task_id"], task_id)
+
+    async def test_hook_session_id_reflects_current_captured_session_id(self):
+        """session_id in ask_user_question lets the frontend resume the correct
+        conversation thread after the user submits their answer."""
+        task_id = "aq-sessid"
+        writer = MockWriter()
+        sdk_session_id = "existing-sdk-session"
+
+        async def call_hook(hook):
+            async def resolve():
+                agent.handle_answer_question(
+                    {"type": "answer_question", "request_id": "req-s", "answers": {}}
+                )
+            asyncio.create_task(resolve())
+            await hook({"tool_input": {"questions": []}}, "req-s", None)
+
+        events = await self._run_with_hook(task_id, writer, call_hook, sdk_session_id=sdk_session_id)
+        aq_event = next(e for e in events if e["event"] == "ask_user_question")
+        self.assertEqual(aq_event["data"]["session_id"], sdk_session_id)
+
+    async def test_hook_round_trip_injects_answers_into_updated_input(self):
+        """The hook must return { hookSpecificOutput: { updatedInput: { answers } } }
+        so the SDK can pass the user's selections back to AskUserQuestion."""
+        task_id = "aq-rt"
+        writer = MockWriter()
+        hook_results = []
+
+        async def call_hook(hook):
+            async def resolve():
+                agent.handle_answer_question({
+                    "type": "answer_question",
+                    "request_id": "req-rt",
+                    "answers": {"Which option?": "Option A"},
+                })
+            asyncio.create_task(resolve())
+            result = await hook(
+                {"tool_input": {"questions": [{"question": "Which option?", "options": []}]}},
+                "req-rt",
+                None,
+            )
+            hook_results.append(result)
+
+        await self._run_with_hook(task_id, writer, call_hook)
+
+        self.assertEqual(len(hook_results), 1)
+        result = hook_results[0]
+        self.assertIn("hookSpecificOutput", result)
+        updated = result["hookSpecificOutput"]["updatedInput"]
+        self.assertEqual(updated["answers"], {"Which option?": "Option A"})
+
+    async def test_hook_returns_none_when_session_removed_before_hook_runs(self):
+        """If the session is gone by the time the hook fires (race condition on
+        interrupt), the hook returns None without emitting anything or raising."""
+        task_id = "aq-gone"
+        writer = MockWriter()
+        hook_results = []
+
+        async def call_hook(hook):
+            agent._sessions.pop(task_id, None)  # simulate race: session already gone
+            result = await hook({"tool_input": {"questions": []}}, "req-gone", None)
+            hook_results.append(result)
+
+        await self._run_with_hook(task_id, writer, call_hook)
+
+        self.assertEqual(hook_results, [None])
+        aq_events = [e for e in writer.written_events() if e["event"] == "ask_user_question"]
+        self.assertEqual(aq_events, [])
 
 
 if __name__ == "__main__":

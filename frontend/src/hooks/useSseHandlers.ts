@@ -19,6 +19,7 @@ export function useSseHandlers(
     runningSessionId,
     setRunningSessionId,
     setIsStreaming,
+    setNullOrphaned,
     setSessionPendingQuestion,
     setTaskId,
     setSessions,
@@ -38,6 +39,9 @@ export function useSseHandlers(
 
   const viewRef = useRef(viewSessionId);
   viewRef.current = viewSessionId;
+
+  const nullOrphanedRef = useRef(chatState.nullOrphaned);
+  nullOrphanedRef.current = chatState.nullOrphaned;
 
   // Track pending tool message IDs by tool_use_id
   const toolIdToMsgId = useRef<Map<string, string>>(new Map());
@@ -166,6 +170,7 @@ export function useSseHandlers(
         const completedSession = runningRef.current;
         setRunningSessionId(null);
         setIsStreaming(false);
+        setNullOrphaned(false);
         setSessionPendingQuestion(completedSession, null);
         sealThinking();
         assistantMsgId.current = null;
@@ -192,18 +197,24 @@ export function useSseHandlers(
 
       case "error_event": {
         const { message } = event.payload;
+        const wasOrphaned = nullOrphanedRef.current;
         setRunningSessionId(null);
         setIsStreaming(false);
+        setNullOrphaned(false);
         setSessionPendingQuestion(session, null);
         thinkingMsgId.current = null;
         assistantMsgId.current = null;
         toolIdToMsgId.current.clear();
-        addMessage(session, {
-          id: generateId(),
-          type: "error",
-          content: message,
-          timestamp: Date.now(),
-        });
+        if (wasOrphaned) {
+          setMessages(session, []);
+        } else {
+          addMessage(session, {
+            id: generateId(),
+            type: "error",
+            content: message,
+            timestamp: Date.now(),
+          });
+        }
         break;
       }
     }

@@ -2,7 +2,7 @@ use std::{env, fs, path::Path, process::Command};
 
 fn main() {
     let manifest_dir = env::var("CARGO_MANIFEST_DIR").unwrap();
-    let frontend_dir = Path::new(&manifest_dir).join("frontend");
+    let frontend_dir = Path::new(&manifest_dir).join("../frontend");
     let src_dir = frontend_dir.join("src");
     let dist_dir = frontend_dir.join("dist");
 

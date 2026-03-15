@@ -116,6 +116,8 @@ export default function ChatInterface({ sessions, setSessions, selectedSession, 
     setRunningSessionId,
     isStreaming,
     setIsStreaming,
+    nullOrphaned,
+    setNullOrphaned,
     getSessionPendingQuestion,
     setSessionPendingQuestion,
     getTaskId,
@@ -159,12 +161,21 @@ export default function ChatInterface({ sessions, setSessions, selectedSession, 
     loadTranscriptForSession(selectedSession);
   }, [selectedSession, setViewSessionId, loadTranscriptForSession]);
 
+  // Refs for reading latest values inside effects without adding to deps
+  const runningSessionIdRef = useRef(runningSessionId);
+  runningSessionIdRef.current = runningSessionId;
+  const isStreamingRef = useRef(isStreaming);
+  isStreamingRef.current = isStreaming;
+
   // Reset to a blank new chat when the user explicitly clicks "New Chat"
   useEffect(() => {
     if (newChatKey === 0) return;
+    if (runningSessionIdRef.current === null && isStreamingRef.current) {
+      setNullOrphaned(true);
+    }
     setMessages(null, []);
     setViewSessionId(null);
-  }, [newChatKey, setMessages, setViewSessionId]);
+  }, [newChatKey, setMessages, setViewSessionId, setNullOrphaned]);
 
   // Notify parent when the running session changes so Sidebar can show the active indicator
   const onRunningSessionChangeRef = useRef(onRunningSessionChange);
@@ -226,7 +237,7 @@ export default function ChatInterface({ sessions, setSessions, selectedSession, 
 
   const messages = getMessages(viewSessionId);
   const pendingQuestion = getSessionPendingQuestion(viewSessionId);
-  const isLoading = isStreaming && runningSessionId === viewSessionId;
+  const isLoading = isStreaming && runningSessionId === viewSessionId && !nullOrphaned;
 
   return (
     <div className="flex min-h-0 flex-1 flex-col">

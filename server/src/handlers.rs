@@ -1,8 +1,8 @@
 use anyhow::{Context, Result, anyhow};
 use axum::{
     Json,
-    extract::{Form, Multipart, Path as RoutePath, Query, State},
-    http::StatusCode,
+    extract::{Form, FromRequestParts, Multipart, Path as RoutePath, Query, State},
+    http::{StatusCode, request::Parts},
     response::{Html, IntoResponse, Redirect, Response},
 };
 use chat_history::{delete_chat_session, fetch_chat_history, list_chat_sessions};
@@ -14,6 +14,7 @@ use sftp_client::open_sftp_session;
 use ssh_client::connect_ssh;
 use std::{
     io::{Error as IoError, ErrorKind},
+    net::Ipv4Addr,
     path::{Path, PathBuf},
     time::{Duration, Instant, SystemTime, UNIX_EPOCH},
 };
@@ -30,7 +31,7 @@ use vm_lifecycle::{
 
 use crate::{
     auth::User,
-    state::{AppError, AppState, find_vm_guest_ip_for_user},
+    state::{AppError, AppState, find_user_vm, find_vm_guest_ip_for_user},
     static_files::{app_js_version, styles_css_version},
     templates::render_terminal_page,
 };
@@ -76,14 +77,49 @@ fn register_vm(vms: &VmRegistry, vm_id: String, vm_entry: VmEntry) -> Result<(),
     Ok(())
 }
 
-fn find_user_vm_id(vms: &VmRegistry, user_id: Uuid) -> Result<Option<String>> {
-    let registry = vms
-        .lock()
-        .map_err(|_| anyhow!("vm registry lock poisoned"))?;
-    Ok(registry
-        .iter()
-        .find(|(_, e)| e.user_id == user_id)
-        .map(|(id, _)| id.clone()))
+pub(crate) struct UserVm {
+    pub(crate) user_id: Uuid,
+    pub(crate) vm_id: String,
+    pub(crate) guest_ip: Ipv4Addr,
+}
+
+impl FromRequestParts<AppState> for UserVm {
+    type Rejection = Response;
+
+    async fn from_request_parts(parts: &mut Parts, state: &AppState) -> Result<Self, Self::Rejection> {
+        let user = User::from_request_parts(parts, state).await
+            .map_err(IntoResponse::into_response)?;
+        let db_user = upsert_user(&state.db, &user.email).await.map_err(|e| {
+            error!("db error: {e}");
+            (StatusCode::INTERNAL_SERVER_ERROR, "An internal error occurred").into_response()
+        })?;
+        let (vm_id, guest_ip) = match find_user_vm(&state.vms, db_user.id).map_err(|e| {
+            error!("vm registry error: {e}");
+            (StatusCode::INTERNAL_SERVER_ERROR, "An internal error occurred").into_response()
+        })? {
+            Some(entry) => entry,
+            None => {
+                let vm_count = count_registered_vms(&state.vms)
+                    .map_err(IntoResponse::into_response)?;
+                if vm_count >= state.config.vm_max_count {
+                    return Err((StatusCode::SERVICE_UNAVAILABLE, "VM limit reached").into_response());
+                }
+                let new_vm_id = provision_new_vm(state, db_user.id).await
+                    .map_err(IntoResponse::into_response)?;
+                let guest_ip = find_vm_guest_ip_for_user(&state.vms, &new_vm_id, db_user.id)
+                    .map_err(|e| {
+                        error!("vm registry error after provision: {e}");
+                        (StatusCode::INTERNAL_SERVER_ERROR, "An internal error occurred").into_response()
+                    })?
+                    .ok_or_else(|| {
+                        error!("newly provisioned VM not found in registry");
+                        (StatusCode::INTERNAL_SERVER_ERROR, "An internal error occurred").into_response()
+                    })?;
+                (new_vm_id, guest_ip)
+            }
+        };
+        Ok(UserVm { user_id: db_user.id, vm_id, guest_ip })
+    }
 }
 
 fn remove_user_vm(vms: &VmRegistry, user_id: Uuid) -> Result<()> {
@@ -104,39 +140,21 @@ fn remove_user_vm(vms: &VmRegistry, user_id: Uuid) -> Result<()> {
 }
 
 pub(crate) async fn get_or_create_terminal(
-    user: User,
+    user_vm: UserVm,
     session: Session,
     State(state): State<AppState>,
 ) -> Result<Response, AppError> {
-    let db_user = upsert_user(&state.db, &user.email).await?;
-
-    let Some(vm_id) = find_user_vm_id(&state.vms, db_user.id)? else {
-        return check_vm_limit_and_create(session, state, db_user).await;
-    };
-    Ok(Redirect::to(&format!("/terminal/{vm_id}")).into_response())
+    build_terminal_response(&session, &state, user_vm.user_id, &user_vm.vm_id).await
 }
 
-async fn check_vm_limit_and_create(
-    session: Session,
-    state: AppState,
-    db_user: DbUser,
-) -> Result<Response, AppError> {
-    let vm_count = count_registered_vms(&state.vms)?;
-    if vm_count >= state.config.vm_max_count {
-        return Ok((StatusCode::SERVICE_UNAVAILABLE, "VM limit reached").into_response());
-    }
-    let vm_id = provision_new_vm(&state, db_user.id).await?;
-    build_terminal_response(&session, &state, db_user.id, &vm_id).await
-}
-
-fn count_registered_vms(vms: &VmRegistry) -> Result<usize, AppError> {
+pub(crate) fn count_registered_vms(vms: &VmRegistry) -> Result<usize, AppError> {
     Ok(vms
         .lock()
         .map_err(|_| anyhow!("vm registry lock poisoned"))?
         .len())
 }
 
-async fn provision_new_vm(state: &AppState, user_id: Uuid) -> Result<String, AppError> {
+pub(crate) async fn provision_new_vm(state: &AppState, user_id: Uuid) -> Result<String, AppError> {
     let iam_creds = fetch_host_iam_credentials(&state.config.iam_role_name)
         .await
         .context("failed to fetch IAM credentials for VM")?;
