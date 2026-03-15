@@ -42,6 +42,9 @@ async fn run_task_stream(
 ) {
     let mut heartbeat = interval(Duration::from_secs(HEARTBEAT_SECS));
     heartbeat.tick().await;
+    // connect_ssh retries the TCP connection for up to 60s (VM SSH daemon may still be starting),
+    // then open_agent_channel retries the Unix socket for another 60s (agent process may still be
+    // starting). Total worst-case connect time is ~120s.
     let connect_future =
         connect_ssh_and_open_channel(guest_ip, &ssh_key_path, &ssh_user, &vm_host_key_path);
     tokio::pin!(connect_future);

@@ -20,6 +20,8 @@ use crate::{
     state::{AppError, AppState, update_vm_last_activity},
 };
 
+// Sends a fire-and-forget message to the agent (e.g. QuestionAnswer, Interrupt).
+// The agent's response is streamed back over the existing SSE connection opened by handle_chat_query.
 async fn dispatch_agent_message(
     user_vm: &UserVm,
     state: &AppState,
