@@ -76,18 +76,10 @@ export function useSseHandlers(
       case "session_start": {
         const { task_id } = event.payload;
         setTaskId(session, task_id);
-        const storageKey = `chat_running_task_${vmId}`;
-        const saved = localStorage.getItem(storageKey);
-        if (saved) {
-          try {
-            const parsed = JSON.parse(saved) as { running_session_id?: string | null };
-            localStorage.setItem(storageKey, JSON.stringify({ task_id, running_session_id: parsed.running_session_id ?? session }));
-          } catch {
-            localStorage.setItem(storageKey, JSON.stringify({ task_id, running_session_id: session }));
-          }
-        } else {
-          localStorage.setItem(storageKey, JSON.stringify({ task_id, running_session_id: session }));
-        }
+        localStorage.setItem(
+          `chat_running_task_${vmId}`,
+          JSON.stringify({ task_id, running_session_id: session }),
+        );
         break;
       }
 

@@ -339,9 +339,14 @@ class TestHandleHello(unittest.IsolatedAsyncioTestCase):
         finally:
             agent._sessions.pop(task_id, None)
 
-    async def test_ignores_unknown_task_id(self):
+    async def test_emits_done_for_unknown_task_id(self):
         writer = MockWriter()
         agent.handle_hello({"type": "hello", "task_id": "nonexistent"}, writer)
+        events = writer.written_events()
+        self.assertEqual(len(events), 1)
+        self.assertEqual(events[0]["event"], "done")
+        self.assertEqual(events[0]["data"]["task_id"], "nonexistent")
+        self.assertIsNone(events[0]["data"]["session_id"])
 
     async def test_missing_task_id_is_no_op(self):
         writer = MockWriter()

@@ -65,7 +65,7 @@ fn find_agent_sender(state: &AppState, vm_id: &str) -> Option<mpsc::Sender<Agent
     Some(sender.clone())
 }
 
-struct VerifiedVmSender(mpsc::Sender<AgentMessage>);
+pub(crate) struct VerifiedVmSender(mpsc::Sender<AgentMessage>);
 
 impl FromRequestParts<AppState> for VerifiedVmSender {
     type Rejection = Response;
