@@ -90,20 +90,26 @@ export default function ChatInterface({ sessions, setSessions, selectedSession, 
 
   const handleSend = useCallback(async (text: string) => {
     const conversationId = viewSessionId;
-    if (!conversationId) return;
-    const isNewConversation = selectedSessionRef.current?.is_pending ?? false;
-    const serverSessionId = isNewConversation ? null : conversationId;
+    const effectiveId = conversationId ?? crypto.randomUUID();
+    const isNewConversation = !conversationId || (selectedSessionRef.current?.is_pending ?? false);
+    const serverSessionId = isNewConversation ? null : effectiveId;
 
-    addMessage(conversationId, {
+    addMessage(effectiveId, {
       id: generateId(),
       type: "user",
       content: text,
       timestamp: Date.now(),
     });
-    setRunningSessionId(conversationId);
+    setRunningSessionId(effectiveId);
     setIsStreaming(true);
 
-    if (isNewConversation && selectedSessionRef.current) {
+    if (!conversationId) {
+      setViewSessionId(effectiveId);
+      setSessions((prev: ChatSession[]) => [
+        { session_id: effectiveId, created_at: new Date().toISOString(), title: "New chat\u2026", is_pending: true },
+        ...prev,
+      ]);
+    } else if (isNewConversation && selectedSessionRef.current) {
       setSessions((prev: ChatSession[]) => [selectedSessionRef.current!, ...prev]);
     }
 
@@ -111,9 +117,9 @@ export default function ChatInterface({ sessions, setSessions, selectedSession, 
       await sseCtx.sendQuery(text, serverSessionId);
     } catch (err) {
       if (isNewConversation) {
-        setSessions((prev: ChatSession[]) => prev.filter((s) => s.session_id !== conversationId));
+        setSessions((prev: ChatSession[]) => prev.filter((s) => s.session_id !== effectiveId));
       }
-      addMessage(conversationId, {
+      addMessage(effectiveId, {
         id: generateId(),
         type: "error",
         content: String(err),
@@ -122,7 +128,7 @@ export default function ChatInterface({ sessions, setSessions, selectedSession, 
       setRunningSessionId(null);
       setIsStreaming(false);
     }
-  }, [viewSessionId, generateId, addMessage, setRunningSessionId, setIsStreaming, setSessions, sseCtx]);
+  }, [viewSessionId, generateId, addMessage, setRunningSessionId, setIsStreaming, setViewSessionId, setSessions, sseCtx]);
 
   const handleStop = useCallback(() => {
     sseCtx.sendStop(getTaskId(runningSessionId) ?? "").catch(console.error);

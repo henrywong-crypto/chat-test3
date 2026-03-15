@@ -1,19 +1,12 @@
 [workspace]
 members = [
     "chat-agent",
-    "chat-history",
     "chat-relay",
     "common",
-    "download",
-    "firecracker-client",
-    "firecracker-manager",
     "net-helper",
     "server",
-    "sftp-client",
     "ssh-client",
     "store",
-    "upload",
     "vm-lifecycle",
-    "vm-settings",
 ]
 resolver = "2"

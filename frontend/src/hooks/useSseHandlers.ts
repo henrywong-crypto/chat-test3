@@ -247,7 +247,11 @@ export function useSseHandlers(
         }
 
         case "reconnecting": {
-          const { task_id, running_session_id, project_dir } = event.payload;
+          const { task_id, running_session_id: rawRunningId, project_dir } = event.payload;
+          // onopen fires for every EventSource connection; deduplicate by task_id.
+          if (currentTaskIdRef.current === task_id) break;
+          // Legacy localStorage may have stored null for new-chat sessions; generate a UUID for those.
+          const running_session_id = rawRunningId ?? crypto.randomUUID();
           currentTaskIdRef.current = task_id;
           setTaskId(running_session_id, task_id);
           setRunningSessionId(running_session_id);

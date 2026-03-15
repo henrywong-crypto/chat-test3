@@ -2,11 +2,13 @@ mod hello;
 mod interrupt;
 mod query;
 mod question_answer;
+pub mod relay;
 
-pub use hello::build_hello_payload;
-pub use interrupt::build_interrupt_payload;
-pub use query::build_query_payload;
-pub use question_answer::build_question_answer_payload;
+pub use hello::HelloPayload;
+pub use interrupt::InterruptPayload;
+pub use query::QueryPayload;
+pub use question_answer::QuestionAnswerPayload;
+pub use relay::{VmRelayHandle, start_vm_relay};
 
 pub enum AgentMessage {
     Query {
