@@ -18,7 +18,7 @@ use std::{
     path::{Path, PathBuf},
     time::{Duration, Instant, SystemTime, UNIX_EPOCH},
 };
-use store::{User as DbUser, upsert_user};
+use store::upsert_user;
 use tokio::{io::{AsyncRead, AsyncWriteExt}, time::timeout};
 use tokio_util::io::StreamReader;
 use tower_sessions::Session;
@@ -122,6 +122,37 @@ impl FromRequestParts<AppState> for UserVm {
     }
 }
 
+pub(crate) struct UserVmById {
+    pub(crate) vm_id: String,
+    pub(crate) user_id: Uuid,
+    pub(crate) guest_ip: Ipv4Addr,
+}
+
+impl FromRequestParts<AppState> for UserVmById {
+    type Rejection = Response;
+
+    async fn from_request_parts(parts: &mut Parts, state: &AppState) -> Result<Self, Self::Rejection> {
+        let RoutePath(vm_id) = RoutePath::<String>::from_request_parts(parts, state).await
+            .map_err(IntoResponse::into_response)?;
+        if !validate_vm_id(&vm_id) {
+            return Err((StatusCode::NOT_FOUND, "Not found").into_response());
+        }
+        let user = User::from_request_parts(parts, state).await
+            .map_err(IntoResponse::into_response)?;
+        let db_user = upsert_user(&state.db, &user.email).await.map_err(|e| {
+            error!("db error: {e}");
+            (StatusCode::INTERNAL_SERVER_ERROR, "An internal error occurred").into_response()
+        })?;
+        let Some(guest_ip) = find_vm_guest_ip_for_user(&state.vms, &vm_id, db_user.id).map_err(|e| {
+            error!("vm registry error: {e}");
+            (StatusCode::INTERNAL_SERVER_ERROR, "An internal error occurred").into_response()
+        })? else {
+            return Err((StatusCode::NOT_FOUND, "Session not found or expired").into_response());
+        };
+        Ok(UserVmById { vm_id, user_id: db_user.id, guest_ip })
+    }
+}
+
 fn remove_user_vm(vms: &VmRegistry, user_id: Uuid) -> Result<()> {
     let mut registry = vms
         .lock()
@@ -177,8 +208,7 @@ pub(crate) async fn provision_new_vm(state: &AppState, user_id: Uuid) -> Result<
         VmEntry {
             user_id,
             has_iam_creds: true,
-            created_at: Instant::now(),
-            ws_connected: false,
+            last_activity: Instant::now(),
             vm,
         },
     )?;
@@ -226,42 +256,19 @@ pub(crate) async fn delete_user_rootfs_handler(
 }
 
 pub(crate) async fn get_terminal_page(
-    user: User,
+    user_vm: UserVmById,
     session: Session,
-    RoutePath(vm_id): RoutePath<String>,
     State(state): State<AppState>,
 ) -> Result<Response, AppError> {
-    if !validate_vm_id(&vm_id) {
-        return Ok((StatusCode::NOT_FOUND, "Not found").into_response());
-    }
-    let db_user = upsert_user(&state.db, &user.email).await?;
-    let owned = state
-        .vms
-        .lock()
-        .map_err(|_| anyhow!("vm registry lock poisoned"))?
-        .get(&vm_id)
-        .map(|e| e.user_id == db_user.id)
-        .unwrap_or(false);
-    if !owned {
-        return Ok((StatusCode::NOT_FOUND, "Not found").into_response());
-    }
-    build_terminal_response(&session, &state, db_user.id, &vm_id).await
+    build_terminal_response(&session, &state, user_vm.user_id, &user_vm.vm_id).await
 }
 
 pub(crate) async fn list_chat_sessions_handler(
-    user: User,
-    RoutePath(vm_id): RoutePath<String>,
+    user_vm: UserVmById,
     State(state): State<AppState>,
 ) -> Result<Response, AppError> {
-    if !validate_vm_id(&vm_id) {
-        return Ok((StatusCode::NOT_FOUND, "Not found").into_response());
-    }
-    let db_user = upsert_user(&state.db, &user.email).await?;
-    let Some(guest_ip) = find_vm_guest_ip_for_user(&state.vms, &vm_id, db_user.id)? else {
-        return Ok((StatusCode::NOT_FOUND, "Session not found or expired").into_response());
-    };
     Ok(list_chat_sessions(
-        guest_ip,
+        user_vm.guest_ip,
         &state.config.ssh_key_path,
         &state.config.ssh_user,
         &state.config.vm_host_key_path,
@@ -282,20 +289,12 @@ pub(crate) struct TranscriptQuery {
 }
 
 pub(crate) async fn get_chat_transcript_handler(
-    user: User,
-    RoutePath(vm_id): RoutePath<String>,
+    user_vm: UserVmById,
     Query(query): Query<TranscriptQuery>,
     State(state): State<AppState>,
 ) -> Result<Response, AppError> {
-    if !validate_vm_id(&vm_id) {
-        return Ok((StatusCode::NOT_FOUND, "Not found").into_response());
-    }
-    let db_user = upsert_user(&state.db, &user.email).await?;
-    let Some(guest_ip) = find_vm_guest_ip_for_user(&state.vms, &vm_id, db_user.id)? else {
-        return Ok((StatusCode::NOT_FOUND, "Session not found or expired").into_response());
-    };
     Ok(fetch_chat_history(
-        guest_ip,
+        user_vm.guest_ip,
         &state.config.ssh_key_path,
         &state.config.ssh_user,
         &state.config.vm_host_key_path,
@@ -318,24 +317,16 @@ pub(crate) struct DeleteChatSessionForm {
 }
 
 pub(crate) async fn delete_chat_session_handler(
-    user: User,
-    RoutePath(vm_id): RoutePath<String>,
+    user_vm: UserVmById,
     session: Session,
     State(state): State<AppState>,
     Json(form): Json<DeleteChatSessionForm>,
 ) -> Result<Response, AppError> {
-    if !validate_vm_id(&vm_id) {
-        return Ok((StatusCode::NOT_FOUND, "Not found").into_response());
-    }
     if !validate_csrf(&session, &form.csrf_token).await {
         return Ok((StatusCode::FORBIDDEN, "Forbidden").into_response());
     }
-    let db_user = upsert_user(&state.db, &user.email).await?;
-    let Some(guest_ip) = find_vm_guest_ip_for_user(&state.vms, &vm_id, db_user.id)? else {
-        return Ok((StatusCode::NOT_FOUND, "Session not found or expired").into_response());
-    };
     delete_chat_session(
-        guest_ip,
+        user_vm.guest_ip,
         &state.config.ssh_key_path,
         &state.config.ssh_user,
         &state.config.vm_host_key_path,
@@ -351,26 +342,18 @@ struct ChatUploadMetadata {
 }
 
 pub(crate) async fn handle_chat_upload(
-    user: User,
+    user_vm: UserVmById,
     session: Session,
-    RoutePath(vm_id): RoutePath<String>,
     State(state): State<AppState>,
     mut multipart: Multipart,
 ) -> Result<Response, AppError> {
-    if !validate_vm_id(&vm_id) {
-        return Ok((StatusCode::NOT_FOUND, "Not found").into_response());
-    }
-    let db_user = upsert_user(&state.db, &user.email).await?;
     let chat_upload_metadata = extract_chat_upload_metadata(&mut multipart).await?;
     if !validate_csrf(&session, &chat_upload_metadata.csrf_token).await {
         return Ok((StatusCode::FORBIDDEN, "Forbidden").into_response());
     }
-    let Some(guest_ip) = find_vm_guest_ip_for_user(&state.vms, &vm_id, db_user.id)? else {
-        return Ok((StatusCode::NOT_FOUND, "Session not found or expired").into_response());
-    };
     info!("uploading chat attachment via sftp");
     let mut ssh_handle = connect_ssh(
-        guest_ip,
+        user_vm.guest_ip,
         &state.config.ssh_key_path,
         &state.config.ssh_user,
         &state.config.vm_host_key_path,

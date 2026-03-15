@@ -11,6 +11,7 @@ use std::{
     net::Ipv4Addr,
     path::PathBuf,
     sync::{Arc, Mutex},
+    time::Instant,
 };
 use store::PgPool;
 use tokio::sync::{Mutex as AsyncMutex, mpsc};
@@ -226,13 +227,13 @@ impl<E: Into<anyhow::Error>> From<E> for AppError {
     }
 }
 
-pub(crate) fn mark_vm_ws_connected(vms: &VmRegistry, vm_id: &str) -> Result<()> {
+pub(crate) fn update_vm_last_activity(vms: &VmRegistry, vm_id: &str) -> Result<()> {
     let mut registry = vms
         .lock()
         .map_err(|_| anyhow!("vm registry lock poisoned"))?;
     registry
         .get_mut(vm_id)
-        .map(|entry| entry.ws_connected = true);
+        .map(|entry| entry.last_activity = Instant::now());
     Ok(())
 }
 

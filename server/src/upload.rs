@@ -1,6 +1,6 @@
 use anyhow::{Context, Result, anyhow};
 use axum::{
-    extract::{Multipart, Path as AxumPath, State},
+    extract::{Multipart, State},
     http::StatusCode,
     response::{IntoResponse, Response},
 };
@@ -12,14 +12,12 @@ use std::{
     io::{Error as IoError, ErrorKind},
     path::Path,
 };
-use store::upsert_user;
 use tokio_util::io::StreamReader;
 use tower_sessions::Session;
-use uuid::Uuid;
 
 use crate::{
-    auth::User,
-    state::{AppError, AppState, find_vm_guest_ip_for_user},
+    handlers::UserVmById,
+    state::{AppError, AppState},
 };
 
 struct UploadMetadata {
@@ -28,25 +26,17 @@ struct UploadMetadata {
 }
 
 pub(crate) async fn upload_file_handler(
-    user: User,
+    user_vm: UserVmById,
     session: Session,
-    AxumPath(vm_id): AxumPath<String>,
     State(state): State<AppState>,
     mut multipart: Multipart,
 ) -> Result<Response, AppError> {
-    if Uuid::parse_str(&vm_id).is_err() {
-        return Ok((StatusCode::NOT_FOUND, "Not found").into_response());
-    }
-    let db_user = upsert_user(&state.db, &user.email).await?;
     let upload_metadata = extract_upload_metadata(&mut multipart).await?;
     if !validate_csrf(&session, &upload_metadata.csrf_token).await {
         return Ok((StatusCode::FORBIDDEN, "Forbidden").into_response());
     }
-    let Some(guest_ip) = find_vm_guest_ip_for_user(&state.vms, &vm_id, db_user.id)? else {
-        return Ok((StatusCode::NOT_FOUND, "Session not found or expired").into_response());
-    };
     let mut ssh_handle = connect_ssh(
-        guest_ip,
+        user_vm.guest_ip,
         &state.config.ssh_key_path,
         &state.config.ssh_user,
         &state.config.vm_host_key_path,

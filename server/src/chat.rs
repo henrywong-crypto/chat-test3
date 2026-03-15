@@ -17,7 +17,7 @@ use uuid::Uuid;
 
 use crate::{
     handlers::UserVm,
-    state::{AppError, AppState, mark_vm_ws_connected},
+    state::{AppError, AppState, update_vm_last_activity},
 };
 
 const SEND_TIMEOUT_SECS: u64 = 30;
@@ -30,7 +30,7 @@ pub(crate) async fn handle_chat_stream(
     if Uuid::parse_str(&vm_id).is_err() {
         return Ok((StatusCode::NOT_FOUND, "Not found").into_response());
     }
-    mark_vm_ws_connected(&state.vms, &user_vm.vm_id)?;
+    update_vm_last_activity(&state.vms, &user_vm.vm_id)?;
     let (agent_tx, agent_rx) = mpsc::channel::<AgentMessage>(4);
     state
         .chat_senders
@@ -100,29 +100,6 @@ async fn forward_agent_message(
             Err((StatusCode::SERVICE_UNAVAILABLE, "Agent not available").into_response())
         }
     }
-}
-
-#[derive(Deserialize)]
-pub(crate) struct HelloBody {
-    task_id: String,
-    csrf_token: String,
-}
-
-pub(crate) async fn handle_chat_hello(
-    VerifiedVmSender(agent_tx): VerifiedVmSender,
-    session: Session,
-    Json(body): Json<HelloBody>,
-) -> Response {
-    if !validate_csrf(&session, &body.csrf_token).await {
-        return (StatusCode::FORBIDDEN, "Forbidden").into_response();
-    }
-    let task_id = body.task_id.clone();
-    let agent_message = AgentMessage::Hello { task_id: body.task_id };
-    if let Err(response) = forward_agent_message(agent_tx, agent_message).await {
-        return response;
-    }
-    info!("hello forwarded  task_id={task_id}");
-    (StatusCode::OK, "").into_response()
 }
 
 #[derive(Deserialize)]

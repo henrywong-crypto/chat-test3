@@ -1,8 +1,7 @@
 use anyhow::Context;
 use axum::{
-    extract::{Path, Query, State},
-    http::{Response, StatusCode},
-    response::IntoResponse,
+    extract::{Query, State},
+    http::Response,
 };
 use common::validate_within_dir;
 use download::{file::build_streaming_file_response, zip::build_streaming_zip_response};
@@ -10,12 +9,10 @@ use serde::Deserialize;
 use sftp_client::open_sftp_session;
 use ssh_client::connect_ssh;
 use std::path::PathBuf;
-use store::upsert_user;
-use uuid::Uuid;
 
 use crate::{
-    auth::User,
-    state::{AppError, AppState, find_vm_guest_ip_for_user},
+    handlers::UserVmById,
+    state::{AppError, AppState},
 };
 
 #[derive(Deserialize)]
@@ -24,20 +21,12 @@ pub(crate) struct DownloadQuery {
 }
 
 pub(crate) async fn download_file_handler(
-    user: User,
-    Path(vm_id): Path<String>,
+    user_vm: UserVmById,
     Query(query): Query<DownloadQuery>,
     State(state): State<AppState>,
 ) -> Result<Response<axum::body::Body>, AppError> {
-    if Uuid::parse_str(&vm_id).is_err() {
-        return Ok((StatusCode::NOT_FOUND, "Not found").into_response());
-    }
-    let db_user = upsert_user(&state.db, &user.email).await?;
-    let Some(guest_ip) = find_vm_guest_ip_for_user(&state.vms, &vm_id, db_user.id)? else {
-        return Ok((StatusCode::NOT_FOUND, "Session not found or expired").into_response());
-    };
     let mut ssh_handle = connect_ssh(
-        guest_ip,
+        user_vm.guest_ip,
         &state.config.ssh_key_path,
         &state.config.ssh_user,
         &state.config.vm_host_key_path,

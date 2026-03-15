@@ -7,10 +7,12 @@
  * UF-38  Sidebar pulsing indicator stays        — shown on running session after navigating away
  * UF-39  Navigate back to running session       — status bar reappears
  * UF-40  Done fires while viewing new chat      — sidebar indicator clears, view unchanged
- * UF-41  Non-running session has active composer — can type when viewing a different session
+ * UF-41  Non-running session disables composer  — blocked while another session is streaming
  * UF-42  Click existing session mid-stream (null) — status bar disappears
  * UF-43  New Chat hides thinking indicator      — animated dots disappear when navigating away
  * UF-44  Navigate back shows thinking indicator — animated dots reappear when returning to running session
+ * UF-45  SSE events routed to running session   — text arrives in sess-a, not in viewed sess-b
+ * UF-46  Composer re-enables after done         — input active again once running session completes
  */
 import { test, expect } from "@playwright/test";
 import { setupApp, sendMessage, sse, makeSession } from "./helpers/setup";
@@ -163,7 +165,7 @@ test.describe("navigation during streaming", () => {
 
   // ── Cross-session navigation ───────────────────────────────────────────────
 
-  test("UF-41 viewing a non-running session gives an active composer during streaming", async ({
+  test("UF-41 viewing a non-running session disables the composer while another session is streaming", async ({
     page,
   }) => {
     const session = makeSession({ session_id: "sess-a", title: "Other Chat" });
@@ -176,9 +178,10 @@ test.describe("navigation during streaming", () => {
     // Switch to an existing session — it is not the running one
     await page.getByText("Other Chat").click();
 
-    // isLoading=false for this session → no status bar, composer is active
+    // isCurrentRunning=false for this session → no status bar
+    // isOtherRunning=true → composer is disabled to prevent cross-session routing
     await expect(page.getByRole("status")).not.toBeVisible();
-    await expect(page.getByPlaceholder("Message Claude…")).toBeEnabled();
+    await expect(page.getByPlaceholder("Message Claude…")).toBeDisabled();
   });
 
   test("UF-42 clicking an existing session while a null-session stream is pending hides the status bar", async ({
@@ -244,5 +247,57 @@ test.describe("navigation during streaming", () => {
     // Return to the running session — thinking indicator reappears
     await page.getByText("Running Session").click();
     await expect(page.locator(".thinking-dot").first()).toBeVisible();
+  });
+
+  // ── Cross-session isolation ────────────────────────────────────────────────
+
+  test("UF-45 SSE events during cross-session viewing route to the running session not the viewed one", async ({
+    page,
+  }) => {
+    const sessA = makeSession({ session_id: "sess-a", title: "Session A" });
+    const sessB = makeSession({ session_id: "sess-b", title: "Session B" });
+    const ctrl = await setupApp(page, { sessions: [sessA, sessB] });
+
+    // Start streaming from Session A
+    await page.getByText("Session A").click();
+    await sendMessage(page, "Question for A");
+    await expect(page.getByRole("status")).toBeVisible();
+
+    // Navigate to Session B while Session A is still streaming
+    await page.getByText("Session B").click();
+
+    // SSE events arrive (for Session A's request)
+    ctrl.setSessions([sessA, sessB]);
+    ctrl.sendSseEvents(sse.text("Answer for A", "sess-a"));
+
+    // Session B shows none of Session A's response
+    await expect(page.getByText("Answer for A")).not.toBeVisible();
+
+    // Navigate back to Session A — the response is there
+    await page.getByText("Session A").click();
+    await expect(page.getByText("Answer for A")).toBeVisible();
+  });
+
+  test("UF-46 composer re-enables after the running session completes while viewing a different session", async ({
+    page,
+  }) => {
+    const sessA = makeSession({ session_id: "sess-a", title: "Session A" });
+    const sessB = makeSession({ session_id: "sess-b", title: "Session B" });
+    const ctrl = await setupApp(page, { sessions: [sessA, sessB] });
+
+    // Start streaming from Session A
+    await page.getByText("Session A").click();
+    await sendMessage(page, "Question for A");
+
+    // Navigate to Session B — composer is disabled while Session A is running
+    await page.getByText("Session B").click();
+    await expect(page.getByPlaceholder("Message Claude…")).toBeDisabled();
+
+    // Session A's stream completes
+    ctrl.setSessions([sessA, sessB]);
+    ctrl.sendSseEvents(sse.text("Answer for A", "sess-a"));
+
+    // Composer in Session B re-enables now that no session is running
+    await expect(page.getByPlaceholder("Message Claude…")).toBeEnabled();
   });
 });

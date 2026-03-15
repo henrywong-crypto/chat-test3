@@ -237,12 +237,13 @@ export default function ChatInterface({ sessions, setSessions, selectedSession, 
 
   const messages = getMessages(viewSessionId);
   const pendingQuestion = getSessionPendingQuestion(viewSessionId);
-  const isLoading = isStreaming && runningSessionId === viewSessionId && !nullOrphaned;
+  const isCurrentRunning = isStreaming && runningSessionId === viewSessionId && !nullOrphaned;
+  const isOtherRunning = isStreaming && runningSessionId !== viewSessionId && !nullOrphaned;
 
   return (
     <div className="flex min-h-0 flex-1 flex-col">
-      <ChatMessagesPane messages={messages} isLoading={isLoading} />
-      <ClaudeStatus isLoading={isLoading} onAbort={handleStop} />
+      <ChatMessagesPane messages={messages} isLoading={isCurrentRunning} />
+      <ClaudeStatus isLoading={isCurrentRunning} onAbort={handleStop} />
       {pendingQuestion ? (
         <div className="flex-shrink-0 border-t border-border p-4">
           <div className="mx-auto max-w-3xl">
@@ -255,7 +256,8 @@ export default function ChatInterface({ sessions, setSessions, selectedSession, 
         </div>
       ) : (
         <ChatComposer
-          isLoading={isLoading}
+          isLoading={isCurrentRunning}
+          isOtherRunning={isOtherRunning}
           onSend={handleSend}
           onStop={handleStop}
         />

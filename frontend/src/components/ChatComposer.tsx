@@ -4,6 +4,7 @@ import { useSse } from "../contexts/SseContext";
 
 interface ChatComposerProps {
   isLoading: boolean;
+  isOtherRunning?: boolean;
   onSend: (text: string) => void;
   onStop: () => void;
 }
@@ -33,7 +34,7 @@ const SLASH_COMMANDS: SlashCommand[] = [
   { name: "/vim",         description: "Enter vim mode" },
 ];
 
-export default function ChatComposer({ isLoading, onSend, onStop }: ChatComposerProps) {
+export default function ChatComposer({ isLoading, isOtherRunning, onSend, onStop }: ChatComposerProps) {
   const { uploadAction, csrfToken, uploadDir } = useSse();
 
   const [input, setInput] = useState("");
@@ -62,7 +63,7 @@ export default function ChatComposer({ isLoading, onSend, onStop }: ChatComposer
   const handleSend = useCallback(async () => {
     const text = input.trim();
     if (!text && pendingFiles.length === 0) return;
-    if (isLoading || uploading) return;
+    if (blocked || uploading) return;
 
     let finalText = text;
 
@@ -93,7 +94,7 @@ export default function ChatComposer({ isLoading, onSend, onStop }: ChatComposer
     setSlashMenuOpen(false);
     if (textareaRef.current) textareaRef.current.style.height = "auto";
     onSend(finalText);
-  }, [input, isLoading, uploading, pendingFiles, uploadAction, csrfToken, uploadDir, onSend]);
+  }, [input, blocked, uploading, pendingFiles, uploadAction, csrfToken, uploadDir, onSend]);
 
   const selectCommand = useCallback((cmd: SlashCommand) => {
     setInput(cmd.name + " ");
@@ -146,6 +147,7 @@ export default function ChatComposer({ isLoading, onSend, onStop }: ChatComposer
 
   const menuVisible = slashMenuOpen && filteredCommands.length > 0;
   const busy = isLoading || uploading;
+  const blocked = busy || (isOtherRunning ?? false);
 
   return (
     <div className="flex-shrink-0 border-t border-border bg-card/60 px-3 pb-3 pt-2">
@@ -201,7 +203,7 @@ export default function ChatComposer({ isLoading, onSend, onStop }: ChatComposer
               type="button"
               title="Attach file"
               onClick={() => fileInputRef.current?.click()}
-              disabled={busy}
+              disabled={blocked}
               className="mb-1 flex h-7 w-7 flex-shrink-0 items-center justify-center rounded-lg text-muted-foreground hover:bg-accent hover:text-foreground disabled:opacity-40"
             >
               <Paperclip className="h-4 w-4" />
@@ -220,7 +222,7 @@ export default function ChatComposer({ isLoading, onSend, onStop }: ChatComposer
               onInput={handleInput}
               onKeyDown={handleKeyDown}
               placeholder="Message Claude…"
-              disabled={busy}
+              disabled={blocked}
               rows={1}
               className="max-h-[260px] min-h-[36px] flex-1 resize-none bg-transparent py-1 text-sm text-foreground placeholder-muted-foreground/50 focus:outline-none disabled:opacity-60"
               style={{ height: "36px" }}
@@ -243,7 +245,7 @@ export default function ChatComposer({ isLoading, onSend, onStop }: ChatComposer
               <button
                 type="button"
                 onClick={handleSend}
-                disabled={!input.trim() && pendingFiles.length === 0}
+                disabled={blocked || (!input.trim() && pendingFiles.length === 0)}
                 title="Send"
                 className="mb-1 flex h-8 w-8 flex-shrink-0 items-center justify-center rounded-xl bg-primary text-primary-foreground hover:opacity-90 disabled:bg-muted disabled:text-muted-foreground"
               >

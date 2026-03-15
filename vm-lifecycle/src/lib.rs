@@ -38,7 +38,6 @@ pub type VmRegistry = Arc<Mutex<HashMap<String, VmEntry>>>;
 pub struct VmEntry {
     pub user_id: Uuid,
     pub has_iam_creds: bool,
-    pub created_at: Instant,
-    pub ws_connected: bool,
+    pub last_activity: Instant,
     pub vm: Vm,
 }
