@@ -50,7 +50,33 @@ export function SseProvider({ children }: { children: React.ReactNode }) {
     const es = new EventSource(`/sessions/${vmId}/chat-stream`);
     esRef.current = es;
 
-    es.onopen = () => setIsConnected(true);
+    es.onopen = () => {
+      setIsConnected(true);
+      const storageKey = `chat_running_task_${vmId}`;
+      const saved = localStorage.getItem(storageKey);
+      if (saved) {
+        try {
+          const parsed = JSON.parse(saved) as { task_id?: string; running_session_id?: string | null };
+          if (parsed.task_id) {
+            fetch(`/sessions/${vmId}/chat-hello`, {
+              method: "POST",
+              headers: { "Content-Type": "application/json" },
+              body: JSON.stringify({ task_id: parsed.task_id, csrf_token: csrfToken }),
+            }).catch(console.error);
+            flushSync(() =>
+              setLatestEvent({
+                type: "reconnecting",
+                payload: { task_id: parsed.task_id!, running_session_id: parsed.running_session_id ?? null },
+              })
+            );
+          } else {
+            localStorage.removeItem(storageKey);
+          }
+        } catch {
+          localStorage.removeItem(storageKey);
+        }
+      }
+    };
 
     es.onerror = () => {
       if (es.readyState === EventSource.CLOSED) {
@@ -92,10 +118,12 @@ export function SseProvider({ children }: { children: React.ReactNode }) {
     });
 
     addListener("done", (e) => {
+      localStorage.removeItem(`chat_running_task_${vmId}`);
       flushSync(() => setLatestEvent({ type: "done", payload: JSON.parse(e.data) }));
     });
 
     addListener("error_event", (e) => {
+      localStorage.removeItem(`chat_running_task_${vmId}`);
       flushSync(() => setLatestEvent({ type: "error_event", payload: JSON.parse(e.data) }));
     });
 

@@ -129,7 +129,7 @@ export default function ChatInterface({ sessions, setSessions, selectedSession, 
 
   // Wire SSE events to chat state
   useSseHandlers(
-    { latestEvent: sseCtx.latestEvent, loadHistory, newChatKeyRef, sessionStartKeyRef },
+    { latestEvent: sseCtx.latestEvent, loadHistory, newChatKeyRef, sessionStartKeyRef, vmId: sseCtx.vmId },
     { ...chatState, setSessions },
   );
 

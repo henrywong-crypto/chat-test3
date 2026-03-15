@@ -85,7 +85,8 @@ def handle_hello(msg: dict, writer: asyncio.StreamWriter) -> None:
         return
     session = _sessions.get(task_id)
     if not session:
-        log(f"hello for unknown session {task_id!r}")
+        log(f"hello for unknown session {task_id!r}, notifying client")
+        write_sse(writer, "done", {"session_id": None, "task_id": task_id})
         return
     log(f"client rebound to session {task_id!r}")
     session.writer = writer

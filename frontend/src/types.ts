@@ -99,6 +99,11 @@ export interface SseErrorEvent {
   message: string;
 }
 
+export interface SseReconnecting {
+  task_id: string;
+  running_session_id: string | null;
+}
+
 export type SseEvent =
   | { type: "session_start"; payload: SseSessionStart }
   | { type: "init" }
@@ -108,7 +113,8 @@ export type SseEvent =
   | { type: "ask_user_question"; payload: SseAskUserQuestion }
   | { type: "tool_result"; payload: SseToolResult }
   | { type: "done"; payload: SseDone }
-  | { type: "error_event"; payload: SseErrorEvent };
+  | { type: "error_event"; payload: SseErrorEvent }
+  | { type: "reconnecting"; payload: SseReconnecting };
 
 export interface FileEntry {
   name: string;

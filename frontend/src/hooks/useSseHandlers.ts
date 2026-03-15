@@ -7,13 +7,14 @@ interface SseHandlerDeps {
   loadHistory: () => Promise<import("../types").ChatSession[]>;
   newChatKeyRef: { current: number };
   sessionStartKeyRef: { current: number };
+  vmId: string;
 }
 
 export function useSseHandlers(
   sseState: SseHandlerDeps,
   chatState: ChatStateResult & { setSessions: (s: import("../types").ChatSession[]) => void },
 ) {
-  const { latestEvent, loadHistory, newChatKeyRef, sessionStartKeyRef } = sseState;
+  const { latestEvent, loadHistory, newChatKeyRef, sessionStartKeyRef, vmId } = sseState;
   const {
     viewSessionId,
     runningSessionId,
@@ -75,6 +76,18 @@ export function useSseHandlers(
       case "session_start": {
         const { task_id } = event.payload;
         setTaskId(session, task_id);
+        const storageKey = `chat_running_task_${vmId}`;
+        const saved = localStorage.getItem(storageKey);
+        if (saved) {
+          try {
+            const parsed = JSON.parse(saved) as { running_session_id?: string | null };
+            localStorage.setItem(storageKey, JSON.stringify({ task_id, running_session_id: parsed.running_session_id ?? session }));
+          } catch {
+            localStorage.setItem(storageKey, JSON.stringify({ task_id, running_session_id: session }));
+          }
+        } else {
+          localStorage.setItem(storageKey, JSON.stringify({ task_id, running_session_id: session }));
+        }
         break;
       }
 
@@ -215,6 +228,15 @@ export function useSseHandlers(
             timestamp: Date.now(),
           });
         }
+        break;
+      }
+
+      case "reconnecting": {
+        const { task_id, running_session_id } = event.payload;
+        setTaskId(running_session_id, task_id);
+        setRunningSessionId(running_session_id);
+        setIsStreaming(true);
+        setViewSessionId(running_session_id);
         break;
       }
     }

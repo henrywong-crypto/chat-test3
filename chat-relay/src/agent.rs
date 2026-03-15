@@ -25,6 +25,9 @@ const HEARTBEAT_SECS: u64 = 60;
 const SEND_TIMEOUT_SECS: u64 = 30;
 
 pub enum AgentMessage {
+    Hello {
+        task_id: String,
+    },
     Query {
         content: String,
         session_id: Option<String>,
@@ -143,6 +146,13 @@ async fn run_relay(
                         info!("inbound channel closed, ending relay");
                         break;
                     }
+                    Some(AgentMessage::Hello { task_id }) => {
+                        info!("sending hello to agent  task_id={task_id}");
+                        let payload = build_hello_payload(&task_id)?;
+                        let line = format!("{payload}\n");
+                        ssh_channel.data(Bytes::from(line).as_ref()).await?;
+                        info!("hello sent to agent");
+                    }
                     Some(AgentMessage::Query { content, session_id }) => {
                         info!("sending query to agent  content_len={}", content.len());
                         let payload = build_query_payload(&content, session_id.as_deref())?;
@@ -221,6 +231,21 @@ async fn run_relay(
     }
     info!("agent relay ended");
     Ok(())
+}
+
+#[derive(Serialize)]
+struct HelloPayload<'a> {
+    #[serde(rename = "type")]
+    type_: &'a str,
+    task_id: &'a str,
+}
+
+fn build_hello_payload(task_id: &str) -> Result<String> {
+    let hello_payload = HelloPayload {
+        type_: "hello",
+        task_id,
+    };
+    Ok(serde_json::to_string(&hello_payload)?)
 }
 
 #[derive(Serialize)]

@@ -10,14 +10,12 @@ use chat_relay::{AgentMessage, start_agent_relay};
 use futures::StreamExt;
 use serde::Deserialize;
 use std::{convert::Infallible, time::Duration};
-use store::upsert_user;
 use tokio::{sync::mpsc, time::timeout};
 use tower_sessions::Session;
 use tracing::{error, info};
 use uuid::Uuid;
 
 use crate::{
-    auth::User,
     handlers::UserVm,
     state::{AppError, AppState, mark_vm_ws_connected},
 };
@@ -73,23 +71,12 @@ impl FromRequestParts<AppState> for VerifiedVmSender {
     type Rejection = Response;
 
     async fn from_request_parts(parts: &mut Parts, state: &AppState) -> Result<Self, Self::Rejection> {
-        let user = User::from_request_parts(parts, state).await
-            .map_err(IntoResponse::into_response)?;
+        UserVm::from_request_parts(parts, state).await?;
         let Path(vm_id) = Path::<String>::from_request_parts(parts, state).await
             .map_err(IntoResponse::into_response)?;
         if Uuid::parse_str(&vm_id).is_err() {
             return Err((StatusCode::NOT_FOUND, "Not found").into_response());
         }
-        let db_user = upsert_user(&state.db, &user.email).await.map_err(|e| {
-            error!("db error: {e}");
-            (StatusCode::INTERNAL_SERVER_ERROR, "An internal error occurred").into_response()
-        })?;
-        if find_user_vm(&state.vms, db_user.id).map_err(|e| {
-            error!("vm registry error: {e}");
-            (StatusCode::INTERNAL_SERVER_ERROR, "An internal error occurred").into_response()
-        })?.is_none() {
-            return Err((StatusCode::NOT_FOUND, "VM not found").into_response());
-        };
         let Some(agent_tx) = find_agent_sender(state, &vm_id) else {
             info!("no active chat stream");
             return Err((StatusCode::NOT_FOUND, "No active chat stream").into_response());
@@ -113,6 +100,29 @@ async fn forward_agent_message(
             Err((StatusCode::SERVICE_UNAVAILABLE, "Agent not available").into_response())
         }
     }
+}
+
+#[derive(Deserialize)]
+pub(crate) struct HelloBody {
+    task_id: String,
+    csrf_token: String,
+}
+
+pub(crate) async fn handle_chat_hello(
+    VerifiedVmSender(agent_tx): VerifiedVmSender,
+    session: Session,
+    Json(body): Json<HelloBody>,
+) -> Response {
+    if !validate_csrf(&session, &body.csrf_token).await {
+        return (StatusCode::FORBIDDEN, "Forbidden").into_response();
+    }
+    let task_id = body.task_id.clone();
+    let agent_message = AgentMessage::Hello { task_id: body.task_id };
+    if let Err(response) = forward_agent_message(agent_tx, agent_message).await {
+        return response;
+    }
+    info!("hello forwarded  task_id={task_id}");
+    (StatusCode::OK, "").into_response()
 }
 
 #[derive(Deserialize)]
