@@ -40,7 +40,20 @@ function readAppConfig(): {
 
 export function SseProvider({ children }: { children: React.ReactNode }) {
   const config = useRef(readAppConfig());
-  const { vmId, csrfToken, uploadDir, uploadAction, hasUserRootfs } = config.current;
+  const { vmId, uploadDir, uploadAction, hasUserRootfs } = config.current;
+
+  // csrfToken is rotated by the server after every validated POST/DELETE.
+  // Keep a ref for synchronous access in callbacks and state for reactive consumers.
+  const csrfTokenRef = useRef(config.current.csrfToken);
+  const [csrfToken, setCsrfToken] = useState(config.current.csrfToken);
+
+  const refreshCsrfToken = useCallback((res: Response) => {
+    const newToken = res.headers.get("x-csrf-token");
+    if (newToken) {
+      csrfTokenRef.current = newToken;
+      setCsrfToken(newToken);
+    }
+  }, []);
 
   const [latestEvent, setLatestEvent] = useState<SseEvent | null>(null);
   const [isConnected, setIsConnected] = useState(false);
@@ -61,7 +74,7 @@ export function SseProvider({ children }: { children: React.ReactNode }) {
             fetch(`/sessions/${vmId}/chat-hello`, {
               method: "POST",
               headers: { "Content-Type": "application/json" },
-              body: JSON.stringify({ task_id: parsed.task_id, csrf_token: csrfToken }),
+              body: JSON.stringify({ task_id: parsed.task_id, csrf_token: csrfTokenRef.current }),
             }).catch(console.error);
             flushSync(() =>
               setLatestEvent({
@@ -136,13 +149,14 @@ export function SseProvider({ children }: { children: React.ReactNode }) {
     const res = await fetch(path, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ ...body, csrf_token: csrfToken }),
+      body: JSON.stringify({ ...body, csrf_token: csrfTokenRef.current }),
     });
     if (!res.ok) {
       const msg = await res.text();
       throw new Error(msg || `HTTP ${res.status}`);
     }
-  }, [csrfToken]);
+    refreshCsrfToken(res);
+  }, [refreshCsrfToken]);
 
   const sendQuery = useCallback(async (content: string, sessionId: string | null) => {
     await post(`/sessions/${vmId}/chat`, { content, session_id: sessionId });
@@ -178,10 +192,11 @@ export function SseProvider({ children }: { children: React.ReactNode }) {
     const res = await fetch(`/sessions/${vmId}/chat-transcript`, {
       method: "DELETE",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ csrf_token: csrfToken, session_id: sessionId, project_dir: projectDir }),
+      body: JSON.stringify({ csrf_token: csrfTokenRef.current, session_id: sessionId, project_dir: projectDir }),
     });
     if (!res.ok) throw new Error(`HTTP ${res.status}`);
-  }, [vmId, csrfToken]);
+    refreshCsrfToken(res);
+  }, [vmId, refreshCsrfToken]);
 
   const listFiles = useCallback(async (path: string): Promise<FileEntry[]> => {
     const res = await fetch(`/sessions/${vmId}/ls?path=${encodeURIComponent(path)}`);
