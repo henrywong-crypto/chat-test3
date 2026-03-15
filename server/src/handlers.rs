@@ -36,6 +36,7 @@ use crate::{
 };
 
 const LOCK_TIMEOUT_SECS: u64 = 30;
+const SFTP_OP_TIMEOUT_SECS: u64 = 30;
 
 #[derive(Deserialize)]
 pub(crate) struct CsrfForm {
@@ -415,15 +416,26 @@ async fn write_chat_file_via_sftp(
     reader: &mut (impl AsyncRead + Unpin),
 ) -> Result<()> {
     let path_str = path.to_str().context("chat upload path is not valid UTF-8")?;
-    let mut file = sftp
-        .create(path_str)
-        .await
-        .map_err(|e| anyhow!("sftp create: {e}"))?;
-    tokio::io::copy(reader, &mut file)
-        .await
-        .context("failed to write chat file via sftp")?;
-    file.shutdown()
-        .await
-        .map_err(|e| anyhow!("sftp shutdown: {e}"))?;
+    let mut file = timeout(
+        Duration::from_secs(SFTP_OP_TIMEOUT_SECS),
+        sftp.create(path_str),
+    )
+    .await
+    .context("sftp create timed out")?
+    .map_err(|e| anyhow!("sftp create: {e}"))?;
+    timeout(
+        Duration::from_secs(SFTP_OP_TIMEOUT_SECS),
+        tokio::io::copy(reader, &mut file),
+    )
+    .await
+    .context("sftp write timed out")?
+    .context("failed to write chat file via sftp")?;
+    timeout(
+        Duration::from_secs(SFTP_OP_TIMEOUT_SECS),
+        file.shutdown(),
+    )
+    .await
+    .context("sftp shutdown timed out")?
+    .map_err(|e| anyhow!("sftp shutdown: {e}"))?;
     Ok(())
 }

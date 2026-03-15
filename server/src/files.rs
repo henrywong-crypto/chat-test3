@@ -9,12 +9,18 @@ use russh_sftp::client::{SftpSession, fs::DirEntry};
 use serde::{Deserialize, Serialize};
 use sftp_client::open_sftp_session;
 use ssh_client::connect_ssh;
-use std::path::{Path as StdPath, PathBuf};
+use std::{
+    path::{Path as StdPath, PathBuf},
+    time::Duration,
+};
+use tokio::time::timeout;
 
 use crate::{
     handlers::UserVm,
     state::{AppError, AppState},
 };
+
+const SFTP_OP_TIMEOUT_SECS: u64 = 30;
 
 #[derive(Deserialize)]
 pub(crate) struct ListQuery {
@@ -47,19 +53,26 @@ pub(crate) async fn list_files_handler(
     .await?;
     let sftp = open_sftp_session(&mut ssh_handle).await?;
     let real_path = PathBuf::from(
-        sftp.canonicalize(&query.path)
-            .await
-            .context("failed to resolve remote path")?,
+        timeout(
+            Duration::from_secs(SFTP_OP_TIMEOUT_SECS),
+            sftp.canonicalize(&query.path),
+        )
+        .await
+        .context("canonicalize timed out")?
+        .context("failed to resolve remote path")?,
     );
     validate_within_dir(&real_path, &PathBuf::from(&state.config.upload_dir))?;
     let real_path_str = real_path
         .to_str()
         .context("resolved path is not valid UTF-8")?
         .to_owned();
-    let read_dir = sftp
-        .read_dir(&real_path_str)
-        .await
-        .context("failed to read remote directory")?;
+    let read_dir = timeout(
+        Duration::from_secs(SFTP_OP_TIMEOUT_SECS),
+        sftp.read_dir(&real_path_str),
+    )
+    .await
+    .context("read_dir timed out")?
+    .context("failed to read remote directory")?;
     let entries = collect_file_entries(&sftp, &real_path, read_dir.collect()).await?;
     Ok(Json(ListResponse { entries }).into_response())
 }
@@ -84,10 +97,14 @@ async fn collect_file_entries(
             let child_str = child_path
                 .to_str()
                 .context("child path is not valid UTF-8")?;
-            sftp.symlink_metadata(child_str)
-                .await
-                .map(|m| m.file_type().is_dir())
-                .context("failed to stat directory entry")?
+            timeout(
+                Duration::from_secs(SFTP_OP_TIMEOUT_SECS),
+                sftp.symlink_metadata(child_str),
+            )
+            .await
+            .context("symlink_metadata timed out")?
+            .map(|m| m.file_type().is_dir())
+            .context("failed to stat directory entry")?
         };
         let size = metadata.size.context("missing file size")?;
         let file_entry = FileEntry { name, is_dir, size };

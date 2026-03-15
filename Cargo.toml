@@ -2,6 +2,7 @@
 members = [
     "chat-settings",
     "server",
+    "sftp-client",
     "ssh-client",
     "vm-lifecycle",
 ]

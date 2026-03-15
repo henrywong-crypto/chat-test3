@@ -142,7 +142,19 @@ async fn relay_ws_to_ssh(
     ws_sender: &mut SplitSink<WebSocket, Message>,
 ) -> bool {
     match msg {
-        Some(Ok(Message::Binary(data))) => ssh_channel.data(&data[..]).await.is_ok(),
+        Some(Ok(Message::Binary(data))) => {
+            match timeout(Duration::from_secs(SEND_TIMEOUT_SECS), ssh_channel.data(&data[..])).await {
+                Ok(Ok(())) => true,
+                Ok(Err(_)) => {
+                    info!("ssh channel closed, ending relay");
+                    false
+                }
+                Err(_) => {
+                    error!("ssh channel send timed out, consumer likely stuck");
+                    false
+                }
+            }
+        }
         Some(Ok(Message::Text(text))) => {
             handle_resize_message(ssh_channel, &text)
                 .await
@@ -198,7 +210,13 @@ async fn handle_resize_message(ssh_channel: &mut Channel<Msg>, text: &str) -> Re
                 .context("missing rows in resize message")?,
         )
         .context("rows out of u32 range")?;
-        ssh_channel.window_change(cols, rows, 0, 0).await?;
+        timeout(
+            Duration::from_secs(SEND_TIMEOUT_SECS),
+            ssh_channel.window_change(cols, rows, 0, 0),
+        )
+        .await
+        .context("window_change timed out")?
+        .context("window_change failed")?;
     }
     Ok(())
 }

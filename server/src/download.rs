@@ -8,12 +8,15 @@ use download::{file::build_streaming_file_response, zip::build_streaming_zip_res
 use serde::Deserialize;
 use sftp_client::open_sftp_session;
 use ssh_client::connect_ssh;
-use std::path::PathBuf;
+use std::{path::PathBuf, time::Duration};
+use tokio::time::timeout;
 
 use crate::{
     handlers::UserVm,
     state::{AppError, AppState},
 };
+
+const SFTP_OP_TIMEOUT_SECS: u64 = 30;
 
 #[derive(Deserialize)]
 pub(crate) struct DownloadQuery {
@@ -34,9 +37,13 @@ pub(crate) async fn download_file_handler(
     .await?;
     let sftp = open_sftp_session(&mut ssh_handle).await?;
     let real_path = PathBuf::from(
-        sftp.canonicalize(&query.path)
-            .await
-            .context("failed to resolve remote path")?,
+        timeout(
+            Duration::from_secs(SFTP_OP_TIMEOUT_SECS),
+            sftp.canonicalize(&query.path),
+        )
+        .await
+        .context("canonicalize timed out")?
+        .context("failed to resolve remote path")?,
     );
     let upload_dir = PathBuf::from(&state.config.upload_dir);
     validate_within_dir(&real_path, &upload_dir)?;
@@ -44,10 +51,13 @@ pub(crate) async fn download_file_handler(
         .to_str()
         .context("resolved path is not valid UTF-8")?
         .to_owned();
-    let metadata = sftp
-        .symlink_metadata(&real_path_str)
-        .await
-        .context("failed to stat remote path")?;
+    let metadata = timeout(
+        Duration::from_secs(SFTP_OP_TIMEOUT_SECS),
+        sftp.symlink_metadata(&real_path_str),
+    )
+    .await
+    .context("symlink_metadata timed out")?
+    .context("failed to stat remote path")?;
     if metadata.is_dir() {
         let dirname = real_path
             .file_name()
