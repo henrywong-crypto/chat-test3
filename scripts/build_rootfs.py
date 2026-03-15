@@ -237,6 +237,12 @@ def prepare_rootfs(rootfs: Path) -> None:
     (rootfs / "var/log/apt").mkdir(parents=True, exist_ok=True)
     (rootfs / "etc/logrotate.d/agent").write_text(LOGROTATE_CONF)
 
+    # Allow direct-streamlocal (Unix domain socket forwarding) so the relay can
+    # open a channel to /tmp/agent.sock without exec'ing a proxy process.
+    sshd_config_d = rootfs / "etc/ssh/sshd_config.d"
+    sshd_config_d.mkdir(parents=True, exist_ok=True)
+    (sshd_config_d / "50-agent.conf").write_text("StreamLocalForwarding yes\n")
+
 
 def mount_binds(rootfs: Path) -> list[Path]:
     # Replace any symlink at etc/resolv.conf with a plain file so the bind
