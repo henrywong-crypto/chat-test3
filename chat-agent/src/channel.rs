@@ -30,7 +30,7 @@ pub async fn send_agent_message(
     vm_host_key_path: &Path,
     message: &AgentMessage,
 ) -> Result<()> {
-    let (_ssh_handle, mut ssh_channel) =
+    let (_ssh_handle, ssh_channel) =
         connect_ssh_and_open_channel(guest_ip, ssh_key_path, ssh_user, vm_host_key_path).await?;
     let line = format!(
         "{}\n",

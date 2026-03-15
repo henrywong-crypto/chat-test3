@@ -41,7 +41,7 @@ pub(crate) async fn handle_chat_stream(
         .map_err(AppError::from)
 }
 
-async fn forward_agent_message(
+async fn dispatch_agent_message(
     user_vm: &UserVmById,
     state: &AppState,
     message: &AgentMessage,
@@ -90,7 +90,7 @@ pub(crate) async fn handle_chat_query(
         session_id: body.session_id,
         work_dir: body.work_dir,
     };
-    if let Err(response) = forward_agent_message(&user_vm, &state, &agent_message).await {
+    if let Err(response) = dispatch_agent_message(&user_vm, &state, &agent_message).await {
         return response;
     }
     info!("query forwarded  task_id={task_id}  content_len={content_len}");
@@ -121,7 +121,7 @@ pub(crate) async fn handle_chat_question_answer(
         request_id: body.request_id,
         answers: body.answers,
     };
-    if let Err(response) = forward_agent_message(&user_vm, &state, &agent_message).await {
+    if let Err(response) = dispatch_agent_message(&user_vm, &state, &agent_message).await {
         return response;
     }
     info!("question answer forwarded  request_id={request_id}");
@@ -144,7 +144,7 @@ pub(crate) async fn handle_chat_stop(
         return (StatusCode::FORBIDDEN, "Forbidden").into_response();
     };
     let agent_message = AgentMessage::Interrupt { task_id: body.task_id };
-    if let Err(response) = forward_agent_message(&user_vm, &state, &agent_message).await {
+    if let Err(response) = dispatch_agent_message(&user_vm, &state, &agent_message).await {
         return response;
     }
     info!("interrupt forwarded");
@@ -167,7 +167,7 @@ pub(crate) async fn handle_chat_hello(
         return (StatusCode::FORBIDDEN, "Forbidden").into_response();
     };
     let agent_message = AgentMessage::Hello { task_id: body.task_id };
-    if let Err(response) = forward_agent_message(&user_vm, &state, &agent_message).await {
+    if let Err(response) = dispatch_agent_message(&user_vm, &state, &agent_message).await {
         return response;
     }
     attach_csrf_token((StatusCode::OK, "").into_response(), &csrf_token)
