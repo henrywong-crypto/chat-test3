@@ -3,7 +3,7 @@ use axum::{
     http::StatusCode,
     response::{IntoResponse, Response},
 };
-use chat_relay::AgentMessage;
+use chat_relay::VmRelayHandle;
 use config::{Config, Environment, File};
 use serde::Deserialize;
 use std::{
@@ -14,7 +14,7 @@ use std::{
     time::Instant,
 };
 use store::PgPool;
-use tokio::sync::{Mutex as AsyncMutex, mpsc};
+use tokio::sync::Mutex as AsyncMutex;
 use tracing::error;
 use uuid::Uuid;
 use vm_lifecycle::{VmBuildConfig, VmRegistry};
@@ -199,7 +199,7 @@ pub(crate) struct AppState {
     pub(crate) db: PgPool,
     pub(crate) vms: VmRegistry,
     pub(crate) rootfs_lock: Arc<AsyncMutex<()>>,
-    pub(crate) chat_senders: Arc<Mutex<HashMap<String, mpsc::Sender<AgentMessage>>>>,
+    pub(crate) vm_relays: Arc<Mutex<HashMap<String, VmRelayHandle>>>,
     pub(crate) static_assets: Arc<StaticAssets>,
 }
 
@@ -210,7 +210,7 @@ impl AppState {
             db: pg_pool,
             vms: Arc::new(Mutex::new(HashMap::new())),
             rootfs_lock: Arc::new(AsyncMutex::new(())),
-            chat_senders: Arc::new(Mutex::new(HashMap::new())),
+            vm_relays: Arc::new(Mutex::new(HashMap::new())),
             static_assets: Arc::new(static_assets),
         }
     }

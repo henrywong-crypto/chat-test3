@@ -8,6 +8,7 @@ use std::{
     net::Ipv4Addr,
     path::{Path, PathBuf},
     str::from_utf8,
+    sync::{Arc, Mutex},
 };
 use tokio::{
     sync::mpsc,
@@ -38,29 +39,60 @@ pub enum AgentMessage {
     },
 }
 
-pub fn start_agent_relay(
+// One relay per VM: a single persistent SSH connection runs connector.py and forwards
+// messages between the inbound channel (fed by POST handlers) and the SSE output channel
+// (consumed by the browser). The relay task outlives individual SSE connections — when
+// the browser disconnects and reconnects, register_sse_subscriber swaps in a fresh output
+// channel without restarting connector.py. The relay task exits only when the inbound
+// channel is dropped (VM removed) or the SSH connection closes.
+#[derive(Clone)]
+pub struct VmRelayHandle {
+    inbound_tx: mpsc::Sender<AgentMessage>,
+    sse_output: Arc<Mutex<Option<mpsc::Sender<Bytes>>>>,
+}
+
+impl VmRelayHandle {
+    pub fn is_alive(&self) -> bool {
+        !self.inbound_tx.is_closed()
+    }
+
+    pub fn register_sse_subscriber(&self) -> impl Stream<Item = Bytes> + use<> {
+        let (tx, rx) = mpsc::channel::<Bytes>(1);
+        *self.sse_output.lock().unwrap() = Some(tx);
+        ReceiverStream::new(rx)
+    }
+
+    pub fn inbound_tx(&self) -> &mpsc::Sender<AgentMessage> {
+        &self.inbound_tx
+    }
+}
+
+pub fn start_vm_relay(
     guest_ip: Ipv4Addr,
     ssh_key_path: &Path,
     ssh_user: &str,
     vm_host_key_path: &Path,
-    // owned: tokio::spawn requires 'static and Receiver must be consumed to call recv
-    inbound: mpsc::Receiver<AgentMessage>,
-) -> impl Stream<Item = Bytes> + use<> {
-    let (tx, rx) = mpsc::channel::<Bytes>(1);
+) -> VmRelayHandle {
+    let (inbound_tx, inbound_rx) = mpsc::channel::<AgentMessage>(4);
+    let sse_output: Arc<Mutex<Option<mpsc::Sender<Bytes>>>> = Arc::new(Mutex::new(None));
     let ssh_key_path = ssh_key_path.to_owned();
     let ssh_user = ssh_user.to_owned();
     let vm_host_key_path = vm_host_key_path.to_owned();
-    // The relay runs as an independent background task rather than a lazy stream.
-    // This matters because the caller returns ReceiverStream as an SSE response body,
-    // which Axum polls only when the client is reading. If the relay were driven by
-    // polling, it would stall whenever the client paused. By spawning, the relay runs
-    // continuously: it reads inbound messages from POST handlers and forwards SSH output
-    // to the SSE body regardless of how fast the client consumes it. The task exits
-    // naturally when the SSH channel closes or when tx.send fails (SSE connection dropped).
+    let relay_sse_output = sse_output.clone();
     tokio::spawn(async move {
-        run_agent_relay(guest_ip, ssh_key_path, ssh_user, vm_host_key_path, inbound, tx).await
+        run_agent_relay(guest_ip, ssh_key_path, ssh_user, vm_host_key_path, inbound_rx, relay_sse_output).await
     });
-    ReceiverStream::new(rx)
+    VmRelayHandle { inbound_tx, sse_output }
+}
+
+fn take_live_sse_sender(sse_output: &Mutex<Option<mpsc::Sender<Bytes>>>) -> Option<mpsc::Sender<Bytes>> {
+    let mut guard = sse_output.lock().unwrap();
+    let sender = guard.as_ref()?;
+    if sender.is_closed() {
+        *guard = None;
+        return None;
+    }
+    Some(sender.clone())
 }
 
 async fn run_agent_relay(
@@ -69,28 +101,29 @@ async fn run_agent_relay(
     ssh_user: String,
     vm_host_key_path: PathBuf,
     inbound: mpsc::Receiver<AgentMessage>,
-    tx: mpsc::Sender<Bytes>,
+    sse_output: Arc<Mutex<Option<mpsc::Sender<Bytes>>>>,
 ) {
-    let heartbeat_tx = tx.clone();
+    let heartbeat_sse_output = sse_output.clone();
     let heartbeat_task = tokio::spawn(async move {
-        let mut interval = interval(Duration::from_secs(HEARTBEAT_SECS));
-        interval.tick().await;
+        let mut heartbeat_interval = interval(Duration::from_secs(HEARTBEAT_SECS));
+        heartbeat_interval.tick().await;
         loop {
-            interval.tick().await;
+            heartbeat_interval.tick().await;
+            let Some(tx) = take_live_sse_sender(&heartbeat_sse_output) else {
+                continue;
+            };
             match timeout(
                 Duration::from_secs(SEND_TIMEOUT_SECS),
-                heartbeat_tx.send(Bytes::from_static(b": keep-alive\n\n")),
+                tx.send(Bytes::from_static(b": keep-alive\n\n")),
             )
             .await
             {
                 Ok(Ok(())) => {}
                 Ok(Err(_)) => {
-                    info!("sse receiver dropped during startup heartbeat, ending");
-                    break;
+                    info!("sse receiver dropped during startup heartbeat");
                 }
                 Err(_) => {
                     error!("startup heartbeat send timed out, sse consumer likely stuck");
-                    break;
                 }
             }
         }
@@ -101,7 +134,7 @@ async fn run_agent_relay(
         ssh_user,
         vm_host_key_path,
         inbound,
-        tx.clone(),
+        sse_output.clone(),
     )
     .await;
     heartbeat_task.abort();
@@ -111,11 +144,13 @@ async fn run_agent_relay(
             "event: error_event\ndata: {}\n\n",
             serde_json::to_string(&error_payload).unwrap_or_default()
         );
-        let _ = timeout(
-            Duration::from_secs(SEND_TIMEOUT_SECS),
-            tx.send(Bytes::from(error_event)),
-        )
-        .await;
+        if let Some(tx) = take_live_sse_sender(&sse_output) {
+            let _ = timeout(
+                Duration::from_secs(SEND_TIMEOUT_SECS),
+                tx.send(Bytes::from(error_event)),
+            )
+            .await;
+        }
     }
 }
 
@@ -125,19 +160,19 @@ async fn connect_agent_relay(
     ssh_user: String,
     vm_host_key_path: PathBuf,
     inbound: mpsc::Receiver<AgentMessage>,
-    tx: mpsc::Sender<Bytes>,
+    sse_output: Arc<Mutex<Option<mpsc::Sender<Bytes>>>>,
 ) -> Result<()> {
     let mut ssh_handle = connect_ssh(guest_ip, &ssh_key_path, &ssh_user, &vm_host_key_path).await?;
     info!("agent ssh channel opened");
     let ssh_channel = open_exec_channel(&mut ssh_handle, AGENT_CMD).await?;
-    run_relay(ssh_handle, ssh_channel, inbound, tx).await
+    run_relay(ssh_handle, ssh_channel, inbound, sse_output).await
 }
 
 async fn run_relay(
     _ssh_handle: client::Handle<SshClient>, // keeps the SSH connection alive for the duration of the relay
     mut ssh_channel: Channel<client::Msg>,
     mut inbound: mpsc::Receiver<AgentMessage>,
-    tx: mpsc::Sender<Bytes>,
+    sse_output: Arc<Mutex<Option<mpsc::Sender<Bytes>>>>,
 ) -> Result<()> {
     let mut heartbeat = interval(Duration::from_secs(HEARTBEAT_SECS));
     heartbeat.tick().await;
@@ -177,15 +212,16 @@ async fn run_relay(
                 match msg {
                     Some(ChannelMsg::Data { ref data }) => {
                         info!("received stdout from agent");
+                        let Some(tx) = take_live_sse_sender(&sse_output) else {
+                            continue;
+                        };
                         match timeout(Duration::from_secs(SEND_TIMEOUT_SECS), tx.send(Bytes::copy_from_slice(data))).await {
                             Ok(Ok(())) => {}
                             Ok(Err(_)) => {
-                                info!("sse receiver dropped, ending relay");
-                                break;
+                                info!("sse receiver dropped");
                             }
                             Err(_) => {
                                 error!("send timed out, sse consumer likely stuck");
-                                break;
                             }
                         }
                     }
@@ -212,15 +248,16 @@ async fn run_relay(
                 }
             }
             _ = heartbeat.tick() => {
+                let Some(tx) = take_live_sse_sender(&sse_output) else {
+                    continue;
+                };
                 match timeout(Duration::from_secs(SEND_TIMEOUT_SECS), tx.send(Bytes::from_static(b": keep-alive\n\n"))).await {
                     Ok(Ok(())) => {}
                     Ok(Err(_)) => {
-                        info!("sse receiver dropped during heartbeat, ending relay");
-                        break;
+                        info!("sse receiver dropped during heartbeat");
                     }
                     Err(_) => {
                         error!("heartbeat send timed out, sse consumer likely stuck");
-                        break;
                     }
                 }
             }
