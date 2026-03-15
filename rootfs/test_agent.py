@@ -173,26 +173,26 @@ class TestClassToEventType(unittest.TestCase):
         self.assertIsNone(agent._class_to_event_type(object()))
 
 
-class TestBlockType(unittest.TestCase):
-    """_block_type derives content block type strings from block class names."""
+class TestDeriveBlockType(unittest.TestCase):
+    """_derive_block_type derives content block type strings from block class names."""
 
     def test_text_block_maps_to_text(self):
         class TextBlock:
             pass
-        self.assertEqual(agent._block_type(TextBlock()), "text")
+        self.assertEqual(agent._derive_block_type(TextBlock()), "text")
 
     def test_tool_use_block_maps_to_tool_use(self):
         class ToolUseBlock:
             pass
-        self.assertEqual(agent._block_type(ToolUseBlock()), "tool_use")
+        self.assertEqual(agent._derive_block_type(ToolUseBlock()), "tool_use")
 
     def test_thinking_block_maps_to_thinking(self):
         class ThinkingBlock:
             pass
-        self.assertEqual(agent._block_type(ThinkingBlock()), "thinking")
+        self.assertEqual(agent._derive_block_type(ThinkingBlock()), "thinking")
 
     def test_unknown_block_returns_none(self):
-        self.assertIsNone(agent._block_type(object()))
+        self.assertIsNone(agent._derive_block_type(object()))
 
 
 # ── SSE wire-format tests ──────────────────────────────────────────────────
@@ -886,6 +886,127 @@ class TestProcessStreamEvent(unittest.IsolatedAsyncioTestCase):
 
 
 # ── Structured agent event processing tests ────────────────────────────────
+
+
+class TestEmitAssistantBlock(unittest.IsolatedAsyncioTestCase):
+    """emit_assistant_block emits the correct SSE event for each block type."""
+
+    def _make_block(self, type_: str, **kwargs):
+        class Block:
+            pass
+        b = Block()
+        b.type = type_
+        for k, v in kwargs.items():
+            setattr(b, k, v)
+        return b
+
+    async def test_text_block_emits_init_then_text_delta(self):
+        writer = MockWriter()
+        token = agent._emit_writer.set(writer)
+        try:
+            agent.emit_assistant_block(self._make_block("text", text="hello"))
+        finally:
+            agent._emit_writer.reset(token)
+        events = writer.written_events()
+        names = [e["event"] for e in events]
+        self.assertIn("init", names)
+        self.assertIn("text_delta", names)
+        self.assertEqual(events[names.index("text_delta")]["data"]["text"], "hello")
+
+    async def test_empty_text_block_emits_nothing(self):
+        writer = MockWriter()
+        token = agent._emit_writer.set(writer)
+        try:
+            agent.emit_assistant_block(self._make_block("text", text=""))
+        finally:
+            agent._emit_writer.reset(token)
+        self.assertEqual(writer.written_events(), [])
+
+    async def test_thinking_block_emits_thinking_delta(self):
+        writer = MockWriter()
+        token = agent._emit_writer.set(writer)
+        try:
+            agent.emit_assistant_block(self._make_block("thinking", thinking="deep thought"))
+        finally:
+            agent._emit_writer.reset(token)
+        events = writer.written_events()
+        self.assertEqual(len(events), 1)
+        self.assertEqual(events[0]["event"], "thinking_delta")
+        self.assertEqual(events[0]["data"]["thinking"], "deep thought")
+
+    async def test_tool_use_block_emits_tool_start(self):
+        writer = MockWriter()
+        token = agent._emit_writer.set(writer)
+        try:
+            agent.emit_assistant_block(
+                self._make_block("tool_use", id="t1", name="Bash", input={"command": "ls"})
+            )
+        finally:
+            agent._emit_writer.reset(token)
+        events = writer.written_events()
+        self.assertEqual(len(events), 1)
+        self.assertEqual(events[0]["event"], "tool_start")
+        self.assertEqual(events[0]["data"]["name"], "Bash")
+
+    async def test_ask_user_question_block_emits_nothing(self):
+        writer = MockWriter()
+        token = agent._emit_writer.set(writer)
+        try:
+            agent.emit_assistant_block(
+                self._make_block("tool_use", id="q1", name="AskUserQuestion", input={})
+            )
+        finally:
+            agent._emit_writer.reset(token)
+        self.assertEqual(writer.written_events(), [])
+
+
+class TestEmitToolResultBlock(unittest.IsolatedAsyncioTestCase):
+    """emit_tool_result_block emits a single tool_result SSE event."""
+
+    def _make_block(self, tool_use_id, content, is_error=False):
+        class Block:
+            type = "tool_result"
+        b = Block()
+        b.tool_use_id = tool_use_id
+        b.content = content
+        b.is_error = is_error
+        return b
+
+    async def test_emits_tool_result_with_string_content(self):
+        writer = MockWriter()
+        token = agent._emit_writer.set(writer)
+        try:
+            agent.emit_tool_result_block(self._make_block("t1", "output text"))
+        finally:
+            agent._emit_writer.reset(token)
+        events = writer.written_events()
+        self.assertEqual(len(events), 1)
+        self.assertEqual(events[0]["event"], "tool_result")
+        self.assertEqual(events[0]["data"]["tool_use_id"], "t1")
+        self.assertEqual(events[0]["data"]["content"], "output text")
+        self.assertFalse(events[0]["data"]["is_error"])
+
+    async def test_emits_tool_result_joining_list_content(self):
+        class TextBlock:
+            type = "text"
+            text = "line one"
+
+        writer = MockWriter()
+        token = agent._emit_writer.set(writer)
+        try:
+            agent.emit_tool_result_block(self._make_block("t2", [TextBlock()]))
+        finally:
+            agent._emit_writer.reset(token)
+        self.assertEqual(writer.written_events()[0]["data"]["content"], "line one")
+
+    async def test_is_error_propagated(self):
+        writer = MockWriter()
+        token = agent._emit_writer.set(writer)
+        try:
+            agent.emit_tool_result_block(self._make_block("err1", "failed", is_error=True))
+        finally:
+            agent._emit_writer.reset(token)
+        self.assertTrue(writer.written_events()[0]["data"]["is_error"])
 
 
 class TestProcessAssistantEvent(unittest.IsolatedAsyncioTestCase):

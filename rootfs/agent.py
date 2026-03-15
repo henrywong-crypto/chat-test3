@@ -10,12 +10,19 @@ import os
 import signal
 import sys
 import uuid
+from typing import Any
 
 SOCKET_PATH = "/tmp/agent.sock"
 QUESTION_TIMEOUT_SECS = 3600
 
 # Allowed root directories for work_dir. Populated at startup via _init_allowed_roots().
 _ALLOWED_WORK_DIR_ROOTS: list[str] = []
+
+
+def log(msg: str) -> None:
+    """Write a log line to stderr so it appears in server logs without polluting the stdout protocol."""
+    sys.stderr.write(f"[agent] {msg}\n")
+    sys.stderr.flush()
 
 
 def _init_allowed_roots() -> None:
@@ -47,12 +54,6 @@ def resolve_work_dir(raw: str | None) -> str:
 _init_allowed_roots()
 
 
-def log(msg: str) -> None:
-    """Write a log line to stderr so it appears in server logs without polluting the stdout protocol."""
-    sys.stderr.write(f"[agent] {msg}\n")
-    sys.stderr.flush()
-
-
 @dataclasses.dataclass
 class Session:
     task: asyncio.Task
@@ -76,13 +77,19 @@ _emit_session_id: contextvars.ContextVar[str | None] = (
 )
 
 
+def _log_drain_error(task: asyncio.Task) -> None:
+    if not task.cancelled() and task.exception():
+        log(f"drain error: {task.exception()}")
+
+
 def write_sse(writer: asyncio.StreamWriter, event_name: str, data: dict) -> None:
     """Write an SSE event directly to a specific writer."""
     if writer.is_closing():
         return
     payload = f"event: {event_name}\ndata: {json.dumps(data, cls=_Encoder)}\n\n"
     writer.write(payload.encode())
-    asyncio.get_running_loop().create_task(writer.drain())
+    drain_task = asyncio.get_running_loop().create_task(writer.drain())
+    drain_task.add_done_callback(_log_drain_error)
 
 
 def emit_sse(event_name: str, data: dict) -> None:
@@ -101,7 +108,7 @@ def emit_sse(event_name: str, data: dict) -> None:
     write_sse(writer, event_name, data)
 
 
-def get_field(obj, field, default=None):
+def get_field(obj: Any, field: str, default: Any = None) -> Any:
     """Get a field from either a dict or an object attribute."""
     if isinstance(obj, dict):
         return obj.get(field, default)
@@ -208,10 +215,12 @@ async def handle_connection(
 ) -> None:
     """Handle a single client connection."""
     log("client connected")
-    await route_connection(reader, writer)
-    writer.close()
-    await writer.wait_closed()
-    log("client disconnected")
+    try:
+        await route_connection(reader, writer)
+    finally:
+        writer.close()
+        await writer.wait_closed()
+        log("client disconnected")
 
 
 async def main():
@@ -240,12 +249,23 @@ async def main():
 # ── Query execution ───────────────────────────────────────────────────────────
 
 
+async def build_prompt_stream(content: str):
+    yield {
+        "type": "user",
+        "session_id": "",
+        "message": {"role": "user", "content": content},
+        "parent_tool_use_id": None,
+    }
+
+
 async def run_query(content: str, sdk_session_id: str | None, task_id: str, conversation_id: str, work_dir: str):
     from claude_agent_sdk import ClaudeAgentOptions, PermissionResultAllow, query
     from claude_agent_sdk.types import HookMatcher, StreamEvent
 
     log(f"query start  task_id={task_id!r}  resume={sdk_session_id!r}  content_len={len(content)}")
     emit_sse("session_start", {"task_id": task_id})
+
+    captured_session_id = sdk_session_id
 
     async def handle_tool_permission(tool_name, input_, context):
         log(f"can_use_tool called  tool_name={tool_name!r}")
@@ -296,16 +316,6 @@ async def run_query(content: str, sdk_session_id: str | None, task_id: str, conv
         **({"resume": sdk_session_id} if sdk_session_id else {}),
     )
 
-    # can_use_tool requires AsyncIterable prompt (not a plain string).
-    async def prompt_stream():
-        yield {
-            "type": "user",
-            "session_id": "",
-            "message": {"role": "user", "content": content},
-            "parent_tool_use_id": None,
-        }
-
-    captured_session_id = sdk_session_id
     # Per-block tracking for streaming deltas: index -> type / tool-info / accumulated-input
     block_types: dict[int, str] = {}
     tool_info: dict[int, dict] = {}
@@ -314,7 +324,7 @@ async def run_query(content: str, sdk_session_id: str | None, task_id: str, conv
     # from the full AssistantEvent to avoid duplicates.
     emitted_streaming_text = False
     try:
-        async for event in query(prompt=prompt_stream(), options=options):
+        async for event in query(prompt=build_prompt_stream(content), options=options):
             if hasattr(event, "session_id") and event.session_id:
                 captured_session_id = event.session_id
             if isinstance(event, StreamEvent):
@@ -441,7 +451,7 @@ def _class_to_event_type(event) -> str | None:
     return None
 
 
-def _block_type(block) -> str | None:
+def _derive_block_type(block) -> str | None:
     """Derive content block type from class name when .type attribute is absent.
 
     e.g. TextBlock -> 'text', ToolUseBlock -> 'tool_use', ThinkingBlock -> 'thinking'
@@ -471,6 +481,30 @@ def process_agent_event(event, emitted_streaming_text: bool) -> None:
         log(f"system  subtype={getattr(event, 'subtype', '?')}")
 
 
+def emit_assistant_block(block) -> None:
+    block_type = getattr(block, "type", None) or _derive_block_type(block)
+    if block_type == "text":
+        text = getattr(block, "text", "") or ""
+        if text:
+            emit_sse("init", {})
+            emit_sse("text_delta", {"text": text})
+    elif block_type == "thinking":
+        thinking = getattr(block, "thinking", "") or ""
+        if thinking:
+            emit_sse("thinking_delta", {"thinking": thinking})
+    elif block_type == "tool_use":
+        block_name = getattr(block, "name", None) or ""
+        if block_name != "AskUserQuestion":
+            emit_sse(
+                "tool_start",
+                {
+                    "id": getattr(block, "id", None),
+                    "name": block_name,
+                    "input": getattr(block, "input", {}) or {},
+                },
+            )
+
+
 def process_assistant_event(event, emitted_streaming_text: bool) -> None:
     # AssistantMessage exposes .content directly (no .message wrapper)
     content_blocks = getattr(event, "content", None) or []
@@ -482,29 +516,28 @@ def process_assistant_event(event, emitted_streaming_text: bool) -> None:
     if emitted_streaming_text:
         # All content (text deltas and tool_start) already delivered via streaming events.
         return
-    # No streaming text: emit the full message content now.
     for block in content_blocks:
-        block_type = getattr(block, "type", None) or _block_type(block)
-        if block_type == "text":
-            text = getattr(block, "text", "") or ""
-            if text:
-                emit_sse("init", {})
-                emit_sse("text_delta", {"text": text})
-        elif block_type == "thinking":
-            thinking = getattr(block, "thinking", "") or ""
-            if thinking:
-                emit_sse("thinking_delta", {"thinking": thinking})
-        elif block_type == "tool_use":
-            block_name = getattr(block, "name", None) or ""
-            if block_name != "AskUserQuestion":
-                emit_sse(
-                    "tool_start",
-                    {
-                        "id": getattr(block, "id", None),
-                        "name": block_name,
-                        "input": getattr(block, "input", {}) or {},
-                    },
-                )
+        emit_assistant_block(block)
+
+
+def emit_tool_result_block(block) -> None:
+    raw_content = getattr(block, "content", None)
+    if isinstance(raw_content, list):
+        content_str = " ".join(
+            getattr(b, "text", "") or ""
+            for b in raw_content
+            if getattr(b, "type", None) == "text"
+        )
+    else:
+        content_str = str(raw_content) if raw_content is not None else ""
+    emit_sse(
+        "tool_result",
+        {
+            "tool_use_id": getattr(block, "tool_use_id", None),
+            "content": content_str,
+            "is_error": getattr(block, "is_error", False) or False,
+        },
+    )
 
 
 def process_user_event(event) -> None:
@@ -516,23 +549,7 @@ def process_user_event(event) -> None:
         if getattr(block, "type", None) != "tool_result":
             continue
         tool_ids.append(getattr(block, "tool_use_id", None))
-        raw_content = getattr(block, "content", None)
-        if isinstance(raw_content, list):
-            content_str = " ".join(
-                getattr(b, "text", "") or ""
-                for b in raw_content
-                if getattr(b, "type", None) == "text"
-            )
-        else:
-            content_str = str(raw_content) if raw_content is not None else ""
-        emit_sse(
-            "tool_result",
-            {
-                "tool_use_id": getattr(block, "tool_use_id", None),
-                "content": content_str,
-                "is_error": getattr(block, "is_error", False) or False,
-            },
-        )
+        emit_tool_result_block(block)
     log(f"user tool_results  tool_use_ids={tool_ids}")
 
 
