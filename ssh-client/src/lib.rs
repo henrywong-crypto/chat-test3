@@ -1,5 +1,4 @@
 use anyhow::{Context, Result, bail};
-use chrono::{TimeDelta, Utc};
 use russh::{
     Channel,
     client::{Config, Handle, Handler, Msg, connect},
@@ -16,6 +15,7 @@ use tokio::time::timeout;
 
 const TERMINAL_EXEC_CMD: &str = "bash -ic 'claude; exec bash'";
 const SSH_OP_TIMEOUT_SECS: u64 = 30;
+const SSH_CONNECT_TIMEOUT_SECS: u64 = 60;
 
 pub struct SshClient {
     vm_host_key: Option<PublicKey>,
@@ -46,21 +46,12 @@ pub async fn connect_ssh(
     let ssh_keypair = Arc::new(load_ssh_keypair(ssh_key_path)?);
     let ssh_config = Arc::new(Config::default());
     let guest_addr = SocketAddr::from((guest_ip, 22));
-    let connect_deadline = Utc::now()
-        .checked_add_signed(TimeDelta::seconds(60))
-        .context("connect deadline overflow")?;
-    let mut ssh_handle = loop {
-        let ssh_client = SshClient {
-            vm_host_key: vm_host_key.clone(),
-        };
-        match connect(ssh_config.clone(), guest_addr, ssh_client).await {
-            Ok(ssh_handle) => break ssh_handle,
-            Err(_) if Utc::now() < connect_deadline => {
-                tokio::time::sleep(Duration::from_millis(500)).await;
-            }
-            Err(connect_error) => bail!("SSH connect timed out: {connect_error}"),
-        }
-    };
+    let mut ssh_handle = timeout(
+        Duration::from_secs(SSH_CONNECT_TIMEOUT_SECS),
+        connect_ssh_handle(ssh_config, guest_addr, vm_host_key),
+    )
+    .await
+    .context("SSH connect timed out")?;
     authenticate_ssh_handle(&mut ssh_handle, ssh_user, ssh_keypair).await?;
     Ok(ssh_handle)
 }
@@ -75,6 +66,20 @@ fn load_vm_host_key(vm_host_key_path: &Path) -> Result<Option<PublicKey>> {
 
 fn load_ssh_keypair(ssh_key_path: &Path) -> Result<PrivateKey> {
     load_secret_key(ssh_key_path, None).context("failed to load SSH key")
+}
+
+async fn connect_ssh_handle(
+    ssh_config: Arc<Config>,
+    guest_addr: SocketAddr,
+    vm_host_key: Option<PublicKey>,
+) -> Handle<SshClient> {
+    loop {
+        let ssh_client = SshClient { vm_host_key: vm_host_key.clone() };
+        if let Ok(ssh_handle) = connect(ssh_config.clone(), guest_addr, ssh_client).await {
+            return ssh_handle;
+        }
+        tokio::time::sleep(Duration::from_millis(500)).await;
+    }
 }
 
 async fn authenticate_ssh_handle(
