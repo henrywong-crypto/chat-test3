@@ -241,7 +241,7 @@ def prepare_rootfs(rootfs: Path) -> None:
     # open a channel to /tmp/agent.sock without exec'ing a proxy process.
     sshd_config_d = rootfs / "etc/ssh/sshd_config.d"
     sshd_config_d.mkdir(parents=True, exist_ok=True)
-    (sshd_config_d / "50-agent.conf").write_text("StreamLocalForwarding yes\n")
+    (sshd_config_d / "50-agent.conf").write_text("AllowStreamLocalForwarding yes\n")
 
 
 def mount_binds(rootfs: Path) -> list[Path]:
@@ -451,15 +451,6 @@ def boot_vm(
             "iface_id": "eth0",
             "guest_mac": "AA:FC:00:00:00:01",
             "host_dev_name": tap,
-        },
-    )
-    fc_api(
-        socket_path,
-        "PUT",
-        "/machine-config",
-        {
-            "vcpu_count": 1,
-            "mem_size_mib": 512,
         },
     )
     fc_api(socket_path, "PUT", "/actions", {"action_type": "InstanceStart"})
