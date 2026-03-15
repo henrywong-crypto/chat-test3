@@ -19,6 +19,8 @@ use tracing::error;
 use uuid::Uuid;
 use vm_lifecycle::{VmBuildConfig, VmRegistry};
 
+use crate::static_files::StaticAssets;
+
 #[derive(Clone, Deserialize)]
 pub(crate) struct AppConfig {
     #[serde(default = "default_kernel_path")]
@@ -83,6 +85,8 @@ pub(crate) struct AppConfig {
     pub(crate) anthropic_default_sonnet_model: String,
     #[serde(default = "default_anthropic_default_opus_model")]
     pub(crate) anthropic_default_opus_model: String,
+    #[serde(default = "default_static_dir")]
+    pub(crate) static_dir: PathBuf,
 }
 
 fn default_kernel_path() -> PathBuf {
@@ -154,6 +158,9 @@ fn default_anthropic_default_sonnet_model() -> String {
 fn default_anthropic_default_opus_model() -> String {
     "us.anthropic.claude-opus-4-6-v1".to_string()
 }
+fn default_static_dir() -> PathBuf {
+    PathBuf::from("frontend/dist")
+}
 
 pub(crate) fn load_config() -> Result<AppConfig> {
     let mut app_config: AppConfig = Config::builder()
@@ -193,16 +200,18 @@ pub(crate) struct AppState {
     pub(crate) vms: VmRegistry,
     pub(crate) rootfs_lock: Arc<AsyncMutex<()>>,
     pub(crate) chat_senders: Arc<Mutex<HashMap<String, mpsc::Sender<AgentMessage>>>>,
+    pub(crate) static_assets: Arc<StaticAssets>,
 }
 
 impl AppState {
-    pub(crate) fn new(config: AppConfig, pg_pool: PgPool) -> Self {
+    pub(crate) fn new(config: AppConfig, pg_pool: PgPool, static_assets: StaticAssets) -> Self {
         AppState {
             config,
             db: pg_pool,
             vms: Arc::new(Mutex::new(HashMap::new())),
             rootfs_lock: Arc::new(AsyncMutex::new(())),
             chat_senders: Arc::new(Mutex::new(HashMap::new())),
+            static_assets: Arc::new(static_assets),
         }
     }
 }

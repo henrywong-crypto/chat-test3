@@ -6,7 +6,7 @@ use axum::{
 };
 use chat_relay::{build_api_key_settings_json, get_vm_settings, set_vm_settings};
 use serde::{Deserialize, Serialize};
-use store::upsert_user;
+use store::get_user_by_email;
 use tower_sessions::Session;
 
 use crate::{
@@ -34,7 +34,9 @@ pub(crate) async fn get_settings_handler(
         })
         .into_response());
     }
-    let db_user = upsert_user(&state.db, &user.email).await?;
+    let Some(db_user) = get_user_by_email(&state.db, &user.email).await? else {
+        return Ok((StatusCode::UNAUTHORIZED, "Not found").into_response());
+    };
     let guest_ip_opt = find_user_vm_guest_ip(&state.vms, db_user.id)?;
     let Some(guest_ip) = guest_ip_opt else {
         return Ok(Json(SettingsResponse {
@@ -81,8 +83,9 @@ pub(crate) async fn put_settings_handler(
         )
             .into_response();
     }
-    let db_user = match upsert_user(&state.db, &user.email).await {
-        Ok(u) => u,
+    let db_user = match get_user_by_email(&state.db, &user.email).await {
+        Ok(Some(u)) => u,
+        Ok(None) => return (StatusCode::UNAUTHORIZED, "Not found").into_response(),
         Err(e) => return AppError::from(e).into_response(),
     };
     let guest_ip_opt = match find_user_vm_guest_ip(&state.vms, db_user.id) {

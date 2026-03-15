@@ -18,7 +18,7 @@ use std::{
     path::{Path, PathBuf},
     time::{Duration, Instant, SystemTime, UNIX_EPOCH},
 };
-use store::upsert_user;
+use store::get_user_by_email;
 use tokio::{io::{AsyncRead, AsyncWriteExt}, time::timeout};
 use tokio_util::io::StreamReader;
 use tower_sessions::Session;
@@ -32,7 +32,6 @@ use vm_lifecycle::{
 use crate::{
     auth::User,
     state::{AppError, AppState, find_user_vm, find_vm_guest_ip_for_user},
-    static_files::{app_js_version, styles_css_version},
     templates::render_terminal_page,
 };
 
@@ -110,10 +109,10 @@ impl FromRequestParts<AppState> for UserVm {
     async fn from_request_parts(parts: &mut Parts, state: &AppState) -> Result<Self, Self::Rejection> {
         let user = User::from_request_parts(parts, state).await
             .map_err(IntoResponse::into_response)?;
-        let db_user = upsert_user(&state.db, &user.email).await.map_err(|e| {
+        let db_user = get_user_by_email(&state.db, &user.email).await.map_err(|e| {
             error!("db error: {e}");
             (StatusCode::INTERNAL_SERVER_ERROR, "An internal error occurred").into_response()
-        })?;
+        })?.ok_or_else(|| Redirect::to("/login").into_response())?;
         let (vm_id, guest_ip) = match find_user_vm(&state.vms, db_user.id).map_err(|e| {
             error!("vm registry error: {e}");
             (StatusCode::INTERNAL_SERVER_ERROR, "An internal error occurred").into_response()
@@ -160,10 +159,10 @@ impl FromRequestParts<AppState> for UserVmById {
         }
         let user = User::from_request_parts(parts, state).await
             .map_err(IntoResponse::into_response)?;
-        let db_user = upsert_user(&state.db, &user.email).await.map_err(|e| {
+        let db_user = get_user_by_email(&state.db, &user.email).await.map_err(|e| {
             error!("db error: {e}");
             (StatusCode::INTERNAL_SERVER_ERROR, "An internal error occurred").into_response()
-        })?;
+        })?.ok_or_else(|| Redirect::to("/login").into_response())?;
         let Some(guest_ip) = find_vm_guest_ip_for_user(&state.vms, &vm_id, db_user.id).map_err(|e| {
             error!("vm registry error: {e}");
             (StatusCode::INTERNAL_SERVER_ERROR, "An internal error occurred").into_response()
@@ -249,8 +248,8 @@ async fn build_terminal_response(
         &csrf_token,
         &state.config.upload_dir,
         has_user_rootfs,
-        app_js_version(),
-        styles_css_version(),
+        &state.static_assets.app_js_version,
+        &state.static_assets.styles_css_version,
     ))
     .into_response())
 }
@@ -264,7 +263,9 @@ pub(crate) async fn delete_user_rootfs_handler(
     if validate_csrf(&session, &form.csrf_token).await.is_none() {
         return Ok((StatusCode::FORBIDDEN, "Forbidden").into_response());
     }
-    let db_user = upsert_user(&state.db, &user.email).await?;
+    let Some(db_user) = get_user_by_email(&state.db, &user.email).await? else {
+        return Ok(Redirect::to("/login").into_response());
+    };
     let rootfs_path = build_user_rootfs_path(&state.config.user_rootfs_dir, db_user.id);
     info!("deleting saved rootfs");
     let _guard = timeout(Duration::from_secs(LOCK_TIMEOUT_SECS), state.rootfs_lock.lock())

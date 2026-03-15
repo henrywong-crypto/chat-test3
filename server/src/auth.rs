@@ -4,7 +4,9 @@ use axum::{
     response::{Html, IntoResponse, Redirect, Response},
 };
 use handlers::{AppState as CognitoState, CallbackQuery, callback, login};
+use store::upsert_user;
 use tower_sessions::Session;
+use uuid::Uuid;
 
 use crate::{state::AppState, templates::render_login_page};
 
@@ -60,9 +62,17 @@ pub(crate) async fn get_callback_handler(
     State(state): State<AppState>,
 ) -> Response {
     let cognito_state = build_cognito_state(&state);
-    callback(query, session, State(cognito_state))
+    let response = callback(query, session.clone(), State(cognito_state))
         .await
-        .unwrap_or_else(|e| (StatusCode::INTERNAL_SERVER_ERROR, e.to_string()).into_response())
+        .unwrap_or_else(|e| (StatusCode::INTERNAL_SERVER_ERROR, e.to_string()).into_response());
+    if let Some(email) = session.get::<String>("email").await.ok().flatten() {
+        if let Err(e) = upsert_user(&state.db, &email).await {
+            return (StatusCode::INTERNAL_SERVER_ERROR, e.to_string()).into_response();
+        }
+        let new_csrf_token = Uuid::new_v4().to_string().replace('-', "");
+        let _ = session.insert("csrf_token", &new_csrf_token).await;
+    }
+    response
 }
 
 pub(crate) async fn get_logout_handler(session: Session) -> impl IntoResponse {

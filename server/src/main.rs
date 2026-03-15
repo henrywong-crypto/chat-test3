@@ -41,7 +41,7 @@ use crate::{
     },
     settings::{get_settings_handler, put_settings_handler},
     state::{AppState, load_config},
-    static_files::{serve_app_js, serve_styles_css},
+    static_files::{load_static_assets, serve_app_js, serve_styles_css},
     terminal::handle_ws_upgrade,
     upload::upload_file_handler,
 };
@@ -55,6 +55,8 @@ async fn main() -> Result<()> {
         )
         .init();
     let app_config = load_config()?;
+    let static_assets = load_static_assets(&app_config.static_dir)
+        .with_context(|| format!("failed to load static assets from {}", app_config.static_dir.display()))?;
     let pg_pool = store::connect_db(&app_config.database_url).await?;
     store::run_migrations(&pg_pool).await?;
     let session_store = PostgresStore::new(pg_pool.clone());
@@ -64,7 +66,7 @@ async fn main() -> Result<()> {
             .clone()
             .continuously_delete_expired(tokio::time::Duration::from_secs(3600)),
     );
-    let app_state = AppState::new(app_config, pg_pool);
+    let app_state = AppState::new(app_config, pg_pool, static_assets);
     let port = app_state.config.port;
     cleanup_stale_vms(&app_state.config.net_helper_path, &app_state.config.jailer_chroot_base).await;
     setup_host_networking(&app_state.config.net_helper_path).await;
