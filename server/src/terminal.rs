@@ -31,7 +31,7 @@ pub(crate) async fn handle_ws_upgrade(
     State(state): State<AppState>,
 ) -> Result<Response, AppError> {
     Ok(ws.on_upgrade(move |socket| async move {
-        run_terminal_session(socket, state, user_vm.vm_id, user_vm.user_id, user_vm.guest_ip).await
+        run_terminal_session(socket, state, user_vm.vm_id.clone(), user_vm.user_id, user_vm.guest_ip).await
     }))
 }
 

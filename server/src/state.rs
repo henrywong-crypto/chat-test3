@@ -3,7 +3,6 @@ use axum::{
     http::StatusCode,
     response::{IntoResponse, Response},
 };
-use chat_relay::VmRelayHandle;
 use config::{Config, Environment, File};
 use serde::Deserialize;
 use std::{
@@ -199,7 +198,6 @@ pub(crate) struct AppState {
     pub(crate) db: PgPool,
     pub(crate) vms: VmRegistry,
     pub(crate) rootfs_lock: Arc<AsyncMutex<()>>,
-    pub(crate) vm_relays: Arc<Mutex<HashMap<String, VmRelayHandle>>>,
     pub(crate) static_assets: Arc<StaticAssets>,
 }
 
@@ -210,7 +208,6 @@ impl AppState {
             db: pg_pool,
             vms: Arc::new(Mutex::new(HashMap::new())),
             rootfs_lock: Arc::new(AsyncMutex::new(())),
-            vm_relays: Arc::new(Mutex::new(HashMap::new())),
             static_assets: Arc::new(static_assets),
         }
     }

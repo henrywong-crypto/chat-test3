@@ -2,37 +2,34 @@ use anyhow::anyhow;
 use axum::{
     Json,
     body::Body,
-    extract::{FromRequestParts, Path, State},
-    http::{StatusCode, header, request::Parts},
+    extract::State,
+    http::{StatusCode, header},
     response::{IntoResponse, Response},
 };
-use chat_relay::{AgentMessage, VmRelayHandle, start_vm_relay};
+use chat_relay::{AgentMessage, send_agent_message, stream_agent_sse};
 use futures::StreamExt;
 use serde::{Deserialize, Serialize};
-use std::{convert::Infallible, net::Ipv4Addr, time::Duration};
-use tokio::{sync::mpsc, time::timeout};
+use std::convert::Infallible;
 use tower_sessions::Session;
 use tracing::{error, info};
 use uuid::Uuid;
 
 use crate::{
-    handlers::{UserVm, attach_csrf_token, validate_csrf},
+    handlers::{UserVm, UserVmById, attach_csrf_token, validate_csrf},
     state::{AppError, AppState, update_vm_last_activity},
 };
 
-const SEND_TIMEOUT_SECS: u64 = 30;
-
 pub(crate) async fn handle_chat_stream(
     user_vm: UserVm,
-    Path(vm_id): Path<String>,
     State(state): State<AppState>,
 ) -> Result<Response, AppError> {
-    if Uuid::parse_str(&vm_id).is_err() {
-        return Ok((StatusCode::NOT_FOUND, "Not found").into_response());
-    }
     update_vm_last_activity(&state.vms, &user_vm.vm_id)?;
-    let relay = get_or_create_vm_relay(&state, &vm_id, user_vm.guest_ip)?;
-    let event_stream = relay.register_sse_subscriber();
+    let event_stream = stream_agent_sse(
+        user_vm.guest_ip,
+        state.config.ssh_key_path.clone(),
+        state.config.ssh_user.clone(),
+        state.config.vm_host_key_path.clone(),
+    );
     info!("chat sse stream opened");
     let body = Body::from_stream(event_stream.map(Ok::<_, Infallible>));
     Response::builder()
@@ -44,68 +41,23 @@ pub(crate) async fn handle_chat_stream(
         .map_err(AppError::from)
 }
 
-fn get_or_create_vm_relay(state: &AppState, vm_id: &str, guest_ip: Ipv4Addr) -> anyhow::Result<VmRelayHandle> {
-    let mut relays = state.vm_relays.lock().map_err(|e| anyhow!("vm relays lock poisoned: {e}"))?;
-    if let Some(relay) = relays.get(vm_id) {
-        if relay.is_alive() {
-            return Ok(relay.clone());
-        }
-    }
-    let relay = start_vm_relay(
-        guest_ip,
+async fn forward_agent_message(
+    user_vm: &UserVmById,
+    state: &AppState,
+    message: &AgentMessage,
+) -> Result<(), Response> {
+    send_agent_message(
+        user_vm.guest_ip,
         &state.config.ssh_key_path,
         &state.config.ssh_user,
         &state.config.vm_host_key_path,
-    );
-    relays.insert(vm_id.to_string(), relay.clone());
-    Ok(relay)
-}
-
-fn find_relay_inbound_tx(state: &AppState, vm_id: &str) -> Option<mpsc::Sender<AgentMessage>> {
-    let mut relays = state.vm_relays.lock().ok()?;
-    let relay = relays.get(vm_id)?;
-    if !relay.is_alive() {
-        relays.remove(vm_id);
-        return None;
-    }
-    Some(relay.inbound_tx().clone())
-}
-
-pub(crate) struct VerifiedVmSender(mpsc::Sender<AgentMessage>);
-
-impl FromRequestParts<AppState> for VerifiedVmSender {
-    type Rejection = Response;
-
-    async fn from_request_parts(parts: &mut Parts, state: &AppState) -> Result<Self, Self::Rejection> {
-        UserVm::from_request_parts(parts, state).await?;
-        let Path(vm_id) = Path::<String>::from_request_parts(parts, state).await
-            .map_err(IntoResponse::into_response)?;
-        if Uuid::parse_str(&vm_id).is_err() {
-            return Err((StatusCode::NOT_FOUND, "Not found").into_response());
-        }
-        let Some(agent_tx) = find_relay_inbound_tx(state, &vm_id) else {
-            info!("no active agent relay");
-            return Err((StatusCode::NOT_FOUND, "No active agent relay").into_response());
-        };
-        Ok(VerifiedVmSender(agent_tx))
-    }
-}
-
-async fn forward_agent_message(
-    agent_tx: mpsc::Sender<AgentMessage>,
-    agent_message: AgentMessage,
-) -> Result<(), Response> {
-    match timeout(Duration::from_secs(SEND_TIMEOUT_SECS), agent_tx.send(agent_message)).await {
-        Ok(Ok(())) => Ok(()),
-        Ok(Err(_)) => {
-            info!("agent sender closed");
-            Err((StatusCode::SERVICE_UNAVAILABLE, "Agent not available").into_response())
-        }
-        Err(_) => {
-            error!("send timed out, agent likely stuck");
-            Err((StatusCode::SERVICE_UNAVAILABLE, "Agent not available").into_response())
-        }
-    }
+        message,
+    )
+    .await
+    .map_err(|e| {
+        error!("failed to send agent message: {e}");
+        (StatusCode::SERVICE_UNAVAILABLE, "Agent not available").into_response()
+    })
 }
 
 #[derive(Deserialize)]
@@ -122,8 +74,9 @@ struct QueryResponse {
 }
 
 pub(crate) async fn handle_chat_query(
-    VerifiedVmSender(agent_tx): VerifiedVmSender,
+    user_vm: UserVmById,
     session: Session,
+    State(state): State<AppState>,
     Json(body): Json<QueryBody>,
 ) -> Response {
     let Some(csrf_token) = validate_csrf(&session, &body.csrf_token).await else {
@@ -137,7 +90,7 @@ pub(crate) async fn handle_chat_query(
         session_id: body.session_id,
         work_dir: body.work_dir,
     };
-    if let Err(response) = forward_agent_message(agent_tx, agent_message).await {
+    if let Err(response) = forward_agent_message(&user_vm, &state, &agent_message).await {
         return response;
     }
     info!("query forwarded  task_id={task_id}  content_len={content_len}");
@@ -155,8 +108,9 @@ pub(crate) struct QuestionAnswerBody {
 }
 
 pub(crate) async fn handle_chat_question_answer(
-    VerifiedVmSender(agent_tx): VerifiedVmSender,
+    user_vm: UserVmById,
     session: Session,
+    State(state): State<AppState>,
     Json(body): Json<QuestionAnswerBody>,
 ) -> Response {
     let Some(csrf_token) = validate_csrf(&session, &body.csrf_token).await else {
@@ -167,7 +121,7 @@ pub(crate) async fn handle_chat_question_answer(
         request_id: body.request_id,
         answers: body.answers,
     };
-    if let Err(response) = forward_agent_message(agent_tx, agent_message).await {
+    if let Err(response) = forward_agent_message(&user_vm, &state, &agent_message).await {
         return response;
     }
     info!("question answer forwarded  request_id={request_id}");
@@ -181,14 +135,16 @@ pub(crate) struct StopBody {
 }
 
 pub(crate) async fn handle_chat_stop(
-    VerifiedVmSender(agent_tx): VerifiedVmSender,
+    user_vm: UserVmById,
     session: Session,
+    State(state): State<AppState>,
     Json(body): Json<StopBody>,
 ) -> Response {
     let Some(csrf_token) = validate_csrf(&session, &body.csrf_token).await else {
         return (StatusCode::FORBIDDEN, "Forbidden").into_response();
     };
-    if let Err(response) = forward_agent_message(agent_tx, AgentMessage::Interrupt { task_id: body.task_id }).await {
+    let agent_message = AgentMessage::Interrupt { task_id: body.task_id };
+    if let Err(response) = forward_agent_message(&user_vm, &state, &agent_message).await {
         return response;
     }
     info!("interrupt forwarded");
@@ -202,14 +158,16 @@ pub(crate) struct HelloBody {
 }
 
 pub(crate) async fn handle_chat_hello(
-    VerifiedVmSender(agent_tx): VerifiedVmSender,
+    user_vm: UserVmById,
     session: Session,
+    State(state): State<AppState>,
     Json(body): Json<HelloBody>,
 ) -> Response {
     let Some(csrf_token) = validate_csrf(&session, &body.csrf_token).await else {
         return (StatusCode::FORBIDDEN, "Forbidden").into_response();
     };
-    if let Err(response) = forward_agent_message(agent_tx, AgentMessage::Hello { task_id: body.task_id }).await {
+    let agent_message = AgentMessage::Hello { task_id: body.task_id };
+    if let Err(response) = forward_agent_message(&user_vm, &state, &agent_message).await {
         return response;
     }
     attach_csrf_token((StatusCode::OK, "").into_response(), &csrf_token)

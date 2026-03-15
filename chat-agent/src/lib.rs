@@ -1,6 +1,8 @@
-pub mod relay;
+mod channel;
+mod relay;
 
-pub use relay::{VmRelayHandle, start_vm_relay};
+pub use channel::send_agent_message;
+pub use relay::stream_agent_sse;
 
 #[derive(serde::Serialize)]
 #[serde(tag = "type", rename_all = "snake_case")]
