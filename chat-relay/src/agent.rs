@@ -1,4 +1,4 @@
-use anyhow::Result;
+use anyhow::{Context, Result};
 use bytes::Bytes;
 use futures::stream::Stream;
 use russh::{Channel, ChannelMsg, client};
@@ -12,13 +12,14 @@ use std::{
 };
 use tokio::{
     sync::mpsc,
-    time::{Duration, interval, timeout},
+    time::{Duration, Instant, interval, sleep, timeout},
 };
 use tokio_stream::wrappers::ReceiverStream;
 use tracing::{debug, error, info};
 
 const HEARTBEAT_SECS: u64 = 60;
 const SEND_TIMEOUT_SECS: u64 = 30;
+const AGENT_SOCKET_WAIT_SECS: u64 = 60;
 
 pub enum AgentMessage {
     Query {
@@ -154,6 +155,22 @@ async fn run_agent_relay(
     }
 }
 
+async fn open_agent_channel(ssh_handle: &client::Handle<SshClient>) -> Result<Channel<client::Msg>> {
+    let deadline = Instant::now() + Duration::from_secs(AGENT_SOCKET_WAIT_SECS);
+    loop {
+        match open_direct_streamlocal_channel(ssh_handle, "/tmp/agent.sock").await {
+            Ok(channel) => {
+                info!("agent socket channel opened");
+                return Ok(channel);
+            }
+            Err(_) if Instant::now() < deadline => {
+                sleep(Duration::from_millis(500)).await;
+            }
+            Err(e) => return Err(e).context("timed out waiting for agent socket"),
+        }
+    }
+}
+
 async fn connect_agent_relay(
     guest_ip: Ipv4Addr,
     ssh_key_path: PathBuf,
@@ -163,8 +180,8 @@ async fn connect_agent_relay(
     sse_output: Arc<Mutex<Option<mpsc::Sender<Bytes>>>>,
 ) -> Result<()> {
     let ssh_handle = connect_ssh(guest_ip, &ssh_key_path, &ssh_user, &vm_host_key_path).await?;
-    info!("agent ssh channel opened");
-    let ssh_channel = open_direct_streamlocal_channel(&ssh_handle, "/tmp/agent.sock").await?;
+    info!("agent ssh connected");
+    let ssh_channel = open_agent_channel(&ssh_handle).await?;
     run_relay(ssh_handle, ssh_channel, inbound, sse_output).await
 }
 
