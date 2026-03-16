@@ -6,7 +6,7 @@ use axum::{
 use config::{Config, Environment, File};
 use serde::Deserialize;
 use std::{
-    collections::HashMap,
+    collections::{HashMap, HashSet},
     net::Ipv4Addr,
     path::PathBuf,
     sync::{Arc, Mutex},
@@ -197,6 +197,7 @@ pub(crate) struct AppState {
     pub(crate) config: AppConfig,
     pub(crate) db: PgPool,
     pub(crate) vms: VmRegistry,
+    pub(crate) provisioning_users: Arc<Mutex<HashSet<Uuid>>>,
     pub(crate) rootfs_lock: Arc<AsyncMutex<()>>,
     pub(crate) static_assets: Arc<StaticAssets>,
 }
@@ -207,6 +208,7 @@ impl AppState {
             config,
             db: pg_pool,
             vms: Arc::new(Mutex::new(HashMap::new())),
+            provisioning_users: Arc::new(Mutex::new(HashSet::new())),
             rootfs_lock: Arc::new(AsyncMutex::new(())),
             static_assets: Arc::new(static_assets),
         }

@@ -13,9 +13,11 @@ use serde::{Deserialize, Serialize};
 use sftp_client::open_sftp_session;
 use ssh_client::connect_ssh;
 use std::{
+    collections::HashSet,
     io::{Error as IoError, ErrorKind},
     net::Ipv4Addr,
     path::{Path, PathBuf},
+    sync::{Arc, Mutex},
     time::{Duration, Instant, SystemTime, UNIX_EPOCH},
 };
 use store::get_user_by_email;
@@ -53,13 +55,10 @@ pub(crate) async fn get_csrf_token_handler(
     Ok(Json(CsrfTokenResponse { csrf_token }).into_response())
 }
 
-fn register_vm(vms: &VmRegistry, vm_id: String, vm_entry: VmEntry, max_count: usize) -> Result<(), AppError> {
+fn register_vm(vms: &VmRegistry, vm_id: String, vm_entry: VmEntry) -> Result<(), AppError> {
     let mut registry = vms
         .lock()
         .map_err(|_| anyhow!("vm registry lock poisoned"))?;
-    if registry.len() >= max_count {
-        return Err(anyhow!("vm limit reached").into());
-    }
     registry.insert(vm_id, vm_entry);
     Ok(())
 }
@@ -92,11 +91,6 @@ impl FromRequestParts<AppState> for UserVm {
         })? {
             Some(entry) => entry,
             None => {
-                let vm_count = count_registered_vms(&state.vms)
-                    .map_err(IntoResponse::into_response)?;
-                if vm_count >= state.config.vm_max_count {
-                    return Err((StatusCode::SERVICE_UNAVAILABLE, "VM limit reached").into_response());
-                }
                 let new_vm_id = provision_new_vm(state, db_user.id).await
                     .map_err(IntoResponse::into_response)?;
                 let guest_ip = find_vm_guest_ip_for_user(&state.vms, &new_vm_id, db_user.id)
@@ -141,14 +135,51 @@ pub(crate) async fn get_or_create_terminal(
     build_terminal_response(&session, &state, user_vm.user_id, &user_vm.vm_id).await
 }
 
-pub(crate) fn count_registered_vms(vms: &VmRegistry) -> Result<usize, AppError> {
-    Ok(vms
+/// Acquires a per-user provisioning slot, checking that no VM already exists for
+/// the user and that the total capacity (running VMs + in-flight provisions) has
+/// not been exceeded. Returns a guard that automatically releases the slot on drop.
+fn acquire_provisioning_slot(state: &AppState, user_id: Uuid) -> Result<ProvisioningGuard, AppError> {
+    let registry = state
+        .vms
         .lock()
-        .map_err(|_| anyhow!("vm registry lock poisoned"))?
-        .len())
+        .map_err(|_| anyhow!("vm registry lock poisoned"))?;
+    let mut provisioning = state
+        .provisioning_users
+        .lock()
+        .map_err(|_| anyhow!("provisioning lock poisoned"))?;
+    if registry.values().any(|e| e.user_id == user_id) {
+        return Err(anyhow!("VM already exists for user").into());
+    }
+    if !provisioning.insert(user_id) {
+        return Err(anyhow!("VM provisioning already in progress for user").into());
+    }
+    if registry.len() + provisioning.len() > state.config.vm_max_count {
+        provisioning.remove(&user_id);
+        return Err(anyhow!("vm limit reached").into());
+    }
+    Ok(ProvisioningGuard {
+        provisioning_users: Arc::clone(&state.provisioning_users),
+        user_id,
+    })
+}
+
+/// RAII guard that removes the user from the provisioning set on drop,
+/// ensuring cleanup even if provisioning fails partway through.
+struct ProvisioningGuard {
+    provisioning_users: Arc<Mutex<HashSet<Uuid>>>,
+    user_id: Uuid,
+}
+
+impl Drop for ProvisioningGuard {
+    fn drop(&mut self) {
+        if let Ok(mut provisioning) = self.provisioning_users.lock() {
+            provisioning.remove(&self.user_id);
+        }
+    }
 }
 
 pub(crate) async fn provision_new_vm(state: &AppState, user_id: Uuid) -> Result<String, AppError> {
+    let _guard = acquire_provisioning_slot(state, user_id)?;
     info!("building vm config");
     let user_rootfs = ensure_user_rootfs(
         &state.config.user_rootfs_dir,
@@ -177,7 +208,6 @@ pub(crate) async fn provision_new_vm(state: &AppState, user_id: Uuid) -> Result<
             last_activity: Instant::now(),
             vm,
         },
-        state.config.vm_max_count,
     )?;
     Ok(vm_id)
 }
