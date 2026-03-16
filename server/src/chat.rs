@@ -67,7 +67,7 @@ pub(crate) async fn handle_chat_query(
     }
     let task_created_event = Bytes::from(format!(
         "event: task_created\ndata: {}\n\n",
-        serde_json::to_string(&serde_json::json!({"task_id": &task_id, "conversation_id": &conversation_id}))
+        serde_json::to_string(&serde_json::json!({"type": "task_created", "task_id": &task_id, "conversation_id": &conversation_id}))
             .unwrap_or_default()
     ));
     let agent_message = AgentMessage::Query {

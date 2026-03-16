@@ -213,7 +213,6 @@ impl AppState {
     }
 }
 
-
 pub(crate) struct AppError(pub(crate) anyhow::Error);
 
 impl IntoResponse for AppError {

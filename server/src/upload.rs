@@ -4,14 +4,17 @@ use axum::{
     http::StatusCode,
     response::{IntoResponse, Response},
 };
+use common::validate_within_dir;
 use futures::TryStreamExt;
 use russh_sftp::client::SftpSession;
 use sftp_client::open_sftp_session;
 use ssh_client::connect_ssh;
 use std::{
     io::{Error as IoError, ErrorKind},
-    path::Path,
+    path::{Path, PathBuf},
+    time::Duration,
 };
+use tokio::time::timeout;
 use tokio_util::io::StreamReader;
 use tower_sessions::Session;
 
@@ -19,6 +22,8 @@ use crate::{
     handlers::{UserVm, attach_csrf_token, validate_csrf},
     state::{AppError, AppState},
 };
+
+const SFTP_OP_TIMEOUT_SECS: u64 = 30;
 
 struct UploadMetadata {
     csrf_token: String,
@@ -43,10 +48,20 @@ pub(crate) async fn upload_file_handler(
     )
     .await?;
     let sftp = open_sftp_session(&mut ssh_handle).await?;
+    let real_path = PathBuf::from(
+        timeout(
+            Duration::from_secs(SFTP_OP_TIMEOUT_SECS),
+            sftp.canonicalize(&upload_metadata.remote_path),
+        )
+        .await
+        .context("canonicalize timed out")?
+        .context("failed to resolve remote path")?,
+    );
+    validate_within_dir(&real_path, &state.config.upload_dir)?;
     stream_upload_file(
         &mut multipart,
         &sftp,
-        Path::new(&upload_metadata.remote_path),
+        &real_path,
         &state.config.upload_dir,
     )
     .await?;

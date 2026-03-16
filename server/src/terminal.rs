@@ -93,8 +93,11 @@ async fn run_ssh_relay(guest_ip: Ipv4Addr, state: &AppState, ws: WebSocket) -> R
         &state.config.ssh_user,
         &state.config.vm_host_key_path,
     )
-    .await?;
-    let mut ssh_channel = open_terminal_channel(&mut ssh_handle).await?;
+    .await
+    .context("ssh connect failed")?;
+    let mut ssh_channel = open_terminal_channel(&mut ssh_handle)
+        .await
+        .context("open terminal channel failed")?;
     let (mut ws_sender, mut ws_receiver) = ws.split();
     let mut keepalive = tokio::time::interval(Duration::from_secs(30));
     keepalive.tick().await; // skip the immediate first tick
@@ -168,12 +171,22 @@ async fn relay_ws_to_ssh(
             true
         }
         Some(Ok(Message::Ping(data))) => {
-            let _ = timeout(
+            match timeout(
                 Duration::from_secs(SEND_TIMEOUT_SECS),
                 ws_sender.send(Message::Pong(data)),
             )
-            .await;
-            true
+            .await
+            {
+                Ok(Ok(())) => true,
+                Ok(Err(_)) => {
+                    info!("ws receiver dropped during pong, ending relay");
+                    false
+                }
+                Err(_) => {
+                    error!("ws pong send timed out, consumer likely stuck");
+                    false
+                }
+            }
         }
         Some(Ok(Message::Pong(_))) => true,
         _ => false,

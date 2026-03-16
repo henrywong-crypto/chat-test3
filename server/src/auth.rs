@@ -6,7 +6,7 @@ use axum::{
 use handlers::{AppState as CognitoState, CallbackQuery, callback, login};
 use store::upsert_user;
 use tower_sessions::Session;
-use tracing::warn;
+use tracing::{error, warn};
 use uuid::Uuid;
 
 use crate::{state::AppState, templates::render_login_page};
@@ -54,7 +54,10 @@ pub(crate) async fn get_cognito_login_handler(
     let cognito_state = build_cognito_state(&state);
     login(session, State(cognito_state))
         .await
-        .unwrap_or_else(|e| (StatusCode::INTERNAL_SERVER_ERROR, e.to_string()).into_response())
+        .unwrap_or_else(|e| {
+            error!("cognito login failed: {e}");
+            (StatusCode::INTERNAL_SERVER_ERROR, "An internal error occurred").into_response()
+        })
 }
 
 pub(crate) async fn get_callback_handler(
@@ -65,7 +68,10 @@ pub(crate) async fn get_callback_handler(
     let cognito_state = build_cognito_state(&state);
     let response = callback(query, session.clone(), State(cognito_state))
         .await
-        .unwrap_or_else(|e| (StatusCode::INTERNAL_SERVER_ERROR, e.to_string()).into_response());
+        .unwrap_or_else(|e| {
+            error!("cognito callback failed: {e}");
+            (StatusCode::INTERNAL_SERVER_ERROR, "An internal error occurred").into_response()
+        });
     if let Some(email) = session.get::<String>("email").await.ok().flatten() {
         if let Err(e) = upsert_user(&state.db, &email).await {
             return (StatusCode::INTERNAL_SERVER_ERROR, e.to_string()).into_response();
@@ -79,6 +85,8 @@ pub(crate) async fn get_callback_handler(
 }
 
 pub(crate) async fn get_logout_handler(session: Session) -> impl IntoResponse {
-    let _ = session.delete().await;
+    if let Err(e) = session.delete().await {
+        warn!("session delete failed during logout: {e}");
+    }
     Redirect::to("/login")
 }

@@ -797,7 +797,7 @@ dependencies = [
 [[package]]
 name = "chat-agent"
 version = "0.1.0"
-source = "git+https://github.com/llm-proxy-rs/web#1986a51f2b599cdce90c21b51f3649bf89d8ab26"
+source = "git+https://github.com/llm-proxy-rs/web#c2d2c59416e33ab5444903e98982cceb07ba677f"
 dependencies = [
  "anyhow",
  "bytes",
@@ -815,7 +815,7 @@ dependencies = [
 [[package]]
 name = "chat-history"
 version = "0.1.0"
-source = "git+https://github.com/llm-proxy-rs/web#1986a51f2b599cdce90c21b51f3649bf89d8ab26"
+source = "git+https://github.com/llm-proxy-rs/web#c2d2c59416e33ab5444903e98982cceb07ba677f"
 dependencies = [
  "anyhow",
  "chrono",
@@ -831,6 +831,7 @@ dependencies = [
 [[package]]
 name = "chat-settings"
 version = "0.1.0"
+source = "git+https://github.com/llm-proxy-rs/web#c2d2c59416e33ab5444903e98982cceb07ba677f"
 dependencies = [
  "anyhow",
  "bytes",
@@ -892,7 +893,7 @@ dependencies = [
 [[package]]
 name = "common"
 version = "0.1.0"
-source = "git+https://github.com/llm-proxy-rs/web#1986a51f2b599cdce90c21b51f3649bf89d8ab26"
+source = "git+https://github.com/llm-proxy-rs/web#c2d2c59416e33ab5444903e98982cceb07ba677f"
 dependencies = [
  "anyhow",
  "tokio",
@@ -1310,7 +1311,7 @@ checksum = "1aaf95b3e5c8f23aa320147307562d361db0ae0d51242340f558153b4eb2439b"
 [[package]]
 name = "download"
 version = "0.1.0"
-source = "git+https://github.com/llm-proxy-rs/web#1986a51f2b599cdce90c21b51f3649bf89d8ab26"
+source = "git+https://github.com/llm-proxy-rs/web#c2d2c59416e33ab5444903e98982cceb07ba677f"
 dependencies = [
  "anyhow",
  "async_zip",
@@ -1445,7 +1446,7 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "39cab71617ae0d63f51a36d69f866391735b51691dbda63cf6f96d042b63efeb"
 dependencies = [
  "libc",
- "windows-sys 0.52.0",
+ "windows-sys 0.61.2",
 ]
 
 [[package]]
@@ -1501,7 +1502,7 @@ checksum = "5baebc0774151f905a1a2cc41989300b1e6fbb29aff0ceffa1064fdd3088d582"
 [[package]]
 name = "firecracker-client"
 version = "0.1.0"
-source = "git+https://github.com/llm-proxy-rs/web#1986a51f2b599cdce90c21b51f3649bf89d8ab26"
+source = "git+https://github.com/llm-proxy-rs/web#c2d2c59416e33ab5444903e98982cceb07ba677f"
 dependencies = [
  "anyhow",
  "http-body-util",
@@ -1515,7 +1516,7 @@ dependencies = [
 [[package]]
 name = "firecracker-manager"
 version = "0.1.0"
-source = "git+https://github.com/llm-proxy-rs/web#1986a51f2b599cdce90c21b51f3649bf89d8ab26"
+source = "git+https://github.com/llm-proxy-rs/web#c2d2c59416e33ab5444903e98982cceb07ba677f"
 dependencies = [
  "anyhow",
  "chrono",
@@ -2672,7 +2673,7 @@ version = "0.50.3"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "7957b9740744892f114936ab4a57b3f487491bbeafaf8083688b16841a4240e5"
 dependencies = [
- "windows-sys 0.60.2",
+ "windows-sys 0.61.2",
 ]
 
 [[package]]
@@ -3740,7 +3741,7 @@ dependencies = [
  "security-framework",
  "security-framework-sys",
  "webpki-root-certs",
- "windows-sys 0.52.0",
+ "windows-sys 0.61.2",
 ]
 
 [[package]]
@@ -4003,7 +4004,7 @@ dependencies = [
 [[package]]
 name = "sftp-client"
 version = "0.1.0"
-source = "git+https://github.com/llm-proxy-rs/web#1986a51f2b599cdce90c21b51f3649bf89d8ab26"
+source = "git+https://github.com/llm-proxy-rs/web#c2d2c59416e33ab5444903e98982cceb07ba677f"
 dependencies = [
  "anyhow",
  "russh",
@@ -4141,7 +4142,7 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "3a766e1110788c36f4fa1c2b71b387a7815aa65f88ce0229841826633d93723e"
 dependencies = [
  "libc",
- "windows-sys 0.60.2",
+ "windows-sys 0.61.2",
 ]
 
 [[package]]
@@ -4393,7 +4394,7 @@ dependencies = [
 [[package]]
 name = "ssh-client"
 version = "0.1.0"
-source = "git+https://github.com/llm-proxy-rs/web#1986a51f2b599cdce90c21b51f3649bf89d8ab26"
+source = "git+https://github.com/llm-proxy-rs/web#c2d2c59416e33ab5444903e98982cceb07ba677f"
 dependencies = [
  "anyhow",
  "chrono",
@@ -4422,7 +4423,7 @@ checksum = "6ce2be8dc25455e1f91df71bfa12ad37d7af1092ae736f3a6cd0e37bc7810596"
 [[package]]
 name = "store"
 version = "0.1.0"
-source = "git+https://github.com/llm-proxy-rs/web#1986a51f2b599cdce90c21b51f3649bf89d8ab26"
+source = "git+https://github.com/llm-proxy-rs/web#c2d2c59416e33ab5444903e98982cceb07ba677f"
 dependencies = [
  "anyhow",
  "chrono",
@@ -5046,7 +5047,7 @@ checksum = "8ecb6da28b8a351d773b68d5825ac39017e680750f980f3a1a85cd8dd28a47c1"
 [[package]]
 name = "upload"
 version = "0.1.0"
-source = "git+https://github.com/llm-proxy-rs/web#1986a51f2b599cdce90c21b51f3649bf89d8ab26"
+source = "git+https://github.com/llm-proxy-rs/web#c2d2c59416e33ab5444903e98982cceb07ba677f"
 dependencies = [
  "anyhow",
  "bytes",
@@ -5358,7 +5359,7 @@ version = "0.1.11"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "c2a7b1c03c876122aa43f3020e6c3c3ee5c05081c9a00739faf7503aeba10d22"
 dependencies = [
- "windows-sys 0.48.0",
+ "windows-sys 0.61.2",
 ]
 
 [[package]]
