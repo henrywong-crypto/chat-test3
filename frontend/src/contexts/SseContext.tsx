@@ -81,7 +81,7 @@ function parseSseBlock(part: string): { eventName: string; data: string } | null
     if (line.startsWith("event: ")) {
       eventName = line.slice(7).trim();
     } else if (line.startsWith("data: ")) {
-      data = line.slice(6);
+      data += (data ? "\n" : "") + line.slice(6);
     }
   }
   return eventName && data ? { eventName, data } : null;
@@ -140,7 +140,8 @@ async function readFetchSseStream(
   pushEvent: (e: SseEvent) => void,
   vmId: string,
 ): Promise<void> {
-  const reader = response.body!.getReader();
+  if (!response.body) throw new Error("response has no body");
+  const reader = response.body.getReader();
   const decoder = new TextDecoder();
   let buffer = "";
   try {
@@ -171,21 +172,32 @@ function attachEventSourceListeners(
   const add = (name: string, handler: (e: MessageEvent) => void) => {
     es.addEventListener(name, handler as EventListener);
   };
-  add("task_created", (e) => pushEvent({ type: "task_created", payload: JSON.parse(e.data) as SseTaskCreated }));
-  add("session_start", (e) => pushEvent({ type: "session_start", payload: JSON.parse(e.data) as SseSessionStart }));
+  const safeParse = (raw: string): unknown => {
+    try {
+      return JSON.parse(raw);
+    } catch {
+      return undefined;
+    }
+  };
+  add("task_created", (e) => { const p = safeParse(e.data); if (p !== undefined) pushEvent({ type: "task_created", payload: p as SseTaskCreated }); });
+  add("session_start", (e) => { const p = safeParse(e.data); if (p !== undefined) pushEvent({ type: "session_start", payload: p as SseSessionStart }); });
   add("init", () => pushEvent({ type: "init" }));
-  add("text_delta", (e) => pushEvent({ type: "text_delta", payload: JSON.parse(e.data) as SseTextDelta }));
-  add("thinking_delta", (e) => pushEvent({ type: "thinking_delta", payload: JSON.parse(e.data) as SseThinkingDelta }));
-  add("tool_start", (e) => pushEvent({ type: "tool_start", payload: JSON.parse(e.data) as SseToolStart }));
-  add("ask_user_question", (e) => pushEvent({ type: "ask_user_question", payload: JSON.parse(e.data) as SseAskUserQuestion }));
-  add("tool_result", (e) => pushEvent({ type: "tool_result", payload: JSON.parse(e.data) as SseToolResult }));
+  add("text_delta", (e) => { const p = safeParse(e.data); if (p !== undefined) pushEvent({ type: "text_delta", payload: p as SseTextDelta }); });
+  add("thinking_delta", (e) => { const p = safeParse(e.data); if (p !== undefined) pushEvent({ type: "thinking_delta", payload: p as SseThinkingDelta }); });
+  add("tool_start", (e) => { const p = safeParse(e.data); if (p !== undefined) pushEvent({ type: "tool_start", payload: p as SseToolStart }); });
+  add("ask_user_question", (e) => { const p = safeParse(e.data); if (p !== undefined) pushEvent({ type: "ask_user_question", payload: p as SseAskUserQuestion }); });
+  add("tool_result", (e) => { const p = safeParse(e.data); if (p !== undefined) pushEvent({ type: "tool_result", payload: p as SseToolResult }); });
   add("done", (e) => {
+    const p = safeParse(e.data);
+    if (p === undefined) return;
     localStorage.removeItem(`chat_running_task_${vmId}`);
-    pushEvent({ type: "done", payload: JSON.parse(e.data) as SseDone });
+    pushEvent({ type: "done", payload: p as SseDone });
   });
   add("error_event", (e) => {
+    const p = safeParse(e.data);
+    if (p === undefined) return;
     localStorage.removeItem(`chat_running_task_${vmId}`);
-    pushEvent({ type: "error_event", payload: JSON.parse(e.data) as SseErrorEvent });
+    pushEvent({ type: "error_event", payload: p as SseErrorEvent });
   });
   es.onerror = () => {
     es.close();

@@ -14,8 +14,11 @@ const BADGE_STYLES: Record<ToolDiffViewerProps["badge"], string> = {
   Patch: "bg-orange-500/15 text-orange-400",
 };
 
+const MAX_DIFF_LINES = 200;
+
 export default function ToolDiffViewer({ oldContent, newContent, filePath, badge }: ToolDiffViewerProps) {
   const diffLines = computeDiffLines(oldContent, newContent);
+  const truncated = oldContent.split("\n").length > MAX_DIFF_LINES || newContent.split("\n").length > MAX_DIFF_LINES;
 
   return (
     <div className="overflow-hidden rounded-b-lg">
@@ -24,6 +27,11 @@ export default function ToolDiffViewer({ oldContent, newContent, filePath, badge
         <span className="flex-1 truncate font-mono text-[11px] text-muted-foreground">{filePath}</span>
         <span className={`rounded px-1.5 py-0.5 text-[10px] font-medium ${BADGE_STYLES[badge]}`}>{badge}</span>
       </div>
+      {truncated && (
+        <div className="border-t border-border bg-yellow-500/10 px-3 py-1 text-[11px] text-yellow-400">
+          Diff truncated — inputs exceed {MAX_DIFF_LINES} lines
+        </div>
+      )}
       <div className="overflow-x-auto">
         <table className="w-full border-collapse font-mono text-xs">
           <tbody>

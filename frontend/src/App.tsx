@@ -71,6 +71,7 @@ function AppContent() {
       }
     } catch (err) {
       console.error("Failed to delete session from server", err);
+      return;
     }
     deleteConversation(conversation.conversationId);
     if (selectedConversation?.conversationId === conversation.conversationId) {

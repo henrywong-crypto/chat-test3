@@ -22,11 +22,14 @@ impl<S: Send + Sync> FromRequestParts<S> for User {
         let session = Session::from_request_parts(parts, state)
             .await
             .map_err(|session_error| session_error.into_response())?;
-        session
+        let email = session
             .get::<String>("email")
             .await
-            .ok()
-            .flatten()
+            .map_err(|e| {
+                error!("session lookup failed: {e}");
+                (StatusCode::INTERNAL_SERVER_ERROR, "An internal error occurred").into_response()
+            })?;
+        email
             .map(|email| User { email })
             .ok_or_else(|| Redirect::to("/login").into_response())
     }
@@ -72,7 +75,14 @@ pub(crate) async fn get_callback_handler(
             error!("cognito callback failed: {e}");
             (StatusCode::INTERNAL_SERVER_ERROR, "An internal error occurred").into_response()
         });
-    if let Some(email) = session.get::<String>("email").await.ok().flatten() {
+    let email = match session.get::<String>("email").await {
+        Ok(email) => email,
+        Err(e) => {
+            error!("session lookup failed: {e}");
+            return (StatusCode::INTERNAL_SERVER_ERROR, "An internal error occurred").into_response();
+        }
+    };
+    if let Some(email) = email {
         if let Err(e) = upsert_user(&state.db, &email).await {
             error!("upsert_user failed: {e}");
             return (StatusCode::INTERNAL_SERVER_ERROR, "An internal error occurred").into_response();

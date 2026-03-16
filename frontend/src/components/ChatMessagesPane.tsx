@@ -18,7 +18,7 @@ export default function ChatMessagesPane({ messages, isLoading }: ChatMessagesPa
     const el = scrollRef.current;
     if (!el) return;
     el.scrollTop = el.scrollHeight;
-  });
+  }, [messages.length]);
 
   const handleWheel = () => {
     const el = scrollRef.current;

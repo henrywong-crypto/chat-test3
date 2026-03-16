@@ -89,12 +89,12 @@ export default function ChatComposer({ isLoading, isOtherRunning, onSend, onStop
       for (const file of pendingFiles) {
         const formData = new FormData();
         formData.append("csrf_token", csrfToken);
-        formData.append("path", uploadDir.replace(/\/$/, "") + "/" + file.name);
+        formData.append("path", uploadDir.replace(/\/$/, "") + "/" + file.name.replace(/[/\\]/g, "_"));
         formData.append("file", file);
         try {
           const res = await fetch(uploadAction, { method: "POST", body: formData });
-          if (res.ok) uploadedPaths.push(uploadDir.replace(/\/$/, "") + "/" + file.name);
-        } catch { /* ignore upload errors */ }
+          if (res.ok) uploadedPaths.push(uploadDir.replace(/\/$/, "") + "/" + file.name.replace(/[/\\]/g, "_"));
+        } catch (err) { console.error("File upload failed", err); }
       }
       setUploading(false);
       if (uploadedPaths.length > 0) {
@@ -193,7 +193,7 @@ export default function ChatComposer({ isLoading, isOtherRunning, onSend, onStop
             <div className="mb-2 flex flex-wrap gap-1.5">
               {pendingFiles.map((file, i) => (
                 <span
-                  key={i}
+                  key={file.name + '-' + i}
                   className="flex items-center gap-1 rounded-full border border-border bg-muted px-2.5 py-0.5 text-xs text-foreground"
                 >
                   <Paperclip className="h-2.5 w-2.5 text-muted-foreground" />

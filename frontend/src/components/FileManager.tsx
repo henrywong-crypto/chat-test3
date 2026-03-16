@@ -1,6 +1,6 @@
 import React, { useCallback, useEffect, useState } from "react";
 import { flushSync } from "react-dom";
-import { ChevronRight, Download, Folder, File, Upload, Home } from "lucide-react";
+import { ChevronRight, Download, Folder, File, Upload } from "lucide-react";
 import { useSse } from "../contexts/SseContext";
 import type { FileEntry } from "../types";
 
@@ -49,7 +49,7 @@ export default function FileManager() {
     flushSync(() => setUploadStatus("Uploading…"));
     const formData = new FormData();
     formData.append("csrf_token", csrfToken);
-    formData.append("path", currentPath.replace(/\/$/, "") + "/" + file.name);
+    formData.append("path", currentPath.replace(/\/$/, "") + "/" + file.name.replace(/[/\\]/g, "_"));
     formData.append("file", file);
     try {
       const res = await fetch(uploadAction, { method: "POST", body: formData });

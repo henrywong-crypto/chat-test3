@@ -36,7 +36,7 @@ export default function Terminal({ visible }: { visible: boolean }) {
     fitAddonRef.current = fitAddon;
 
     const wsProto = window.location.protocol === "https:" ? "wss:" : "ws:";
-    const ws = new WebSocket(`${wsProto}//${window.location.host}/ws/${vmId}`);
+    const ws = new WebSocket(`${wsProto}//${window.location.host}/ws/${encodeURIComponent(vmId)}`);
     ws.binaryType = "arraybuffer";
     wsRef.current = ws;
 

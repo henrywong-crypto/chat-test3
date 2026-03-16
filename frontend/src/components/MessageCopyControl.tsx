@@ -37,6 +37,7 @@ export default function MessageCopyControl({ content, messageType }: MessageCopy
   const canSelectFormat = messageType === "assistant";
   const [selectedFormat, setSelectedFormat] = useState<CopyFormat>(canSelectFormat ? "markdown" : "text");
   const [copied, setCopied] = useState(false);
+  const [copyFailed, setCopyFailed] = useState(false);
   const [isDropdownOpen, setIsDropdownOpen] = useState(false);
   const dropdownRef = useRef<HTMLDivElement | null>(null);
   const timerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
@@ -68,10 +69,13 @@ export default function MessageCopyControl({ content, messageType }: MessageCopy
     try {
       await navigator.clipboard.writeText(copyPayload);
       setCopied(true);
+      setCopyFailed(false);
       if (timerRef.current) clearTimeout(timerRef.current);
       timerRef.current = setTimeout(() => setCopied(false), COPY_SUCCESS_TIMEOUT_MS);
     } catch {
-      // clipboard API not available
+      setCopyFailed(true);
+      if (timerRef.current) clearTimeout(timerRef.current);
+      timerRef.current = setTimeout(() => setCopyFailed(false), COPY_SUCCESS_TIMEOUT_MS);
     }
   };
 
@@ -87,8 +91,8 @@ export default function MessageCopyControl({ content, messageType }: MessageCopy
       <button
         type="button"
         onClick={handleCopy}
-        title={copied ? "Copied!" : "Copy"}
-        aria-label={copied ? "Copied!" : "Copy"}
+        title={copied ? "Copied!" : copyFailed ? "Copy failed" : "Copy"}
+        aria-label={copied ? "Copied!" : copyFailed ? "Copy failed" : "Copy"}
         className={`inline-flex items-center gap-1 rounded px-1 py-0.5 transition-colors ${toneClass}`}
       >
         {copied ? (

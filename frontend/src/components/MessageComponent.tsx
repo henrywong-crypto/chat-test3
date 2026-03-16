@@ -1,6 +1,7 @@
 import React, { memo, useState } from "react";
 import ReactMarkdown from "react-markdown";
 import remarkGfm from "remark-gfm";
+import rehypeSanitize from "rehype-sanitize";
 import { twMerge } from "tailwind-merge";
 import type { ChatMessage } from "../types";
 import MessageCopyControl from "./MessageCopyControl";
@@ -135,6 +136,7 @@ function MarkdownContent({ content }: { content: string }) {
   return (
     <ReactMarkdown
       remarkPlugins={[remarkGfm]}
+      rehypePlugins={[rehypeSanitize]}
       className="prose prose-sm max-w-none dark:prose-invert prose-pre:bg-gray-900 prose-pre:border prose-pre:border-border prose-code:text-sm"
     >
       {content}
