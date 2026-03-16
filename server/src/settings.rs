@@ -7,11 +7,9 @@ use axum::{
 use chat_settings::{build_api_key_settings_json, get_vm_settings, set_vm_settings};
 use serde::{Deserialize, Serialize};
 use store::get_user_by_email;
-use tower_sessions::Session;
 
 use crate::{
     auth::User,
-    handlers::{attach_csrf_token, validate_csrf},
     state::{AppError, AppState, find_user_vm_guest_ip},
 };
 
@@ -64,20 +62,13 @@ pub(crate) async fn get_settings_handler(
 #[derive(Deserialize)]
 pub(crate) struct SetSettingsBody {
     api_key: String,
-    csrf_token: String,
 }
 
 pub(crate) async fn put_settings_handler(
     user: User,
-    session: Session,
     State(state): State<AppState>,
     Json(body): Json<SetSettingsBody>,
 ) -> Response {
-    let csrf_token = match validate_csrf(&session, &body.csrf_token).await {
-        Ok(Some(token)) => token,
-        Ok(None) => return (StatusCode::FORBIDDEN, "Forbidden").into_response(),
-        Err(e) => return AppError::from(e).into_response(),
-    };
     if state.config.use_iam_creds {
         return (
             StatusCode::BAD_REQUEST,
@@ -115,6 +106,5 @@ pub(crate) async fn put_settings_handler(
     {
         return AppError::from(e).into_response();
     }
-    attach_csrf_token((StatusCode::OK, "").into_response(), &csrf_token)
+    (StatusCode::OK, "").into_response()
 }
-

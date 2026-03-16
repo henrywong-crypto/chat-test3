@@ -48,11 +48,10 @@ export default function FileManager() {
   const handleUpload = useCallback(async (file: File) => {
     flushSync(() => setUploadStatus("Uploading…"));
     const formData = new FormData();
-    formData.append("csrf_token", csrfToken);
     formData.append("path", currentPath.replace(/\/$/, "") + "/" + file.name.replace(/[/\\]/g, "_"));
     formData.append("file", file);
     try {
-      const res = await fetch(uploadAction, { method: "POST", body: formData });
+      const res = await fetch(uploadAction, { method: "POST", headers: { "x-csrf-token": csrfToken }, body: formData });
       if (res.ok) {
         setUploadStatus("Uploaded.");
         loadDir(currentPath);

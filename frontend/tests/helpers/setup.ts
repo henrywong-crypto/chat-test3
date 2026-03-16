@@ -188,7 +188,8 @@ export interface ChatBody {
   content: string;
   session_id: string | null;
   work_dir?: string | null;
-  csrf_token: string;
+  /** CSRF token read from the x-csrf-token request header. */
+  csrf_token: string | null;
 }
 
 export interface AppController {
@@ -313,8 +314,8 @@ export async function setupApp(
   // ── Transcript (GET) and delete (DELETE) ─────────────────────────────────
   await page.route("**/chat-transcript**", async (route) => {
     if (route.request().method() === "DELETE") {
-      const body = route.request().postDataJSON() as { session_id: string; csrf_token: string };
-      lastDeleteCsrfTokenValue = body.csrf_token ?? null;
+      const body = route.request().postDataJSON() as { session_id: string };
+      lastDeleteCsrfTokenValue = route.request().headerValue("x-csrf-token") ?? null;
       sessions = sessions.filter((s) => s.session_id !== body.session_id);
       await route.fulfill({ status: 200, body: "" });
     } else {
@@ -375,7 +376,7 @@ export async function setupApp(
 
   // ── Reset (rootfs delete) endpoint ────────────────────────────────────────
   await page.route("**/rootfs/delete", async (route) => {
-    lastResetBody = route.request().postData();
+    lastResetBody = route.request().headerValue("x-csrf-token") ?? null;
     await route.fulfill({ status: 303, headers: { Location: "http://localhost/" } });
   });
 
@@ -420,8 +421,9 @@ export async function setupApp(
       return;
     }
 
-    const body = route.request().postDataJSON() as ChatBody;
-    chatBodies.push(body);
+    const body = route.request().postDataJSON() as Omit<ChatBody, "csrf_token">;
+    const csrf_token = route.request().headerValue("x-csrf-token") ?? null;
+    chatBodies.push({ ...body, csrf_token });
     const conversationId = body.conversation_id;
 
     const events = await waitForSseEvents();

@@ -47,8 +47,8 @@ export default function SettingsPanel({ onClose }: SettingsPanelProps) {
     try {
       const res = await fetch("/api/settings", {
         method: "PUT",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ api_key: apiKey.trim(), csrf_token: csrfToken }),
+        headers: { "Content-Type": "application/json", "x-csrf-token": csrfToken },
+        body: JSON.stringify({ api_key: apiKey.trim() }),
       });
       if (!res.ok) throw new Error(await res.text() || `HTTP ${res.status}`);
       setSaveResult("success");

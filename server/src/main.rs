@@ -1,5 +1,6 @@
 mod auth;
 mod chat;
+mod csrf;
 mod download;
 mod files;
 mod handlers;
@@ -33,6 +34,7 @@ use crate::{
         get_callback_handler, get_cognito_login_handler, get_login_handler, get_logout_handler,
     },
     chat::{handle_chat_query, handle_chat_question_answer, handle_chat_reconnect, handle_chat_stop},
+    csrf::csrf_middleware,
     download::download_file_handler,
     files::list_files_handler,
     handlers::{
@@ -123,6 +125,7 @@ fn build_router(app_state: AppState, session_store: PostgresStore) -> Router {
         .route("/static/app.js", get(serve_app_js))
         .route("/static/styles.css", get(serve_styles_css))
         .with_state(app_state)
+        .layer(middleware::from_fn(csrf_middleware))
         .layer(session_layer)
         .layer(middleware::from_fn(add_security_headers))
 }

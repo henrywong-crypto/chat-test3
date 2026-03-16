@@ -1,8 +1,8 @@
 use anyhow::{Context, Result, anyhow};
 use axum::{
     Json,
-    extract::{Form, FromRequestParts, Multipart, Path as AxumPath, Query, State},
-    http::{StatusCode, header::HeaderValue, request::Parts},
+    extract::{FromRequestParts, Multipart, Path as AxumPath, Query, State},
+    http::{StatusCode, request::Parts},
     response::{Html, IntoResponse, Redirect, Response},
 };
 use chat_history::{delete_chat_session, fetch_chat_history, list_chat_sessions};
@@ -31,57 +31,13 @@ use vm_lifecycle::{
 
 use crate::{
     auth::User,
+    csrf::get_csrf_token,
     state::{AppError, AppState, find_user_vm, find_vm_guest_ip_for_user},
     templates::render_terminal_page,
 };
 
 const LOCK_TIMEOUT_SECS: u64 = 30;
 const SFTP_OP_TIMEOUT_SECS: u64 = 30;
-
-#[derive(Deserialize)]
-pub(crate) struct CsrfForm {
-    csrf_token: String,
-}
-
-async fn get_csrf_token(session: &Session) -> Result<String> {
-    let token = session
-        .get::<String>("csrf_token")
-        .await
-        .context("failed to read csrf_token from session")?
-        .unwrap_or_else(|| Uuid::new_v4().to_string().replace('-', ""));
-    session
-        .insert("csrf_token", &token)
-        .await
-        .context("failed to store CSRF token")?;
-    Ok(token)
-}
-
-pub(crate) async fn validate_csrf(session: &Session, submitted: &str) -> Result<Option<String>> {
-    let stored = match session
-        .get::<String>("csrf_token")
-        .await
-        .context("failed to read CSRF token from session")?
-    {
-        Some(s) => s,
-        None => return Ok(None),
-    };
-    if stored != submitted {
-        return Ok(None);
-    }
-    let new_token = Uuid::new_v4().to_string().replace('-', "");
-    session
-        .insert("csrf_token", &new_token)
-        .await
-        .context("failed to store CSRF token")?;
-    Ok(Some(new_token))
-}
-
-pub(crate) fn attach_csrf_token(mut response: Response, csrf_token: &str) -> Response {
-    if let Ok(value) = csrf_token.parse::<HeaderValue>() {
-        response.headers_mut().insert("x-csrf-token", value);
-    }
-    response
-}
 
 #[derive(Serialize)]
 pub(crate) struct CsrfTokenResponse {
@@ -238,13 +194,8 @@ async fn build_terminal_response(
 
 pub(crate) async fn delete_user_rootfs_handler(
     user: User,
-    session: Session,
     State(state): State<AppState>,
-    Form(form): Form<CsrfForm>,
 ) -> Result<Response, AppError> {
-    if validate_csrf(&session, &form.csrf_token).await?.is_none() {
-        return Ok((StatusCode::FORBIDDEN, "Forbidden").into_response());
-    }
     let Some(db_user) = get_user_by_email(&state.db, &user.email).await? else {
         return Ok(Redirect::to("/login").into_response());
     };
@@ -323,20 +274,15 @@ pub(crate) async fn get_chat_transcript_handler(
 
 #[derive(Deserialize)]
 pub(crate) struct DeleteChatSessionForm {
-    csrf_token: String,
     session_id: String,
     project_dir: String,
 }
 
 pub(crate) async fn delete_chat_session_handler(
     user_vm: UserVm,
-    session: Session,
     State(state): State<AppState>,
     Json(form): Json<DeleteChatSessionForm>,
 ) -> Result<Response, AppError> {
-    let Some(csrf_token) = validate_csrf(&session, &form.csrf_token).await? else {
-        return Ok((StatusCode::FORBIDDEN, "Forbidden").into_response());
-    };
     delete_chat_session(
         user_vm.guest_ip,
         &state.config.ssh_key_path,
@@ -346,23 +292,14 @@ pub(crate) async fn delete_chat_session_handler(
         Path::new(&form.project_dir),
     )
     .await?;
-    Ok(attach_csrf_token(StatusCode::NO_CONTENT.into_response(), &csrf_token))
-}
-
-struct ChatUploadMetadata {
-    csrf_token: String,
+    Ok(StatusCode::NO_CONTENT.into_response())
 }
 
 pub(crate) async fn handle_chat_upload(
     user_vm: UserVm,
-    session: Session,
     State(state): State<AppState>,
     mut multipart: Multipart,
 ) -> Result<Response, AppError> {
-    let chat_upload_metadata = extract_chat_upload_metadata(&mut multipart).await?;
-    let Some(csrf_token) = validate_csrf(&session, &chat_upload_metadata.csrf_token).await? else {
-        return Ok((StatusCode::FORBIDDEN, "Forbidden").into_response());
-    };
     info!("uploading chat attachment via sftp");
     let mut ssh_handle = connect_ssh(
         user_vm.guest_ip,
@@ -376,25 +313,7 @@ pub(crate) async fn handle_chat_upload(
     let remote_path_str = remote_path
         .to_str()
         .context("remote path is not valid UTF-8")?;
-    Ok(attach_csrf_token(Json(serde_json::json!({"path": remote_path_str})).into_response(), &csrf_token))
-}
-
-async fn extract_chat_upload_metadata(multipart: &mut Multipart) -> Result<ChatUploadMetadata> {
-    while let Some(field) = multipart
-        .next_field()
-        .await
-        .context("failed to read multipart field")?
-    {
-        let name = field.name().context("multipart field missing name")?.to_owned();
-        if name == "csrf_token" {
-            let csrf_token = field
-                .text()
-                .await
-                .context("failed to read csrf_token field")?;
-            return Ok(ChatUploadMetadata { csrf_token });
-        }
-    }
-    Err(anyhow!("missing 'csrf_token' field"))
+    Ok(Json(serde_json::json!({"path": remote_path_str})).into_response())
 }
 
 async fn stream_chat_attachment(multipart: &mut Multipart, sftp: &SftpSession) -> Result<PathBuf> {

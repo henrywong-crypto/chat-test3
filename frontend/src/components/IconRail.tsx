@@ -84,6 +84,16 @@ function NavButton({
 function ResetButton({ csrfToken }: { csrfToken: string }) {
   const [open, setOpen] = React.useState(false);
 
+  const handleReset = React.useCallback(async () => {
+    const res = await fetch("/rootfs/delete", {
+      method: "POST",
+      headers: { "x-csrf-token": csrfToken },
+    });
+    if (res.ok || res.status === 303) {
+      window.location.href = "/";
+    }
+  }, [csrfToken]);
+
   return (
     <>
       <NavButton title="Reset environment" onClick={() => setOpen(true)}>
@@ -113,15 +123,13 @@ function ResetButton({ csrfToken }: { csrfToken: string }) {
               >
                 Cancel
               </button>
-              <form method="post" action="/rootfs/delete">
-                <input type="hidden" name="csrf_token" value={csrfToken} />
-                <button
-                  type="submit"
-                  className="rounded-lg bg-destructive px-4 py-2 text-sm font-medium text-destructive-foreground hover:opacity-90"
-                >
-                  Reset
-                </button>
-              </form>
+              <button
+                type="button"
+                onClick={handleReset}
+                className="rounded-lg bg-destructive px-4 py-2 text-sm font-medium text-destructive-foreground hover:opacity-90"
+              >
+                Reset
+              </button>
             </div>
           </div>
         </div>

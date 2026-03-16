@@ -11,12 +11,11 @@ use chat_agent::{AgentMessage, send_agent_message, stream_task_sse};
 use futures::StreamExt;
 use serde::Deserialize;
 use std::convert::Infallible;
-use tower_sessions::Session;
 use tracing::{error, info};
 use uuid::Uuid;
 
 use crate::{
-    handlers::{UserVm, attach_csrf_token, validate_csrf},
+    handlers::UserVm,
     state::{AppError, AppState, update_vm_last_activity},
 };
 
@@ -47,18 +46,13 @@ pub(crate) struct QueryBody {
     content: String,
     session_id: Option<String>,
     work_dir: Option<String>,
-    csrf_token: String,
 }
 
 pub(crate) async fn handle_chat_query(
     user_vm: UserVm,
-    session: Session,
     State(state): State<AppState>,
     Json(body): Json<QueryBody>,
 ) -> Result<Response, AppError> {
-    let Some(csrf_token) = validate_csrf(&session, &body.csrf_token).await? else {
-        return Ok((StatusCode::FORBIDDEN, "Forbidden").into_response());
-    };
     let task_id = Uuid::new_v4().to_string();
     let content_len = body.content.len();
     let conversation_id = body.conversation_id.clone();
@@ -95,7 +89,7 @@ pub(crate) async fn handle_chat_query(
         .header("x-accel-buffering", "no")
         .body(body)
         .map_err(|e| anyhow!("failed to build SSE response: {e}"))?;
-    Ok(attach_csrf_token(response, &csrf_token))
+    Ok(response)
 }
 
 #[derive(Deserialize)]
@@ -137,20 +131,13 @@ pub(crate) async fn handle_chat_reconnect(
 pub(crate) struct QuestionAnswerBody {
     request_id: String,
     answers: serde_json::Value,
-    csrf_token: String,
 }
 
 pub(crate) async fn handle_chat_question_answer(
     user_vm: UserVm,
-    session: Session,
     State(state): State<AppState>,
     Json(body): Json<QuestionAnswerBody>,
 ) -> Response {
-    let csrf_token = match validate_csrf(&session, &body.csrf_token).await {
-        Ok(Some(token)) => token,
-        Ok(None) => return (StatusCode::FORBIDDEN, "Forbidden").into_response(),
-        Err(e) => return AppError::from(e).into_response(),
-    };
     let request_id = body.request_id.clone();
     let agent_message = AgentMessage::QuestionAnswer {
         request_id: body.request_id,
@@ -160,30 +147,23 @@ pub(crate) async fn handle_chat_question_answer(
         return response;
     }
     info!("question answer forwarded  request_id={request_id}");
-    attach_csrf_token((StatusCode::OK, "").into_response(), &csrf_token)
+    (StatusCode::OK, "").into_response()
 }
 
 #[derive(Deserialize)]
 pub(crate) struct StopBody {
     task_id: String,
-    csrf_token: String,
 }
 
 pub(crate) async fn handle_chat_stop(
     user_vm: UserVm,
-    session: Session,
     State(state): State<AppState>,
     Json(body): Json<StopBody>,
 ) -> Response {
-    let csrf_token = match validate_csrf(&session, &body.csrf_token).await {
-        Ok(Some(token)) => token,
-        Ok(None) => return (StatusCode::FORBIDDEN, "Forbidden").into_response(),
-        Err(e) => return AppError::from(e).into_response(),
-    };
     let agent_message = AgentMessage::Interrupt { task_id: body.task_id };
     if let Err(response) = dispatch_agent_message(&user_vm, &state, &agent_message).await {
         return response;
     }
     info!("interrupt forwarded");
-    attach_csrf_token((StatusCode::OK, "").into_response(), &csrf_token)
+    (StatusCode::OK, "").into_response()
 }

@@ -342,13 +342,12 @@ export function SseProvider({ children }: { children: React.ReactNode }) {
     const executeStream = async () => {
       const res = await fetch("/chat", {
         method: "POST",
-        headers: { "Content-Type": "application/json" },
+        headers: { "Content-Type": "application/json", "x-csrf-token": csrfTokenRef.current },
         body: JSON.stringify({
           conversation_id: conversationId,
           content,
           session_id: sessionId ?? null,
           work_dir: workDir ?? null,
-          csrf_token: csrfTokenRef.current,
         }),
       });
       if (!res.ok) {
@@ -366,8 +365,8 @@ export function SseProvider({ children }: { children: React.ReactNode }) {
   const post = useCallback(async (path: string, body: Record<string, unknown>) => {
     const res = await fetch(path, {
       method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ ...body, csrf_token: csrfTokenRef.current }),
+      headers: { "Content-Type": "application/json", "x-csrf-token": csrfTokenRef.current },
+      body: JSON.stringify(body),
     });
     if (!res.ok) {
       const msg = await res.text();
@@ -399,8 +398,8 @@ export function SseProvider({ children }: { children: React.ReactNode }) {
   const deleteSession = useCallback(async (sessionId: string, projectDir: string) => {
     const res = await fetch("/chat-transcript", {
       method: "DELETE",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ csrf_token: csrfTokenRef.current, session_id: sessionId, project_dir: projectDir }),
+      headers: { "Content-Type": "application/json", "x-csrf-token": csrfTokenRef.current },
+      body: JSON.stringify({ session_id: sessionId, project_dir: projectDir }),
     });
     if (!res.ok) throw new Error(`HTTP ${res.status}`);
     refreshCsrfToken(res);
