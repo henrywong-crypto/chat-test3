@@ -74,7 +74,8 @@ pub(crate) async fn get_callback_handler(
         });
     if let Some(email) = session.get::<String>("email").await.ok().flatten() {
         if let Err(e) = upsert_user(&state.db, &email).await {
-            return (StatusCode::INTERNAL_SERVER_ERROR, e.to_string()).into_response();
+            error!("upsert_user failed: {e}");
+            return (StatusCode::INTERNAL_SERVER_ERROR, "An internal error occurred").into_response();
         }
         let new_csrf_token = Uuid::new_v4().to_string().replace('-', "");
         if let Err(e) = session.insert("csrf_token", &new_csrf_token).await {
