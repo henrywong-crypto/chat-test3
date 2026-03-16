@@ -61,10 +61,12 @@ pub(crate) async fn handle_chat_query(
     if let Err(e) = update_vm_last_activity(&state.vms, &user_vm.vm_id) {
         error!("failed to update vm activity: {e}");
     }
+    let task_created_json = serde_json::to_string(
+        &serde_json::json!({"type": "task_created", "task_id": &task_id, "conversation_id": &conversation_id}),
+    )
+    .map_err(|e| anyhow!("failed to serialize task_created event: {e}"))?;
     let task_created_event = Bytes::from(format!(
-        "event: task_created\ndata: {}\n\n",
-        serde_json::to_string(&serde_json::json!({"type": "task_created", "task_id": &task_id, "conversation_id": &conversation_id}))
-            .unwrap_or_default()
+        "event: task_created\ndata: {task_created_json}\n\n",
     ));
     let agent_message = AgentMessage::Query {
         task_id: task_id.clone(),
@@ -73,7 +75,7 @@ pub(crate) async fn handle_chat_query(
         session_id: body.session_id,
         work_dir: body.work_dir,
     };
-    info!("query starting  task_id={task_id}  content_len={content_len}");
+    info!("query starting");
     let event_stream = stream_task_sse(
         user_vm.guest_ip,
         state.config.ssh_key_path.clone(),
@@ -150,13 +152,13 @@ pub(crate) async fn handle_chat_question_answer(
         .map_err(|_| anyhow!("invalid request_id: expected UUID"))?
         .to_string();
     let agent_message = AgentMessage::QuestionAnswer {
-        request_id: request_id.clone(),
+        request_id,
         answers: body.answers,
     };
     if let Err(response) = dispatch_agent_message(&user_vm, &state, &agent_message).await {
         return Ok(response);
     }
-    info!("question answer forwarded  request_id={request_id}");
+    info!("question answer forwarded");
     Ok((StatusCode::OK, "").into_response())
 }
 
