@@ -7,7 +7,6 @@ use handlers::{AppState as CognitoState, CallbackQuery, callback, login};
 use store::upsert_user;
 use tower_sessions::Session;
 use tracing::{error, warn};
-use uuid::Uuid;
 
 use crate::{state::AppState, templates::render_login_page};
 
@@ -86,10 +85,6 @@ pub(crate) async fn get_callback_handler(
         if let Err(e) = upsert_user(&state.db, &email).await {
             error!("upsert_user failed: {e}");
             return (StatusCode::INTERNAL_SERVER_ERROR, "An internal error occurred").into_response();
-        }
-        let new_csrf_token = Uuid::new_v4().to_string().replace('-', "");
-        if let Err(e) = session.insert("csrf_token", &new_csrf_token).await {
-            warn!("failed to store CSRF token after login: {e}");
         }
     }
     response
