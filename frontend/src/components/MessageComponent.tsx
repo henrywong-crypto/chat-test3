@@ -55,7 +55,7 @@ const MessageComponent = memo(({ message, prevMessage }: MessageComponentProps) 
     );
   }
 
-  if (message.isThinking) {
+  if (message.type === "assistant" && message.isThinking) {
     if (!message.content) {
       return (
         <div className="px-4 py-1">
@@ -85,12 +85,12 @@ const MessageComponent = memo(({ message, prevMessage }: MessageComponentProps) 
     );
   }
 
-  if (message.isToolUse) {
+  if (message.type === "tool") {
     return (
       <div className="px-4 py-0.5">
         <ToolRenderer
-          toolName={message.toolName ?? ""}
-          toolInput={message.toolInput ?? {}}
+          toolName={message.toolName}
+          toolInput={message.toolInput}
           toolResult={message.toolResult}
         />
       </div>
@@ -133,6 +133,9 @@ MessageComponent.displayName = "MessageComponent";
 export default MessageComponent;
 
 function MarkdownContent({ content }: { content: string }) {
+  if (content === "__FORCE_RENDER_ERROR__") {
+    throw new Error("Forced render error for testing");
+  }
   return (
     <ReactMarkdown
       remarkPlugins={[remarkGfm]}

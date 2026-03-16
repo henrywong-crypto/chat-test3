@@ -2,6 +2,7 @@ import React, { useEffect, useRef, useState } from "react";
 import { ChevronDown } from "lucide-react";
 import type { ChatMessage } from "../types";
 import MessageComponent from "./MessageComponent";
+import MessageErrorBoundary from "./MessageErrorBoundary";
 
 interface ChatMessagesPaneProps {
   messages: ChatMessage[];
@@ -70,7 +71,9 @@ export default function ChatMessagesPane({ messages, isLoading }: ChatMessagesPa
           const prevMessage = index > 0 ? messages[index - 1] : null;
           return (
             <div key={message.id} className="message-slide-in">
-              <MessageComponent message={message} prevMessage={prevMessage} />
+              <MessageErrorBoundary>
+                <MessageComponent message={message} prevMessage={prevMessage} />
+              </MessageErrorBoundary>
             </div>
           );
         })}

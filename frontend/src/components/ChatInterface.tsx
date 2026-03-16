@@ -76,14 +76,15 @@ export default function ChatInterface({ selectedConversation, newChatKey = 0, on
     chatState,
   );
 
-  const loadTranscriptForConversation = useCallback(async (conversation: Conversation) => {
+  const loadTranscriptForConversation = useCallback(async (conversation: Conversation, signal?: AbortSignal) => {
     if (!conversation.sessionId || !conversation.projectDir) return;
     if (getMessages(conversation.conversationId).length > 0) return;
     try {
-      const transcript = await loadTranscript(conversation.sessionId, conversation.projectDir);
+      const transcript = await loadTranscript(conversation.sessionId, conversation.projectDir, signal);
       const msgs = buildMessagesFromTranscript(transcript);
       setMessages(conversation.conversationId, msgs);
     } catch (err) {
+      if (err instanceof DOMException && err.name === "AbortError") return;
       console.error("Failed to load transcript", err);
     }
   }, [loadTranscript, getMessages, setMessages]);
@@ -95,7 +96,9 @@ export default function ChatInterface({ selectedConversation, newChatKey = 0, on
       return;
     }
     setViewConversationId(selectedConversation.conversationId);
-    loadTranscriptForConversation(selectedConversation);
+
+    const abortController = new AbortController();
+    loadTranscriptForConversation(selectedConversation, abortController.signal);
 
     // Restore any pending question for this conversation
     const storedQuestion = getQuestionsForConversation(selectedConversation.conversationId);
@@ -108,6 +111,8 @@ export default function ChatInterface({ selectedConversation, newChatKey = 0, on
     }
 
     setComposerFocusKey((k) => k + 1);
+
+    return () => abortController.abort();
   }, [selectedConversation, setViewConversationId, loadTranscriptForConversation, getQuestionsForConversation, setSessionPendingQuestion]);
 
   const onRunningConversationChangeRef = useRef(onRunningConversationChange);

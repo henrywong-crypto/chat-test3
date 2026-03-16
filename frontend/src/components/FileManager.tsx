@@ -1,4 +1,4 @@
-import React, { useCallback, useEffect, useState } from "react";
+import React, { useCallback, useEffect, useRef, useState } from "react";
 import { flushSync } from "react-dom";
 import { ChevronRight, Download, Folder, File, Upload } from "lucide-react";
 import { useSse } from "../contexts/SseContext";
@@ -24,17 +24,19 @@ export default function FileManager() {
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [uploadStatus, setUploadStatus] = useState<string | null>(null);
+  const uploadTimeoutRef = useRef<number | null>(null);
 
-  const loadDir = useCallback(async (path: string) => {
+  const loadDir = useCallback(async (path: string, signal?: AbortSignal) => {
     setLoading(true);
     setError(null);
     try {
-      const res = await fetch(`/sessions/${vmId}/ls?path=${encodeURIComponent(path)}`);
+      const res = await fetch(`/sessions/${vmId}/ls?path=${encodeURIComponent(path)}`, { signal });
       if (!res.ok) throw new Error(await res.text());
       const data = await res.json();
       setCurrentPath(path);
       setEntries(data.entries as FileEntry[]);
     } catch (err) {
+      if (err instanceof DOMException && err.name === "AbortError") return;
       setError(String(err));
     } finally {
       setLoading(false);
@@ -42,7 +44,9 @@ export default function FileManager() {
   }, [vmId]);
 
   useEffect(() => {
-    loadDir(uploadDir);
+    const abortController = new AbortController();
+    loadDir(uploadDir, abortController.signal);
+    return () => abortController.abort();
   }, [uploadDir, loadDir]);
 
   const handleUpload = useCallback(async (file: File) => {
@@ -61,8 +65,16 @@ export default function FileManager() {
     } catch {
       setUploadStatus("Network error.");
     }
-    setTimeout(() => setUploadStatus(null), 3000);
+    uploadTimeoutRef.current = window.setTimeout(() => setUploadStatus(null), 3000);
   }, [csrfToken, currentPath, uploadAction, loadDir]);
+
+  useEffect(() => {
+    return () => {
+      if (uploadTimeoutRef.current !== null) {
+        clearTimeout(uploadTimeoutRef.current);
+      }
+    };
+  }, []);
 
   const breadcrumbParts = buildBreadcrumb(currentPath, uploadDir);
 

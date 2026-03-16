@@ -1,5 +1,5 @@
 import { useEffect, useRef, type MutableRefObject } from "react";
-import type { ChatMessage, ChatSession, Conversation, SseEvent, StoredQuestion, TranscriptMessage } from "../types";
+import type { ChatMessage, ChatSession, Conversation, SseEvent, StoredQuestion, ToolMessage, TranscriptMessage } from "../types";
 import type { ChatStateResult } from "./useChatState";
 import { buildMessagesFromTranscript } from "../utils/transcript";
 
@@ -14,6 +14,69 @@ interface SseHandlerDeps {
   getQuestionsForConversation: (conversationId: string) => StoredQuestion | null;
   conversations: Conversation[];
   vmId: string;
+}
+
+interface PersistScheduler {
+  schedule: (getMessages: () => ChatMessage[], taskId: string) => void;
+  forceFlush: (getMessages: () => ChatMessage[], taskId: string) => void;
+  cancel: () => void;
+}
+
+function createPersistScheduler(): PersistScheduler {
+  let pendingId: number | null = null;
+  let dirty = false;
+  let pendingGetMessages: (() => ChatMessage[]) | null = null;
+  let pendingTaskId: string | null = null;
+
+  function writeToDisk() {
+    if (!dirty || !pendingGetMessages || !pendingTaskId) return;
+    dirty = false;
+    const taskId = pendingTaskId;
+    const messages = pendingGetMessages();
+    localStorage.setItem(`chat_messages_task_${taskId}`, JSON.stringify(messages));
+    pendingId = null;
+  }
+
+  function schedule(getMessages: () => ChatMessage[], taskId: string) {
+    dirty = true;
+    pendingGetMessages = getMessages;
+    pendingTaskId = taskId;
+    if (pendingId !== null) return;
+    if (typeof requestIdleCallback === "function") {
+      pendingId = requestIdleCallback(writeToDisk) as unknown as number;
+    } else {
+      pendingId = window.setTimeout(writeToDisk, 500);
+    }
+  }
+
+  function forceFlush(getMessages: () => ChatMessage[], taskId: string) {
+    if (pendingId !== null) {
+      if (typeof cancelIdleCallback === "function") {
+        cancelIdleCallback(pendingId);
+      } else {
+        clearTimeout(pendingId);
+      }
+      pendingId = null;
+    }
+    dirty = true;
+    pendingGetMessages = getMessages;
+    pendingTaskId = taskId;
+    writeToDisk();
+  }
+
+  function cancel() {
+    if (pendingId !== null) {
+      if (typeof cancelIdleCallback === "function") {
+        cancelIdleCallback(pendingId);
+      } else {
+        clearTimeout(pendingId);
+      }
+      pendingId = null;
+    }
+    dirty = false;
+  }
+
+  return { schedule, forceFlush, cancel };
 }
 
 export function useSseHandlers(
@@ -63,6 +126,12 @@ export function useSseHandlers(
   // Keep stable refs for conversations to avoid stale closures in the effect
   const conversationsRef = useRef(conversations);
   conversationsRef.current = conversations;
+
+  const schedulerRef = useRef<PersistScheduler>(createPersistScheduler());
+
+  useEffect(() => {
+    return () => schedulerRef.current.cancel();
+  }, []);
 
   useEffect(() => {
     const events = eventQueueRef.current.splice(0);
@@ -116,7 +185,8 @@ export function useSseHandlers(
             isThinking: true,
           });
           if (currentTaskIdRef.current) {
-            localStorage.setItem(`chat_messages_task_${currentTaskIdRef.current}`, JSON.stringify(getMessages(session)));
+            const taskId = currentTaskIdRef.current;
+            schedulerRef.current.schedule(() => getMessages(session), taskId);
           }
           break;
         }
@@ -129,7 +199,8 @@ export function useSseHandlers(
               content: m.content + thinking,
             }));
             if (currentTaskIdRef.current) {
-              localStorage.setItem(`chat_messages_task_${currentTaskIdRef.current}`, JSON.stringify(getMessages(session)));
+              const taskId = currentTaskIdRef.current;
+              schedulerRef.current.schedule(() => getMessages(session), taskId);
             }
           }
           break;
@@ -154,7 +225,8 @@ export function useSseHandlers(
             }));
           }
           if (currentTaskIdRef.current) {
-            localStorage.setItem(`chat_messages_task_${currentTaskIdRef.current}`, JSON.stringify(getMessages(session)));
+            const taskId = currentTaskIdRef.current;
+            schedulerRef.current.schedule(() => getMessages(session), taskId);
           }
           break;
         }
@@ -177,7 +249,8 @@ export function useSseHandlers(
             toolInput: input,
           });
           if (currentTaskIdRef.current) {
-            localStorage.setItem(`chat_messages_task_${currentTaskIdRef.current}`, JSON.stringify(getMessages(session)));
+            const taskId = currentTaskIdRef.current;
+            schedulerRef.current.schedule(() => getMessages(session), taskId);
           }
           break;
         }
@@ -186,12 +259,13 @@ export function useSseHandlers(
           const { tool_use_id, content, is_error } = event.payload;
           const msgId = toolIdToMsgId.current.get(tool_use_id);
           if (msgId) {
-            updateMessageById(session, msgId, (m) => ({
-              ...m,
-              toolResult: { content, isError: is_error },
-            }));
+            updateMessageById(session, msgId, (m) => {
+              if (m.type !== "tool") return m;
+              return { ...m, toolResult: { content, isError: is_error } };
+            });
             if (currentTaskIdRef.current) {
-              localStorage.setItem(`chat_messages_task_${currentTaskIdRef.current}`, JSON.stringify(getMessages(session)));
+              const taskId = currentTaskIdRef.current;
+              schedulerRef.current.schedule(() => getMessages(session), taskId);
             }
           }
           break;
@@ -213,6 +287,7 @@ export function useSseHandlers(
 
         case "done": {
           const { session_id, task_id, conversation_id } = event.payload;
+          schedulerRef.current.forceFlush(() => getMessages(session), task_id);
           localStorage.removeItem(`chat_messages_task_${task_id}`);
           currentTaskIdRef.current = null;
           setRunningConversationId(null);
@@ -245,6 +320,7 @@ export function useSseHandlers(
         case "error_event": {
           const { message } = event.payload;
           if (currentTaskIdRef.current) {
+            schedulerRef.current.forceFlush(() => getMessages(session), currentTaskIdRef.current);
             localStorage.removeItem(`chat_messages_task_${currentTaskIdRef.current}`);
             currentTaskIdRef.current = null;
           }

@@ -21,15 +21,16 @@ export default function SettingsPanel({ onClose }: SettingsPanelProps) {
   const [saveResult, setSaveResult] = useState<"success" | "error" | null>(null);
   const [loadError, setLoadError] = useState<string | null>(null);
 
-  const loadSettings = useCallback(async () => {
+  const loadSettings = useCallback(async (signal?: AbortSignal) => {
     setLoading(true);
     setLoadError(null);
     try {
-      const res = await fetch("/api/settings");
+      const res = await fetch("/api/settings", { signal });
       if (!res.ok) throw new Error(`HTTP ${res.status}`);
       const data = await res.json() as SettingsData;
       setSettings(data);
     } catch (err) {
+      if (err instanceof DOMException && err.name === "AbortError") return;
       setLoadError(String(err));
     } finally {
       setLoading(false);
@@ -37,7 +38,9 @@ export default function SettingsPanel({ onClose }: SettingsPanelProps) {
   }, []);
 
   useEffect(() => {
-    loadSettings();
+    const abortController = new AbortController();
+    loadSettings(abortController.signal);
+    return () => abortController.abort();
   }, []); // eslint-disable-line react-hooks/exhaustive-deps
 
   const handleSave = useCallback(async () => {

@@ -1,4 +1,4 @@
-import type { ChatMessage, ContentBlock, TranscriptMessage } from "../types";
+import type { ChatMessage, ContentBlock, ToolMessage, TranscriptMessage } from "../types";
 
 function extractToolResultContent(raw: string | ContentBlock[] | undefined): string {
   if (!raw) return "";
@@ -25,13 +25,16 @@ export function buildMessagesFromTranscript(transcript: TranscriptMessage[]): Ch
           if (block.type === "tool_result" && block.tool_use_id) {
             const idx = toolIdToIndex.get(block.tool_use_id);
             if (idx !== undefined) {
-              messages[idx] = {
-                ...messages[idx],
-                toolResult: {
-                  content: extractToolResultContent(block.content),
-                  isError: block.is_error ?? false,
-                },
-              };
+              const existing = messages[idx];
+              if (existing.type === "tool") {
+                messages[idx] = {
+                  ...existing,
+                  toolResult: {
+                    content: extractToolResultContent(block.content),
+                    isError: block.is_error ?? false,
+                  },
+                };
+              }
             }
           }
         }
@@ -73,10 +76,10 @@ export function buildMessagesFromTranscript(transcript: TranscriptMessage[]): Ch
             content: "",
             timestamp: Date.now(),
             isToolUse: true,
-            toolId: block.id,
-            toolName: block.name,
-            toolInput: block.input as Record<string, unknown>,
-          });
+            toolId: block.id ?? "",
+            toolName: block.name ?? "",
+            toolInput: (block.input as Record<string, unknown>) ?? {},
+          } satisfies ToolMessage);
         }
       }
     }
