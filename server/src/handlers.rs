@@ -35,7 +35,7 @@ use vm_lifecycle::{
 use crate::{
     auth::User,
     csrf::get_csrf_token,
-    state::{AppError, AppState, find_user_vm, find_vm_guest_ip_for_user},
+    state::{AppError, AppState, find_user_vm},
     templates::render_terminal_page,
 };
 
@@ -92,18 +92,9 @@ impl FromRequestParts<AppState> for UserVm {
         })? {
             Some(entry) => entry,
             None => {
-                let new_vm_id = provision_new_vm(state, db_user.id).await
+                let user_vm = provision_new_vm(state, db_user.id).await
                     .map_err(IntoResponse::into_response)?;
-                let guest_ip = find_vm_guest_ip_for_user(&state.vms, &new_vm_id, db_user.id)
-                    .map_err(|e| {
-                        error!("vm registry error after provision: {e}");
-                        (StatusCode::INTERNAL_SERVER_ERROR, "An internal error occurred").into_response()
-                    })?
-                    .ok_or_else(|| {
-                        error!("newly provisioned VM not found in registry");
-                        (StatusCode::INTERNAL_SERVER_ERROR, "An internal error occurred").into_response()
-                    })?;
-                (new_vm_id, guest_ip)
+                return Ok(user_vm);
             }
         };
         Ok(UserVm { user_id: db_user.id, vm_id, guest_ip })
@@ -202,7 +193,7 @@ impl Drop for ProvisioningGuard {
     }
 }
 
-pub(crate) async fn provision_new_vm(state: &AppState, user_id: Uuid) -> Result<String, AppError> {
+pub(crate) async fn provision_new_vm(state: &AppState, user_id: Uuid) -> Result<UserVm, AppError> {
     // acquire_provisioning_slot locks vms + provisioning_users, performs all
     // checks, inserts user_id into the provisioning set, then drops both locks
     // before returning. The _guard keeps user_id in the set for the duration of
@@ -227,6 +218,7 @@ pub(crate) async fn provision_new_vm(state: &AppState, user_id: Uuid) -> Result<
     let vm = create_vm(&vm_config).await?;
     info!("vm started");
     let vm_id = vm.id.clone();
+    let guest_ip = vm.guest_ip();
     register_vm(
         &state.vms,
         vm_id.clone(),
@@ -237,7 +229,7 @@ pub(crate) async fn provision_new_vm(state: &AppState, user_id: Uuid) -> Result<
             vm,
         },
     )?;
-    Ok(vm_id)
+    Ok(UserVm { user_id, vm_id, guest_ip })
 }
 
 async fn build_terminal_response(

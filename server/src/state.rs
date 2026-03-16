@@ -101,10 +101,10 @@ fn default_ssh_key_path() -> PathBuf {
     PathBuf::from("/var/lib/fc/id_rsa")
 }
 fn default_ssh_user() -> String {
-    "root".to_string()
+    "ubuntu".to_string()
 }
 fn default_ssh_user_home() -> PathBuf {
-    PathBuf::from("/root")
+    PathBuf::from("/home/ubuntu")
 }
 fn default_vm_host_key_path() -> PathBuf {
     PathBuf::from("/var/lib/fc/vm_host_ed25519_key.pub")
@@ -119,7 +119,7 @@ fn default_upload_dir() -> PathBuf {
     PathBuf::from("/home/ubuntu")
 }
 fn default_database_url() -> String {
-    "postgres://localhost/webcode".to_string()
+    "postgres://localhost/web".to_string()
 }
 fn default_port() -> u16 {
     3000
@@ -143,7 +143,7 @@ fn default_vm_max_count() -> usize {
     20
 }
 fn default_iam_role_name() -> String {
-    "vm-role".to_string()
+    "fc-role".to_string()
 }
 fn default_true() -> bool {
     true
@@ -167,11 +167,6 @@ pub(crate) fn load_config() -> Result<AppConfig> {
         .add_source(Environment::default())
         .build()?
         .try_deserialize()?;
-    // Derive ssh_user_home from ssh_user when the caller hasn't explicitly
-    // configured it and ssh_user isn't root (e.g. ssh_user="ubuntu" → "/home/ubuntu").
-    if app_config.ssh_user_home == PathBuf::from("/root") && app_config.ssh_user != "root" {
-        app_config.ssh_user_home = PathBuf::from("/home").join(&app_config.ssh_user);
-    }
     tracing::info!("config loaded");
     Ok(app_config)
 }
@@ -242,24 +237,6 @@ pub(crate) fn update_vm_last_activity(vms: &VmRegistry, vm_id: &str) -> Result<(
         .get_mut(vm_id)
         .map(|entry| entry.last_activity = Instant::now());
     Ok(())
-}
-
-pub(crate) fn find_vm_guest_ip_for_user(
-    vms: &VmRegistry,
-    vm_id: &str,
-    user_id: Uuid,
-) -> Result<Option<Ipv4Addr>> {
-    let registry = vms
-        .lock()
-        .map_err(|_| anyhow!("vm registry lock poisoned"))?;
-    Ok(registry
-        .get(vm_id)
-        .filter(|e| e.user_id == user_id)
-        .map(|e| e.vm.guest_ip()))
-}
-
-pub(crate) fn find_user_vm_guest_ip(vms: &VmRegistry, user_id: Uuid) -> Result<Option<Ipv4Addr>> {
-    Ok(find_user_vm(vms, user_id)?.map(|(_, ip)| ip))
 }
 
 pub(crate) fn find_user_vm(

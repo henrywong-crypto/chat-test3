@@ -1,16 +1,14 @@
 use axum::{
     Json,
     extract::State,
-    http::StatusCode,
     response::{IntoResponse, Response},
 };
 use chat_settings::{build_api_key_settings_json, get_vm_settings, set_vm_settings};
 use serde::{Deserialize, Serialize};
-use store::get_user_by_email;
 
 use crate::{
-    auth::User,
-    state::{AppError, AppState, find_user_vm_guest_ip},
+    handlers::UserVm,
+    state::{AppError, AppState},
 };
 
 #[derive(Serialize)]
@@ -21,7 +19,7 @@ pub(crate) struct SettingsResponse {
 }
 
 pub(crate) async fn get_settings_handler(
-    user: User,
+    user_vm: UserVm,
     State(state): State<AppState>,
 ) -> Result<Response, AppError> {
     if state.config.use_iam_creds {
@@ -32,20 +30,8 @@ pub(crate) async fn get_settings_handler(
         })
         .into_response());
     }
-    let Some(db_user) = get_user_by_email(&state.db, &user.email).await? else {
-        return Ok((StatusCode::UNAUTHORIZED, "Not found").into_response());
-    };
-    let guest_ip_opt = find_user_vm_guest_ip(&state.vms, db_user.id)?;
-    let Some(guest_ip) = guest_ip_opt else {
-        return Ok(Json(SettingsResponse {
-            uses_bedrock: false,
-            has_api_key: false,
-            base_url: state.config.anthropic_base_url.clone(),
-        })
-        .into_response());
-    };
     let vm_settings = get_vm_settings(
-        guest_ip,
+        user_vm.guest_ip,
         &state.config.ssh_key_path,
         &state.config.ssh_user,
         &state.config.vm_host_key_path,
@@ -65,29 +51,13 @@ pub(crate) struct SetSettingsBody {
 }
 
 pub(crate) async fn put_settings_handler(
-    user: User,
+    user_vm: UserVm,
     State(state): State<AppState>,
     Json(body): Json<SetSettingsBody>,
-) -> Response {
+) -> Result<Response, AppError> {
     if state.config.use_iam_creds {
-        return (
-            StatusCode::BAD_REQUEST,
-            "API key not applicable in Bedrock mode",
-        )
-            .into_response();
+        return Ok(Json("API key not applicable in Bedrock mode").into_response());
     }
-    let db_user = match get_user_by_email(&state.db, &user.email).await {
-        Ok(Some(u)) => u,
-        Ok(None) => return (StatusCode::UNAUTHORIZED, "Not found").into_response(),
-        Err(e) => return AppError::from(e).into_response(),
-    };
-    let guest_ip_opt = match find_user_vm_guest_ip(&state.vms, db_user.id) {
-        Ok(ip) => ip,
-        Err(e) => return AppError::from(e).into_response(),
-    };
-    let Some(guest_ip) = guest_ip_opt else {
-        return (StatusCode::NOT_FOUND, "No active VM").into_response();
-    };
     let content = build_api_key_settings_json(
         &body.api_key,
         state.config.anthropic_base_url.as_deref(),
@@ -95,16 +65,13 @@ pub(crate) async fn put_settings_handler(
         &state.config.anthropic_default_sonnet_model,
         &state.config.anthropic_default_opus_model,
     );
-    if let Err(e) = set_vm_settings(
-        guest_ip,
+    set_vm_settings(
+        user_vm.guest_ip,
         &state.config.ssh_key_path,
         &state.config.ssh_user,
         &state.config.vm_host_key_path,
         &content,
     )
-    .await
-    {
-        return AppError::from(e).into_response();
-    }
-    (StatusCode::OK, "").into_response()
+    .await?;
+    Ok(Json("").into_response())
 }

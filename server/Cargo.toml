@@ -21,6 +21,7 @@ config = "0.15.19"
 download = { git = "https://github.com/llm-proxy-rs/web" }
 firecracker-manager = { git = "https://github.com/llm-proxy-rs/web" }
 futures = "0.3.32"
+html-escape = "0.2.13"
 handlers = { git = "https://github.com/llm-proxy-rs/cognito.git", version = "0.1.0" }
 sanitize-filename = "0.6.0"
 russh = "0.57.1"

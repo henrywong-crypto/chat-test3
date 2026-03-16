@@ -22,7 +22,7 @@ user_rootfs_dir = "/home/ubuntu/fc-users"
 upload_dir = "/home/ubuntu"
 
 # PostgreSQL connection URL
-database_url = "postgres://localhost/webcode"
+database_url = "postgres://localhost/web"
 
 # Port the server listens on
 port = 3000

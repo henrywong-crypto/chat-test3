@@ -586,8 +586,8 @@ def main() -> None:
         help=f"Firecracker CI image version for kernel/rootfs (default: {FC_CI_VERSION})",
     )
     parser.add_argument(
-        "--database-url", default="postgres://localhost/webcode", metavar="URL",
-        help="PostgreSQL connection URL (default: postgres://localhost/webcode)",
+        "--database-url", default="postgres://localhost/web", metavar="URL",
+        help="PostgreSQL connection URL (default: postgres://localhost/web)",
     )
     parser.add_argument("--skip-firecracker", action="store_true",
                         help="Skip downloading Firecracker + jailer binaries")

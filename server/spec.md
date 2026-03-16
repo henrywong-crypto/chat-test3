@@ -48,7 +48,7 @@ See `config.example.toml`. All fields can also be set via environment variables.
 | `vm_host_key_path` | `/var/lib/fc/vm_host_key.pub` | Expected VM host public key |
 | `user_rootfs_dir` | `/home/ubuntu/fc-users` | Per-user rootfs storage directory |
 | `upload_dir` | `/home/ubuntu` | Directory inside the VM for uploads/downloads |
-| `database_url` | `postgres://localhost/webcode` | PostgreSQL connection URL |
+| `database_url` | `postgres://localhost/web` | PostgreSQL connection URL |
 | `port` | `3000` | HTTP listen port |
 | `use_jailer` | `false` | Enable Firecracker jailer |
 | `jailer_path` | `/usr/local/bin/jailer` | Path to jailer binary |
