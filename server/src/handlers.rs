@@ -385,7 +385,7 @@ async fn extract_chat_upload_metadata(multipart: &mut Multipart) -> Result<ChatU
         .await
         .context("failed to read multipart field")?
     {
-        let name = field.name().unwrap_or("").to_owned();
+        let name = field.name().context("multipart field missing name")?.to_owned();
         if name == "csrf_token" {
             let csrf_token = field
                 .text()
@@ -403,7 +403,7 @@ async fn stream_chat_attachment(multipart: &mut Multipart, sftp: &SftpSession) -
         .await
         .context("failed to read multipart field")?
     {
-        if field.name().unwrap_or("") == "file" {
+        if field.name().context("multipart field missing name")? == "file" {
             let filename = field
                 .file_name()
                 .context("file upload missing filename")?

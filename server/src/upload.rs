@@ -61,7 +61,7 @@ async fn extract_upload_metadata(multipart: &mut Multipart) -> Result<UploadMeta
         .await
         .context("failed to read multipart field")?
     {
-        let name = field.name().unwrap_or("").to_owned();
+        let name = field.name().context("multipart field missing name")?.to_owned();
         if name == "csrf_token" {
             csrf_token = Some(
                 field
@@ -95,7 +95,7 @@ async fn stream_upload_file(
         .await
         .context("failed to read multipart field")?
     {
-        if field.name().unwrap_or("") == "file" {
+        if field.name().context("multipart field missing name")? == "file" {
             let mut reader =
                 StreamReader::new(field.map_err(|e| IoError::new(ErrorKind::Other, e)));
             return upload::write_file_via_sftp(sftp, remote_path, upload_dir, &mut reader).await;
