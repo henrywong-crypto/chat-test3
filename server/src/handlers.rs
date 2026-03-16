@@ -135,9 +135,27 @@ pub(crate) async fn get_or_create_terminal(
     build_terminal_response(&session, &state, user_vm.user_id, &user_vm.vm_id).await
 }
 
-/// Acquires a per-user provisioning slot, checking that no VM already exists for
-/// the user and that the total capacity (running VMs + in-flight provisions) has
-/// not been exceeded. Returns a guard that automatically releases the slot on drop.
+/// Atomically reserves a provisioning slot for a user by locking both `vms` and
+/// `provisioning_users`, checking three conditions, then inserting `user_id` into
+/// the provisioning set. Both mutex guards are local variables — they drop when
+/// this function returns, so no mutex is held across the subsequent async work in
+/// `provision_new_vm`. The returned `ProvisioningGuard` holds only an `Arc` to
+/// the provisioning set (not a lock guard); its `Drop` impl briefly re-acquires
+/// the provisioning mutex to remove the user_id once provisioning completes or fails.
+///
+/// Checks performed while both locks are held:
+/// 1. User does not already have a running VM in the registry.
+/// 2. User does not already have an in-flight provision (duplicate insert returns false).
+/// 3. Total slots (running VMs + in-flight provisions) does not exceed `vm_max_count`.
+///
+/// No deadlock: this is the only site that holds both mutexes, and it always
+/// acquires them in the same order (vms → provisioning_users). Every other site
+/// in the codebase acquires at most one of the two.
+///
+/// No blocking between different users: the locks are held only for in-memory
+/// checks (microseconds). If User B calls this while User A's locks are held,
+/// User B waits only for the mutex (microseconds), then acquires the locks,
+/// passes the checks, and proceeds to provision concurrently alongside User A.
 fn acquire_provisioning_slot(state: &AppState, user_id: Uuid) -> Result<ProvisioningGuard, AppError> {
     let registry = state
         .vms
@@ -153,6 +171,10 @@ fn acquire_provisioning_slot(state: &AppState, user_id: Uuid) -> Result<Provisio
     if !provisioning.insert(user_id) {
         return Err(anyhow!("VM provisioning already in progress for user").into());
     }
+    // In-flight provisions count as reserved slots so concurrent callers cannot
+    // overshoot vm_max_count. For example, with 18 running VMs and max 20:
+    // User A inserts → 18 + 1 = 19 ≤ 20 ✓, User B inserts → 18 + 2 = 20 ≤ 20 ✓,
+    // User C inserts → 18 + 3 = 21 > 20 ✗ (removed and rejected).
     if registry.len() + provisioning.len() > state.config.vm_max_count {
         provisioning.remove(&user_id);
         return Err(anyhow!("vm limit reached").into());
@@ -163,8 +185,9 @@ fn acquire_provisioning_slot(state: &AppState, user_id: Uuid) -> Result<Provisio
     })
 }
 
-/// RAII guard that removes the user from the provisioning set on drop,
-/// ensuring cleanup even if provisioning fails partway through.
+/// RAII guard that removes the user from the provisioning set on drop. Holds an
+/// `Arc` to the set — not a lock guard — so no mutex is held while this lives.
+/// On drop it briefly acquires the provisioning mutex to remove the user_id.
 struct ProvisioningGuard {
     provisioning_users: Arc<Mutex<HashSet<Uuid>>>,
     user_id: Uuid,
@@ -179,6 +202,10 @@ impl Drop for ProvisioningGuard {
 }
 
 pub(crate) async fn provision_new_vm(state: &AppState, user_id: Uuid) -> Result<String, AppError> {
+    // acquire_provisioning_slot locks vms + provisioning_users, performs all
+    // checks, inserts user_id into the provisioning set, then drops both locks
+    // before returning. The _guard keeps user_id in the set for the duration of
+    // this function; its Drop impl removes it (on success or error).
     let _guard = acquire_provisioning_slot(state, user_id)?;
     info!("building vm config");
     let user_rootfs = ensure_user_rootfs(
