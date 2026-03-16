@@ -55,6 +55,6 @@ test.describe("reset environment", () => {
     ]);
 
     expect(request.method()).toBe("POST");
-    expect(request.postData()).toContain(`csrf_token=${CSRF_TOKEN}`);
+    expect(await request.headerValue("x-csrf-token")).toBe(CSRF_TOKEN);
   });
 });

@@ -55,7 +55,9 @@ pub(crate) async fn handle_chat_query(
 ) -> Result<Response, AppError> {
     let task_id = Uuid::new_v4().to_string();
     let content_len = body.content.len();
-    let conversation_id = body.conversation_id.clone();
+    let conversation_id = Uuid::parse_str(&body.conversation_id)
+        .map_err(|_| anyhow!("invalid conversation_id: expected UUID"))?
+        .to_string();
     if let Err(e) = update_vm_last_activity(&state.vms, &user_vm.vm_id) {
         error!("failed to update vm activity: {e}");
     }
@@ -106,9 +108,15 @@ pub(crate) async fn handle_chat_reconnect(
     if let Err(e) = update_vm_last_activity(&state.vms, &user_vm.vm_id) {
         error!("failed to update vm activity: {e}");
     }
+    let task_id = Uuid::parse_str(&task_id)
+        .map_err(|_| anyhow!("invalid task_id: expected UUID"))?
+        .to_string();
+    let conversation_id = Uuid::parse_str(&query.conversation_id)
+        .map_err(|_| anyhow!("invalid conversation_id: expected UUID"))?
+        .to_string();
     let agent_message = AgentMessage::Hello {
         task_id,
-        conversation_id: query.conversation_id,
+        conversation_id,
     };
     let event_stream = stream_task_sse(
         user_vm.guest_ip,
@@ -137,17 +145,19 @@ pub(crate) async fn handle_chat_question_answer(
     user_vm: UserVm,
     State(state): State<AppState>,
     Json(body): Json<QuestionAnswerBody>,
-) -> Response {
-    let request_id = body.request_id.clone();
+) -> Result<Response, AppError> {
+    let request_id = Uuid::parse_str(&body.request_id)
+        .map_err(|_| anyhow!("invalid request_id: expected UUID"))?
+        .to_string();
     let agent_message = AgentMessage::QuestionAnswer {
-        request_id: body.request_id,
+        request_id: request_id.clone(),
         answers: body.answers,
     };
     if let Err(response) = dispatch_agent_message(&user_vm, &state, &agent_message).await {
-        return response;
+        return Ok(response);
     }
     info!("question answer forwarded  request_id={request_id}");
-    (StatusCode::OK, "").into_response()
+    Ok((StatusCode::OK, "").into_response())
 }
 
 #[derive(Deserialize)]
@@ -159,11 +169,14 @@ pub(crate) async fn handle_chat_stop(
     user_vm: UserVm,
     State(state): State<AppState>,
     Json(body): Json<StopBody>,
-) -> Response {
-    let agent_message = AgentMessage::Interrupt { task_id: body.task_id };
+) -> Result<Response, AppError> {
+    let task_id = Uuid::parse_str(&body.task_id)
+        .map_err(|_| anyhow!("invalid task_id: expected UUID"))?
+        .to_string();
+    let agent_message = AgentMessage::Interrupt { task_id };
     if let Err(response) = dispatch_agent_message(&user_vm, &state, &agent_message).await {
-        return response;
+        return Ok(response);
     }
     info!("interrupt forwarded");
-    (StatusCode::OK, "").into_response()
+    Ok((StatusCode::OK, "").into_response())
 }
