@@ -68,8 +68,7 @@ async fn extract_upload_metadata(multipart: &mut Multipart) -> Result<UploadMeta
         .await
         .context("failed to read multipart field")?
     {
-        let name = field.name().context("multipart field missing name")?.to_owned();
-        if name == "path" {
+        if field.name().context("multipart field missing name")? == "path" {
             let remote_path = field.text().await.context("failed to read path field")?;
             return Ok(UploadMetadata { remote_path });
         }

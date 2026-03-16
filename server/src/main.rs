@@ -72,7 +72,11 @@ async fn main() -> Result<()> {
     let port = app_state.config.port;
     cleanup_stale_vms(&app_state.config.net_helper_path, &app_state.config.jailer_chroot_base).await;
     setup_host_networking(&app_state.config.net_helper_path).await;
-    let mmds_refresh_task = spawn_mmds_refresh_task(app_state.clone());
+    let mmds_refresh_abort_handle = if app_state.config.use_iam_creds {
+        Some(spawn_mmds_refresh_task(app_state.clone()).abort_handle())
+    } else {
+        None
+    };
     let idle_vm_sweep_task = spawn_idle_vm_sweep_task(app_state.clone());
     let router = build_router(app_state.clone(), session_store);
     serve_router(
@@ -80,7 +84,7 @@ async fn main() -> Result<()> {
         port,
         app_state,
         deletion_task.abort_handle(),
-        mmds_refresh_task.abort_handle(),
+        mmds_refresh_abort_handle,
         idle_vm_sweep_task.abort_handle(),
     )
     .await?;
@@ -168,7 +172,7 @@ async fn serve_router(
     port: u16,
     app_state: AppState,
     deletion_task_abort_handle: AbortHandle,
-    mmds_refresh_abort_handle: AbortHandle,
+    mmds_refresh_abort_handle: Option<AbortHandle>,
     idle_vm_sweep_abort_handle: AbortHandle,
 ) -> Result<()> {
     let addr = SocketAddr::new(IpAddr::V4(Ipv4Addr::UNSPECIFIED), port);
@@ -230,7 +234,7 @@ fn spawn_mmds_refresh_task(app_state: AppState) -> tokio::task::JoinHandle<()> {
 
 async fn shutdown_signal(
     deletion_task_abort_handle: AbortHandle,
-    mmds_refresh_abort_handle: AbortHandle,
+    mmds_refresh_abort_handle: Option<AbortHandle>,
     idle_vm_sweep_abort_handle: AbortHandle,
 ) {
     let ctrl_c = async {
@@ -251,6 +255,8 @@ async fn shutdown_signal(
     }
     info!("shutdown signal received, saving vm rootfs before exit");
     deletion_task_abort_handle.abort();
-    mmds_refresh_abort_handle.abort();
+    if let Some(mmds_refresh_abort_handle) = mmds_refresh_abort_handle {
+        mmds_refresh_abort_handle.abort();
+    }
     idle_vm_sweep_abort_handle.abort();
 }
