@@ -6,6 +6,7 @@ use axum::{
     response::{Html, IntoResponse, Redirect, Response},
 };
 use chat_history::{delete_chat_session, fetch_chat_history, list_chat_sessions};
+use common::validate_within_dir;
 use firecracker_manager::create_vm;
 use futures::TryStreamExt;
 use russh_sftp::client::SftpSession;
@@ -266,6 +267,7 @@ pub(crate) async fn delete_user_rootfs_handler(
     };
     let rootfs_path = build_user_rootfs_path(&state.config.user_rootfs_dir, db_user.id);
     info!("deleting saved rootfs");
+    remove_user_vm(&state.vms, db_user.id)?;
     let _guard = timeout(Duration::from_secs(LOCK_TIMEOUT_SECS), state.rootfs_lock.lock())
         .await
         .context("timed out waiting for rootfs lock")?;
@@ -275,7 +277,6 @@ pub(crate) async fn delete_user_rootfs_handler(
         }
     }
     drop(_guard);
-    remove_user_vm(&state.vms, db_user.id)?;
     Ok(Redirect::to("/").into_response())
 }
 
@@ -393,10 +394,22 @@ async fn stream_chat_attachment(multipart: &mut Multipart, sftp: &SftpSession) -
                 .context("file upload missing filename")?
                 .to_owned();
             let remote_path = build_chat_upload_path(&filename);
+            let real_path = PathBuf::from(
+                timeout(
+                    Duration::from_secs(SFTP_OP_TIMEOUT_SECS),
+                    sftp.canonicalize(remote_path.parent().context("chat upload path has no parent")?),
+                )
+                .await
+                .context("canonicalize timed out")?
+                .context("failed to resolve chat upload dir")?,
+            )
+            .join(remote_path.file_name().context("chat upload path has no filename")?);
+            let chat_upload_dir = PathBuf::from("/tmp");
+            validate_within_dir(&real_path, &chat_upload_dir)?;
             let mut reader =
                 StreamReader::new(field.map_err(|e| IoError::new(ErrorKind::Other, e)));
-            write_chat_file_via_sftp(sftp, &remote_path, &mut reader).await?;
-            return Ok(remote_path);
+            write_chat_file_via_sftp(sftp, &real_path, &mut reader).await?;
+            return Ok(real_path);
         }
     }
     Err(anyhow!("missing 'file' field"))
@@ -407,16 +420,7 @@ fn build_chat_upload_path(filename: &str) -> PathBuf {
         .duration_since(UNIX_EPOCH)
         .expect("system clock is before Unix epoch")
         .as_millis();
-    let safe_name: String = filename
-        .chars()
-        .map(|c| {
-            if c.is_alphanumeric() || c == '.' || c == '-' || c == '_' {
-                c
-            } else {
-                '_'
-            }
-        })
-        .collect();
+    let safe_name = sanitize_filename::sanitize(filename);
     PathBuf::from("/tmp").join(format!("{ts}_{safe_name}"))
 }
 

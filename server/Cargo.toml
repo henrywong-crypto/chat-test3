@@ -22,6 +22,7 @@ download = { git = "https://github.com/llm-proxy-rs/web" }
 firecracker-manager = { git = "https://github.com/llm-proxy-rs/web" }
 futures = "0.3.32"
 handlers = { git = "https://github.com/llm-proxy-rs/cognito.git", version = "0.1.0" }
+sanitize-filename = "0.6.0"
 russh = "0.57.1"
 russh-sftp = "2.1.1"
 serde = { version = "1.0.228", features = ["derive"] }
