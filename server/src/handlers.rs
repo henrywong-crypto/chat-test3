@@ -48,6 +48,7 @@ pub(crate) async fn get_csrf_token_handler(
     _user: User,
     session: Session,
 ) -> Result<Response, AppError> {
+    // Fetch or create a CSRF token to return to the frontend
     let csrf_token = get_csrf_token(&session).await?;
     Ok(Json(CsrfTokenResponse { csrf_token }).into_response())
 }
@@ -63,6 +64,9 @@ fn register_vm(vms: &VmRegistry, vm_id: String, vm_entry: VmEntry, max_count: us
     Ok(())
 }
 
+/// Axum extractor that authenticates the user and resolves their VM.
+/// Looks up an existing VM or provisions a new one, returning the user ID,
+/// VM ID, and guest IP for the handler.
 pub(crate) struct UserVm {
     pub(crate) user_id: Uuid,
     pub(crate) vm_id: String,
@@ -73,12 +77,15 @@ impl FromRequestParts<AppState> for UserVm {
     type Rejection = Response;
 
     async fn from_request_parts(parts: &mut Parts, state: &AppState) -> Result<Self, Self::Rejection> {
+        // Step 1: Authenticate the user from the request
         let user = User::from_request_parts(parts, state).await
             .map_err(IntoResponse::into_response)?;
+        // Step 2: Look up the user in the database, redirect to login if not found
         let db_user = get_user_by_email(&state.db, &user.email).await.map_err(|e| {
             error!("db error: {e}");
             (StatusCode::INTERNAL_SERVER_ERROR, "An internal error occurred").into_response()
         })?.ok_or_else(|| Redirect::to("/login").into_response())?;
+        // Step 3: Find an existing VM for the user, or provision a new one
         let (vm_id, guest_ip) = match find_user_vm(&state.vms, db_user.id).map_err(|e| {
             error!("vm registry error: {e}");
             (StatusCode::INTERNAL_SERVER_ERROR, "An internal error occurred").into_response()
@@ -181,6 +188,7 @@ async fn build_terminal_response(
     user_id: Uuid,
     vm_id: &str,
 ) -> Result<Response, AppError> {
+    // Embed a CSRF token in the rendered terminal page
     let csrf_token = get_csrf_token(session).await?;
     let has_user_rootfs = find_user_rootfs(&state.config.user_rootfs_dir, user_id).is_some();
     Ok(Html(render_terminal_page(
