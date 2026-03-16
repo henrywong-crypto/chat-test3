@@ -90,22 +90,7 @@ async fn collect_file_entries(
             continue;
         }
         let metadata = entry.metadata();
-        let is_dir = if metadata.permissions.is_some() {
-            metadata.file_type().is_dir()
-        } else {
-            let child_path = dir_path.join(&name);
-            let child_str = child_path
-                .to_str()
-                .context("child path is not valid UTF-8")?;
-            timeout(
-                Duration::from_secs(SFTP_OP_TIMEOUT_SECS),
-                sftp.symlink_metadata(child_str),
-            )
-            .await
-            .context("symlink_metadata timed out")?
-            .map(|m| m.file_type().is_dir())
-            .context("failed to stat directory entry")?
-        };
+        let is_dir = metadata.file_type().is_dir();
         let size = metadata.size.context("missing file size")?;
         let file_entry = FileEntry { name, is_dir, size };
         if is_dir {
