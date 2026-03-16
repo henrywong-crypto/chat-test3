@@ -3988,6 +3988,7 @@ dependencies = [
  "sftp-client",
  "ssh-client",
  "store",
+ "subtle",
  "time",
  "tokio",
  "tokio-util",

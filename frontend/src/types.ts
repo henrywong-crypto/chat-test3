@@ -62,18 +62,38 @@ export interface ToolResult {
   isError: boolean;
 }
 
-export interface ChatMessage {
+interface BaseMessage {
   id: string;
-  type: "user" | "assistant" | "tool" | "error";
-  content: string;
   timestamp: number;
+}
+
+export interface UserMessage extends BaseMessage {
+  type: "user";
+  content: string;
+}
+
+export interface AssistantMessage extends BaseMessage {
+  type: "assistant";
+  content: string;
   isThinking?: boolean;
-  isToolUse?: boolean;
-  toolId?: string;
-  toolName?: string;
-  toolInput?: Record<string, unknown>;
+}
+
+export interface ToolMessage extends BaseMessage {
+  type: "tool";
+  content: string;
+  isToolUse: true;
+  toolId: string;
+  toolName: string;
+  toolInput: Record<string, unknown>;
   toolResult?: ToolResult;
 }
+
+export interface ErrorMessage extends BaseMessage {
+  type: "error";
+  content: string;
+}
+
+export type ChatMessage = UserMessage | AssistantMessage | ToolMessage | ErrorMessage;
 
 // SSE event payloads
 export interface SseTextDelta {

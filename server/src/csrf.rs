@@ -5,6 +5,7 @@ use axum::{
     middleware::Next,
     response::{IntoResponse, Response},
 };
+use subtle::ConstantTimeEq;
 use tower_sessions::Session;
 use uuid::Uuid;
 
@@ -49,7 +50,9 @@ async fn validate_csrf(session: &Session, submitted: &str) -> Result<Option<Stri
         Some(s) => s,
         None => return Ok(None),
     };
-    if stored != submitted {
+    if stored.len() != submitted.len()
+        || stored.as_bytes().ct_eq(submitted.as_bytes()).unwrap_u8() != 1
+    {
         return Ok(None);
     }
     let new_token = Uuid::new_v4().to_string().replace('-', "");

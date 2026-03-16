@@ -16,8 +16,8 @@ const MessageComponent = memo(({ message, prevMessage }: MessageComponentProps) 
   const isGrouped =
     prevMessage !== null &&
     prevMessage.type === message.type &&
-    !message.isToolUse &&
-    !prevMessage.isToolUse;
+    message.type !== "tool" &&
+    prevMessage.type !== "tool";
 
   const formattedTime = new Date(message.timestamp).toLocaleTimeString([], {
     hour: "2-digit",

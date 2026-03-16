@@ -2,7 +2,7 @@ import React, { useCallback, useRef, useState } from "react";
 import type { ChatMessage, PendingQuestion } from "../types";
 
 function generateId(): string {
-  return Math.random().toString(36).slice(2, 10);
+  return crypto.randomUUID();
 }
 
 export interface ChatStateResult {
